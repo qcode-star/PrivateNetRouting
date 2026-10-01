@@ -1,0 +1,51 @@
+# Результаты сборки
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Ll]ogs/
+*.log
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# Тесты и покрытие
+TestResults/
+coverage*
+*.trx
+*.cobertura.xml
+.playwright/
+
+# NuGet / пакеты
+*.nupkg
+*.snupkg
+packages/
+
+# Публикация
+publish/
+*.pubxml.user
+
+# ЛОКАЛЬНЫЕ КОНФИГИ И СЕКРЕТЫ — никогда не коммитить (правило №1 AGENTS.md)
+appsettings.*.local.json
+*.local.json
+config/local/
+secrets.*
+*.env
+.env.*
+*.pem
+*.key
+
+# Служебное
+*.tmp
+~$*
+Thumbs.db
+.DS_Store
