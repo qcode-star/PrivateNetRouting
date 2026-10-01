@@ -1,15 +1,17 @@
+using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
 using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Runtime;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core;
 
 /// <summary>
-/// Композиция forward-прокси из конфига — единая точка сборки для WPF-приложения и CLI.
-/// Владеет логом, пулом DoH и самим прокси; Dispose останавливает всё.
+/// Композиция forward-прокси и цепочки из конфига — единая точка сборки для WPF-приложения
+/// и CLI. Владеет логом, пулом DoH и самим прокси; Dispose останавливает всё.
 /// </summary>
 public sealed class ProxyRuntime : IAsyncDisposable
 {
@@ -21,12 +23,18 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public DohEndpointPool DohPool { get; }
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy)
+    public ChainSupervisor Chain { get; }
+
+    private readonly FileLog _chainLog;
+
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog)
     {
         Config = config;
         Log = log;
         DohPool = pool;
         Proxy = proxy;
+        Chain = chain;
+        _chainLog = chainLog;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -71,7 +79,36 @@ public sealed class ProxyRuntime : IAsyncDisposable
             TimeSpan.FromSeconds(fp.ActivityTouchIntervalSeconds));
 
         var proxy = new ForwardProxyService(fp, resolver, socks, marker, log);
-        return new ProxyRuntime(config, log, pool, proxy);
+
+        var ports = new TcpPortProbe();
+        var processes = new WmiProcessFinder();
+        var chainLog = new FileLog(
+            Path.Combine(config.Logging.Directory, "chain.log"),
+            config.Logging.MaxBytes,
+            config.Logging.Keep);
+        var elevated = new ElevatedRunner(config.Chain, chainLog);
+        var chain = new ChainSupervisor(
+            config.Chain,
+            proxy,
+            new SidecarDaemon(config.Chain, ports, processes, chainLog, elevated),
+            new SidecarKeeper(config.Chain, processes, chainLog),
+            new SidecarCli(config.Chain),
+            chainLog,
+            ct => ChainHealthAsync(config, ct));
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog);
+    }
+
+    private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
+    {
+        var endpoint = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen);
+        return await ProxyHealthCheck.CheckAsync(
+            endpoint.Address.ToString(),
+            endpoint.Port,
+            config.ForwardProxy.HealthCheckHost,
+            config.ForwardProxy.HealthCheckPort,
+            TimeSpan.FromSeconds(15),
+            ct);
     }
 
     public Task StartAsync(CancellationToken ct = default) => Proxy.StartAsync(ct);
@@ -95,6 +132,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
     {
         await Proxy.DisposeAsync();
         DohPool.Dispose();
+        _chainLog.Dispose();
         Log.Dispose();
     }
 }

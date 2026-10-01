@@ -4,15 +4,21 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PrivateNetRouting.Core;
+using PrivateNetRouting.Core.Chain;
 
 namespace PrivateNetRouting.App;
 
-/// <summary>Главное окно: статус forward-прокси, управление и проверка цепочки.</summary>
+/// <summary>
+/// Главное окно: статус forward-прокси и цепочки, управление. Состояние цепочки опрашивается
+/// реже, чем счётчики прокси: каждый опрос — это CLI-вызов и CONNECT-roundtrip.
+/// </summary>
 public partial class MainWindow : Window
 {
     private readonly ProxyRuntime _runtime;
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
+    private readonly DispatcherTimer _chainTimer;
+    private bool _chainBusy;
 
     public MainWindow(ProxyRuntime runtime, string configPath)
     {
@@ -25,12 +31,36 @@ public partial class MainWindow : Window
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _refreshTimer.Tick += (_, _) => _viewModel.Refresh(runtime);
         _refreshTimer.Start();
+
+        _chainTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _chainTimer.Tick += async (_, _) => await RefreshChainAsync();
+        _chainTimer.Start();
+        _ = RefreshChainAsync();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _refreshTimer.Stop();
+        _chainTimer.Stop();
         base.OnClosed(e);
+    }
+
+    private async Task RefreshChainAsync()
+    {
+        if (_chainBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = await _runtime.Chain.GetStateAsync(CancellationToken.None);
+            _viewModel.UpdateChain(state);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.ChainSummary = $"состояние неизвестно: {ex.Message}";
+        }
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
@@ -53,6 +83,55 @@ public partial class MainWindow : Window
             ? $"цепочка жива: CONNECT через {_runtime.Config.ForwardProxy.Listen} прошёл"
             : $"цепочка не отвечает: CONNECT через {_runtime.Config.ForwardProxy.Listen} не прошёл";
     }
+
+    private async void OnChainUp(object sender, RoutedEventArgs e)
+    {
+        if (!await RunChainBusy(() => _runtime.Chain.EnsureRunningAsync(null, CancellationToken.None)))
+        {
+            return;
+        }
+
+        _viewModel.CheckResult = "цепочка поднята";
+        await RefreshChainAsync();
+    }
+
+    private async void OnChainDown(object sender, RoutedEventArgs e)
+    {
+        if (!await RunChainBusy(() => _runtime.Chain.StopAsync(null, CancellationToken.None)))
+        {
+            return;
+        }
+
+        _viewModel.CheckResult = "цепочка остановлена";
+        await RefreshChainAsync();
+    }
+
+    private async Task<bool> RunChainBusy(Func<Task> action)
+    {
+        if (_chainBusy)
+        {
+            return false;
+        }
+
+        _chainBusy = true;
+        _viewModel.SetChainBusy(true);
+        _viewModel.ChainSummary = "выполняется операция (подтверди UAC, если появится)...";
+        try
+        {
+            await action();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _viewModel.CheckResult = $"ошибка: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            _chainBusy = false;
+            _viewModel.SetChainBusy(false);
+        }
+    }
 }
 
 public sealed class MainViewModel : INotifyPropertyChanged
@@ -69,6 +148,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _logPath = "";
     private bool _canStart;
     private bool _canStop;
+    private string _chainSummary = "…";
+    private string _chainDetails = "";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -144,6 +225,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _canStop, value);
     }
 
+    public string ChainSummary
+    {
+        get => _chainSummary;
+        set => SetField(ref _chainSummary, value);
+    }
+
+    public string ChainDetails
+    {
+        get => _chainDetails;
+        private set => SetField(ref _chainDetails, value);
+    }
+
+    public bool CanChainUp => !_chainOperationRunning;
+
+    public bool CanChainDown => !_chainOperationRunning;
+
+    private bool _chainOperationRunning;
+
+    public void SetChainBusy(bool busy)
+    {
+        _chainOperationRunning = busy;
+        OnPropertyChanged(nameof(CanChainUp));
+        OnPropertyChanged(nameof(CanChainDown));
+    }
+
     public void Refresh(ProxyRuntime runtime)
     {
         var proxy = runtime.Proxy;
@@ -162,6 +268,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         LogPath = runtime.Log.FilePath;
         CanStart = !running;
         CanStop = running;
+    }
+
+    public void UpdateChain(ChainState state)
+    {
+        ChainSummary = state.IsFullyUp ? "полностью поднята" : "не полностью";
+        var daemon = state.DaemonProcessAlive
+            ? state.DaemonHttpListening ? "слушает" : "без слушателя"
+            : "нет";
+        ChainDetails =
+            $"демон: {daemon}    кипер: {(state.KeeperRunning ? "работает" : "нет")}    " +
+            $"узел: {state.BackendState ?? "нет ответа"}\n" +
+            $"прокси: {(state.ProxyRunning ? "работает" : "остановлен")}    здоровье: {(state.ProxyHealthy ? "живо" : "не прошло")}";
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)

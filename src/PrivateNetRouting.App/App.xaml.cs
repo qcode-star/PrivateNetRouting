@@ -1,5 +1,6 @@
 using System.Windows;
 using PrivateNetRouting.Core;
+using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.App;
@@ -7,7 +8,8 @@ namespace PrivateNetRouting.App;
 /// <summary>
 /// Точка входа: одиночный экземпляр (mutex + событие активации), сборка ProxyRuntime из
 /// пользовательского конфига и запуск главного окна. Прокси стартует автоматически,
-/// если включён в конфиге.
+/// если включён в конфиге. Элевейтнутые helper-команды (--elevated-*) выполняются
+/// до всего прочего и сразу завершают процесс (их запускает ElevatedRunner через runas).
 /// </summary>
 public partial class App : Application
 {
@@ -22,6 +24,12 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (TryRunElevatedHelper(e.Args, out var helperCode))
+        {
+            Shutdown(helperCode);
+            return;
+        }
 
         _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var firstInstance);
         if (!firstInstance)
@@ -44,12 +52,47 @@ public partial class App : Application
         _runtime = ProxyRuntime.FromConfig(config);
         if (config.ForwardProxy.Enabled)
         {
-            _runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            try
+            {
+                _runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _runtime.Log.Error($"старт прокси не удался: {ex.Message}");
+            }
         }
 
         var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath());
         MainWindow = window;
         window.Show();
+    }
+
+    private static bool TryRunElevatedHelper(string[] args, out int exitCode)
+    {
+        exitCode = 0;
+        var command = args.FirstOrDefault();
+        if (command is not (ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain))
+        {
+            return false;
+        }
+
+        string? resultFile = null;
+        for (var i = 1; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--result-file")
+            {
+                resultFile = args[i + 1];
+                break;
+            }
+        }
+
+        if (resultFile is null)
+        {
+            return false;
+        }
+
+        exitCode = ElevatedChainCommands.Execute(command, resultFile);
+        return true;
     }
 
     private void ActivateMainWindow()

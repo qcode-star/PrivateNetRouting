@@ -6,6 +6,12 @@
 обновлятор MSIX, запрет прямого доступа, диагностика. Ниже — правила, которые нельзя нарушать,
 и план, по которому строим.
 
+## Правило №0: неоднозначности — уточнять у владельца
+
+При любых неоднозначностях, неточностях и «непонятках» в требованиях — как должен вести
+себя код, какие дефолты, что считать ошибкой — не додумывать молча, а уточнять желаемое
+поведение у пользователя. Один короткий вопрос до кода дешевле переделки после.
+
 ## Правило №1: анонимность репозитория — проверять каждый коммит
 
 Репозиторий приватный и должен оставаться **максимально анонимным**: в нём нет и не должно
@@ -89,6 +95,9 @@ Git-идентичность задана локально в репозитор
 
 Одно WPF-приложение (одиночный экземпляр, трей + окна) + headless-режим для CLI-паритета со
 старыми скриптами. Модули ядра не зависят от UI (тестируемость), UI — тонкая обёртка.
+Порты по решению владельца: **18081** (HTTP демона), **18082** (forward-прокси, адрес для
+клиента), **18083** (SOCKS5 демона); дефолты не конфликтуют с прежней схемой — замещение её
+только явной правкой пользовательского конфига (правило №3).
 Портирование идёт по модулю за модулем из боевого набора; каждый модуль в приложении
 воспроизводит семантику источника (включая краевые случаи), но адреса/порты/имена берёт из
 конфига.
@@ -96,11 +105,11 @@ Git-идентичность задана локально в репозитор
 | Модуль | Что делает | Статус | Источник портирования (`C:\ovpn-script`) |
 |---|---|---|---|
 | ForwardProxy | локальный CONNECT-прокси: DoH-резолв имён через резолверы из конфига, дозвон через SOCKS5-апстрим userspace-sidecar, бинд на localhost и шлюз WSL, маркер активности (mtime) для сторожа | **готов** (`PrivateNetRouting.Core.Net.*`) | `ts-fwd.py` |
-| ChainSupervisor | идемпотентный подъём/останов цепочки (демон userspace-tailscaled → кипер watch-ipn → up → forward-прокси), health-check CONNECT-roundtrip, элевация старта демона (UAC, без мелькания консолей); не ждать boot-процесс через пайп (кипер наследует ручки — виснет) | план | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs` |
+| ChainSupervisor | идемпотентный подъём/останов цепочки (демон userspace-tailscaled → кипер watch-ipn → up → forward-прокси → health-check), элевация старта демона через runas-копию себя (единственный UAC), «свои» процессы опознаются по statedir/пайпу в командной строке; логи демона/кипера — файловые ручки через cmd, переживают выход приложения | **готов** (`PrivateNetRouting.Core.Chain`) | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs` |
 | Launcher | запуск Claude Desktop с `--proxy-server`/`--proxy-bypass-list` (список обхода собирается из доменов конфига, обе формы записи каждой зоны), проверка и подъём цепочки, заставка с шагами подъёма, флаги режимов (только-проверка/без-заставки) | план | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
 | Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown, эскалация SIGTERM→SIGKILL на осиротевшем), затем останов цепочки | план | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
 | Updater | ручное обновление MSIX: установленная версия, адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через прокси-цепочку, сверка Publisher, закрытие приложения, `Add-AppxPackage`, GUI с шагами/прогрессом/стоп-кнопкой и машиной состояний | план | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
-| Guard | managed-политика `egressProxyUrl` (+ `disableWslSessions=0`); запрет прямого доступа тремя слоями: hosts (точные имена), одно NRPT-правило на поддеревья, firewall outbound Block по подсетям; системный прокси on/off на время входа | план | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1` |
+| Guard | managed-политика `egressProxyUrl` (+ `disableWslSessions=0`); запрет прямого доступа тремя слоями: hosts (точные имена), одно NRPT-правило на поддеревья, firewall outbound Block по подсетям; системный прокси on/off на время входа; кнопка «прописать порты в Claude» — согласовать адрес прокси в настройках Claude с конфигом приложения (решение владельца: порты 18081/18082/18083) | план | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1` |
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
 | EnvSync | пересборка `NO_PROXY` и адреса прокси для Claude Code в Windows и WSL из доменов конфига | план | `sync-claude-noproxy.ps1` |
 | Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
@@ -121,6 +130,7 @@ Git-идентичность задана локально в репозитор
 ```
 src/
   PrivateNetRouting.App/     # WPF: окна, одиночный экземпляр (mutex+событие), статус прокси
+                             # и цепочки; элевейтнутые helper-аргументы обрабатывает до UI
   PrivateNetRouting.Core/    # логика без UI
     Configuration/           # AppConfig + загрузка из %APPDATA% (шаблон — config/*.example.json)
     Logging/                 # FileLog: ротация по размеру один раз на старте
@@ -128,12 +138,16 @@ src/
                              # TailscaleNetmapDohSource (автодополнение пула из конфига tailnet)
     Net/Socks/               # Socks5Client (no-auth, дозвон по IPv4)
     Net/Proxy/               # ForwardProxyService (CONNECT-прокси), парсер, ProxyHealthCheck
+    Chain/                   # ChainSupervisor (оркестрация), SidecarDaemon (UAC-старт, stale-добивание),
+                             # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
+    SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым редиректом
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
-    ProxyRuntime.cs          # композиция всего перечисленного из AppConfig (для App и Cli)
-  PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | check | config path|init)
+    ProxyRuntime.cs          # композиция прокси+цепочки из AppConfig (для App и Cli)
+  PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check | config)
 tests/
   PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
-                             # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере
+                             # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
+                             # оркестрация цепочки на фейках (порядок/идемпотентность/отказы)
 config/
   appsettings.example.json   # шаблон пользовательского конфига с плейсхолдерами
 ```

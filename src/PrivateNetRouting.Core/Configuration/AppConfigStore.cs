@@ -62,5 +62,6 @@ file static class AppConfigExtensions
         config.Logging.Directory = Environment.ExpandEnvironmentVariables(config.Logging.Directory);
         config.ForwardProxy.ActivityMarkerPath =
             Environment.ExpandEnvironmentVariables(config.ForwardProxy.ActivityMarkerPath);
+        config.Chain.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.StateDir);
     }
 }

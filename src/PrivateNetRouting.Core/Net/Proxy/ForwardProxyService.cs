@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
@@ -14,7 +15,7 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// Биндится на основной адрес из конфига и один раз на шлюзе WSL NAT, когда адаптер появится.
 /// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки.
 /// </summary>
-public sealed class ForwardProxyService : IAsyncDisposable
+public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
 {
     private static readonly byte[] EstablishResponse =
         "HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray();

@@ -8,6 +8,50 @@ public sealed class AppConfig
     public LoggingConfig Logging { get; set; } = new();
 
     public ForwardProxyConfig ForwardProxy { get; set; } = new();
+
+    public ChainConfig Chain { get; set; } = new();
+}
+
+/// <summary>
+/// Параметры sidecar-цепочки (userspace-tailscaled + кипер + узел). Дефолты подобраны так,
+/// чтобы не конфликтовать с параллельно работающей прежней схемой (правило №3 AGENTS.md):
+/// свой пайп, свои порты, свой statedir. Замещение прежней цепочки — явная правка конфига.
+/// </summary>
+public sealed class ChainConfig
+{
+    public string TailscaledPath { get; set; } = @"C:\Program Files\Tailscale\tailscaled.exe";
+
+    public string TailscaleCliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
+
+    /// <summary>Statedir демона: там ключ узла; отдельный от системного Tailscale.</summary>
+    public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\ts-sidecar";
+
+    /// <summary>Именованный пайп демона (CLI цепляется к нему).</summary>
+    public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
+
+    /// <summary>SOCKS5-слушатель демона (дозвон forward-прокси).</summary>
+    public string DaemonSocksListen { get; set; } = "127.0.0.1:18083";
+
+    /// <summary>HTTP-слушатель демона: его появление = демон жив (так же в прежней схеме).</summary>
+    public string DaemonHttpListen { get; set; } = "127.0.0.1:18081";
+
+    /// <summary>Ожидание слушателей демона после старта.</summary>
+    public int DaemonWaitSeconds { get; set; } = 15;
+
+    /// <summary>Пауза проверки кипера после старта (сразу вылетевший = ошибка).</summary>
+    public int KeeperCheckSeconds { get; set; } = 2;
+
+    /// <summary>Координационный сервер tailnet; пусто — берётся из состояния узла.</summary>
+    public string LoginServer { get; set; } = "";
+
+    /// <summary>Таймаут tailscale up (ключом из statedir вход молчаливый).</summary>
+    public int UpTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>Ожидание подтверждения UAC и старта элевейтнутого демона.</summary>
+    public int UacWaitSeconds { get; set; } = 90;
+
+    /// <summary>Ожидание полного здоровья цепочки (CONNECT-roundtrip).</summary>
+    public int HealthWaitSeconds { get; set; } = 90;
 }
 
 public sealed class LoggingConfig
@@ -27,13 +71,13 @@ public sealed class ForwardProxyConfig
     public bool Enabled { get; set; } = true;
 
     /// <summary>Основной слушатель "host:port".</summary>
-    public string Listen { get; set; } = "127.0.0.1:8082";
+    public string Listen { get; set; } = "127.0.0.1:18082";
 
     /// <summary>Одноразовый бинд на шлюзе WSL NAT (адрес адаптера ищется на старте с повторами).</summary>
     public bool BindWslGateway { get; set; } = true;
 
     /// <summary>SOCKS5-апстрим "host:port" (userspace-sidecar), дозвон по IP после резолва.</summary>
-    public string Socks5Upstream { get; set; } = "127.0.0.1:1055";
+    public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
 
     /// <summary>Стартовый пул DoH-резолверов в форме "http://IP:PORT/dns-query".</summary>
     public List<string> DohSeed { get; set; } = [];

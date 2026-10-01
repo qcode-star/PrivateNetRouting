@@ -12,7 +12,10 @@ public class AppConfigTests : IDisposable
         Assert.False(File.Exists(_path));
         var config = AppConfigStore.LoadOrCreate(_path);
         Assert.True(File.Exists(_path));
-        Assert.Equal("127.0.0.1:8082", config.ForwardProxy.Listen);
+        Assert.Equal("127.0.0.1:18082", config.ForwardProxy.Listen);
+        Assert.Equal("127.0.0.1:18083", config.ForwardProxy.Socks5Upstream);
+        Assert.Equal("127.0.0.1:18081", config.Chain.DaemonHttpListen);
+        Assert.Equal(@"\\.\pipe\pnr-sidecar", config.Chain.Socket);
         Assert.True(config.ForwardProxy.BindWslGateway);
     }
 
