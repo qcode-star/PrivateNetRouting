@@ -1,0 +1,197 @@
+using System.Diagnostics;
+using PrivateNetRouting.Core.Chain;
+using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.SystemOps;
+
+namespace PrivateNetRouting.Tests;
+
+/// <summary>Лончер Claude: bypass-list, порядок «проверка → подъём → запуск», режимы, предупреждения.</summary>
+public class LauncherTests : IDisposable
+{
+    private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-launcher-{Guid.NewGuid():N}.log");
+    private readonly FileLog _log;
+    private readonly FakeChain _chain = new();
+    private readonly FakeProcessFinder _processes = new();
+    private readonly List<ProcessStartInfo> _started = [];
+
+    public LauncherTests()
+    {
+        _log = new FileLog(_logPath);
+    }
+
+    private ClaudeLauncher Create(
+        AppConfig? config = null,
+        bool healthy = true,
+        string? policy = "http://127.0.0.1:18082",
+        ChainException? chainFailure = null)
+    {
+        config ??= new AppConfig
+        {
+            ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
+            Launcher = new LauncherConfig
+            {
+                AliasPath = @"C:\fake\claude.exe",
+                BypassDomains = ["corp.example.com", ".team.example.net"],
+            },
+        };
+        _chain.Failure = chainFailure;
+        return new ClaudeLauncher(
+            config,
+            _chain,
+            _ => Task.FromResult(healthy),
+            _processes,
+            _log,
+            () => policy,
+            psi =>
+            {
+                _started.Add(psi);
+                return null;
+            });
+    }
+
+    [Fact]
+    public void BypassListHasBothFormsOfEveryDomain()
+    {
+        var list = ClaudeBypassList.Build(["corp.example.com", ".team.example.net"]);
+
+        Assert.Equal(
+            "<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local"
+            + ";corp.example.com;*.corp.example.com;team.example.net;*.team.example.net",
+            list);
+    }
+
+    [Fact]
+    public void BypassListWithoutDomainsIsBaseOnly()
+    {
+        var list = ClaudeBypassList.Build([]);
+
+        Assert.StartsWith("<local>;localhost;127.0.0.1", list);
+        Assert.EndsWith("100.64.0.0/10;*.local", list);
+    }
+
+    [Fact]
+    public async Task HealthyChainLaunchesWithoutRaising()
+    {
+        var launcher = Create(healthy: true);
+
+        var result = await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal(LaunchOutcome.Launched, result.Outcome);
+        Assert.False(result.ChainRaised);
+        Assert.Equal(0, _chain.EnsureCalls);
+        var psi = Assert.Single(_started);
+        Assert.Equal(@"C:\fake\claude.exe", psi.FileName);
+        Assert.Equal(2, psi.ArgumentList.Count);
+        Assert.Equal("--proxy-server=http://127.0.0.1:18082", psi.ArgumentList[0]);
+        Assert.Equal(
+            "--proxy-bypass-list=<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local;corp.example.com;*.corp.example.com;team.example.net;*.team.example.net",
+            psi.ArgumentList[1]);
+    }
+
+    [Fact]
+    public async Task DeadChainIsRaisedBeforeLaunch()
+    {
+        var launcher = Create(healthy: false);
+
+        var result = await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal(LaunchOutcome.Launched, result.Outcome);
+        Assert.True(result.ChainRaised);
+        Assert.Equal(1, _chain.EnsureCalls);
+        Assert.Single(_started);
+    }
+
+    [Fact]
+    public async Task CheckOnlyRaisesChainButDoesNotStartClaude()
+    {
+        var launcher = Create(healthy: false);
+
+        var result = await launcher.LaunchAsync(new LauncherOptions(CheckOnly: true), null, CancellationToken.None);
+
+        Assert.Equal(LaunchOutcome.CheckOnly, result.Outcome);
+        Assert.Equal(1, _chain.EnsureCalls);
+        Assert.Empty(_started);
+        Assert.DoesNotContain("WARN", ReadLog()); // политика/процессы в check-only не проверяются
+    }
+
+    [Fact]
+    public async Task ChainFailureStopsLaunch()
+    {
+        var launcher = Create(healthy: false, chainFailure: new ChainException("daemon", new IOException("UAC declined")));
+
+        await Assert.ThrowsAsync<ChainException>(() =>
+            launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None));
+
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public async Task PolicyMismatchWarnsButLaunches()
+    {
+        var launcher = Create(policy: "http://127.0.0.1:9999");
+
+        await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.Single(_started);
+        Assert.Contains("is missing or different", ReadLog());
+    }
+
+    [Fact]
+    public async Task ClaudeWithoutProxyFlagWarnsButLaunches()
+    {
+        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe")];
+        var launcher = Create();
+
+        await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.Single(_started);
+        Assert.Contains("without --proxy-server", ReadLog());
+    }
+
+    // FileLog держит файл открытым на запись — читать с общим доступом ReadWrite
+    private string ReadLog()
+    {
+        using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private sealed class FakeChain : IChainSupervisor
+    {
+        public int EnsureCalls { get; private set; }
+
+        public ChainException? Failure { get; set; }
+
+        public Task<ChainState> GetStateAsync(CancellationToken ct) => Task.FromResult(new ChainState(
+            DaemonHttpListening: true, DaemonProcessAlive: true, KeeperRunning: true,
+            BackendState: "Running", ProxyRunning: true, ProxyHealthy: true));
+
+        public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+        {
+            EnsureCalls++;
+            return Failure is null ? Task.CompletedTask : Task.FromException(Failure);
+        }
+
+        public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class FakeProcessFinder : IProcessFinder
+    {
+        public IReadOnlyList<FoundProcess> Processes { get; set; } = [];
+
+        public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains) => Processes;
+
+        public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => Processes;
+    }
+
+    public void Dispose()
+    {
+        _log.Dispose();
+        if (File.Exists(_logPath))
+        {
+            File.Delete(_logPath);
+        }
+    }
+}

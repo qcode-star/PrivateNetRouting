@@ -9,6 +9,7 @@ using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Launcher;
 
 namespace PrivateNetRouting.App;
 
@@ -26,6 +27,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
     private bool _chainBusy;
+    private bool _launchBusy;
     private bool _fillingLanguages;
 
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
@@ -142,6 +144,60 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Запуск Claude (порт claude-launcher.ps1): сначала живой CONNECT-roundtrip; если цепочка
+    /// отвечает — Claude стартует сразу, без заставки. Иначе поднимается заставка подъёма и
+    /// лончер идемпотентно поднимает цепочку; сбой рисуется заставкой (лог/закрыть,
+    /// автозакрытие минутой), успех — «Готово» и короткое затухание.
+    /// </summary>
+    private async void OnLaunchClaude(object sender, RoutedEventArgs e)
+    {
+        if (_launchBusy)
+        {
+            return;
+        }
+
+        _launchBusy = true;
+        _viewModel.SetLaunchBusy(true);
+        SplashWindow? splash = null;
+        try
+        {
+            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            if (!healthy)
+            {
+                splash = new SplashWindow(_runtime.Launcher.Log.FilePath) { Owner = this };
+                splash.Show();
+            }
+
+            var progress = splash is null ? null : new Progress<ChainStep>(splash.Update);
+            var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, CancellationToken.None);
+            if (splash is not null)
+            {
+                splash.Complete(Loc.F("Splash.CompleteFmt", Math.Round(result.Elapsed.TotalSeconds, 1)));
+                await Task.Delay(1000);
+                splash.CloseSplash();
+            }
+
+            _viewModel.SetCheckResult("Main.Launch.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+        }
+        catch (Exception ex)
+        {
+            if (splash is not null)
+            {
+                splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Launcher.Log.FilePath));
+                await splash.ClosedAsync; // кнопки/автозакрытие через 60 с — как Wait-SplashClose в прежней схеме
+            }
+
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _launchBusy = false;
+            _viewModel.SetLaunchBusy(false);
+            await RefreshChainAsync();
+        }
+    }
+
     /// <summary>Наполняет селектор языка: авто + поддержанные; выбор — по значению конфига.</summary>
     private void FillLanguages(string preference)
     {
@@ -212,6 +268,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _chainSummary = "…";
     private string _chainDetails = "";
     private bool _chainOperationRunning;
+    private bool _launchRunning;
 
     public MainViewModel(ProxyRuntime runtime)
     {
@@ -302,9 +359,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _chainDetails, value);
     }
 
-    public bool CanChainUp => !_chainOperationRunning;
+    public bool CanChainUp => !_chainOperationRunning && !_launchRunning;
 
-    public bool CanChainDown => !_chainOperationRunning;
+    public bool CanChainDown => !_chainOperationRunning && !_launchRunning;
+
+    public bool CanLaunch => !_chainOperationRunning && !_launchRunning;
+
+    public void SetLaunchBusy(bool busy)
+    {
+        _launchRunning = busy;
+        if (busy)
+        {
+            ChainSummary = Loc.S("Main.Launch.Busy");
+        }
+
+        OnPropertyChanged(nameof(CanLaunch));
+        OnPropertyChanged(nameof(CanChainUp));
+        OnPropertyChanged(nameof(CanChainDown));
+    }
 
     public void SetChainBusy(bool busy)
     {
@@ -375,6 +447,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (_chainOperationRunning)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");
+        }
+        else if (_launchRunning)
+        {
+            ChainSummary = Loc.S("Main.Launch.Busy");
         }
         else if (_chainStateError is not null)
         {

@@ -12,6 +12,8 @@ public sealed class AppConfig
     public ForwardProxyConfig ForwardProxy { get; set; } = new();
 
     public ChainConfig Chain { get; set; } = new();
+
+    public LauncherConfig Launcher { get; set; } = new();
 }
 
 /// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
@@ -19,6 +21,20 @@ public sealed class UiConfig
 {
     /// <summary>Язык UI: "auto" — язык системы (фолбэк английский), иначе код ("en", "ru").</summary>
     public string Language { get; set; } = AppLanguage.Auto;
+}
+
+/// <summary>
+/// Запуск Claude Desktop через прокси (порт claude-launcher.ps1): проверка/подъём цепочки,
+/// флаги --proxy-server/--proxy-bypass-list. Базовые записи обхода (localhost, приватные
+/// диапазоны) фиксированы в коде — окружение-зависимы только домены зон.
+/// </summary>
+public sealed class LauncherConfig
+{
+    /// <summary>Исполняемый файл Claude Desktop (execution alias MSIX); переменные окружения раскрываются.</summary>
+    public string AliasPath { get; set; } = @"%LOCALAPPDATA%\Microsoft\WindowsApps\claude-desktop.exe";
+
+    /// <summary>Зоны обхода прокси: каждая попадает в bypass-list в двух формах (zone и *.zone).</summary>
+    public List<string> BypassDomains { get; set; } = [];
 }
 
 /// <summary>

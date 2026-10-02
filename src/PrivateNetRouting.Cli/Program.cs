@@ -1,6 +1,7 @@
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Socks;
 
 namespace PrivateNetRouting.Cli;
@@ -29,6 +30,7 @@ internal static class Program
                 "proxy" => await RunProxyAsync(),
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
+                "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
                 "config" => ConfigCommand(args.Skip(1).ToList()),
                 _ => Help(),
             };
@@ -112,6 +114,40 @@ internal static class Program
         return alive ? 0 : 2;
     }
 
+    private static async Task<int> RunLaunchAsync(List<string> rest)
+    {
+        var checkOnly = false;
+        foreach (var argument in rest)
+        {
+            switch (argument)
+            {
+                case "--check-only":
+                    checkOnly = true;
+                    break;
+                case "--no-splash":
+                    break; // заставка существует только в GUI-режиме; флаг принят для совместимости ярлыков
+                default:
+                    Console.Error.WriteLine($"unknown option: {argument} (--check-only | --no-splash)");
+                    return 1;
+            }
+        }
+
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        var progress = new Progress<ChainStep>(step =>
+            Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
+
+        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly), progress, CancellationToken.None);
+        if (result.Outcome == LaunchOutcome.CheckOnly)
+        {
+            Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
+            return 0;
+        }
+
+        Console.WriteLine($"claude launched (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})");
+        return 0;
+    }
+
     private static int ConfigCommand(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "path";
@@ -156,6 +192,9 @@ internal static class Program
             pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)
             pnr check            check the chain with a CONNECT-roundtrip
+            pnr launch [--check-only] [--no-splash]
+                                 start Claude with --proxy-server/--proxy-bypass-list,
+                                 bringing the chain up if needed (splash is GUI-only)
             pnr config path      user config path
             pnr config init      create the default config if missing
             """);

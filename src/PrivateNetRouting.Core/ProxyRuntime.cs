@@ -1,5 +1,6 @@
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
 using PrivateNetRouting.Core.Net.Proxy;
@@ -25,9 +26,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public ChainSupervisor Chain { get; }
 
+    public ClaudeLauncher Launcher { get; }
+
     private readonly FileLog _chainLog;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog)
+    private readonly FileLog _launcherLog;
+
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog)
     {
         Config = config;
         Log = log;
@@ -35,6 +40,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         Proxy = proxy;
         Chain = chain;
         _chainLog = chainLog;
+        Launcher = launcher;
+        _launcherLog = launcherLog;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -96,7 +103,18 @@ public sealed class ProxyRuntime : IAsyncDisposable
             chainLog,
             ct => ChainHealthAsync(config, ct));
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog);
+        var launcherLog = new FileLog(
+            Path.Combine(config.Logging.Directory, "launcher.log"),
+            config.Logging.MaxBytes,
+            config.Logging.Keep);
+        var launcher = new ClaudeLauncher(
+            config,
+            chain,
+            ct => ChainHealthAsync(config, ct),
+            processes,
+            launcherLog);
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
@@ -133,6 +151,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         await Proxy.DisposeAsync();
         DohPool.Dispose();
         _chainLog.Dispose();
+        _launcherLog.Dispose();
         Log.Dispose();
     }
 }

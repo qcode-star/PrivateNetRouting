@@ -44,6 +44,16 @@ public interface IProxyControl
     Task StopAsync();
 }
 
+/// <summary>Управление цепочкой (реализация — ChainSupervisor; интерфейс для лончера и тестов).</summary>
+public interface IChainSupervisor
+{
+    Task<ChainState> GetStateAsync(CancellationToken ct);
+
+    Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct);
+
+    Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct);
+}
+
 /// <summary>
 /// Оркестратор цепочки: идемпотентный подъём (демон → кипер → узел → прокси → здоровье)
 /// и полный останов (down → демон → кипер → прокси). Порядок и признаки живости — как в
@@ -57,7 +67,7 @@ public sealed class ChainSupervisor(
     ISidecarKeeper keeper,
     ISidecarCli cli,
     FileLog log,
-    Func<CancellationToken, Task<bool>> healthCheck)
+    Func<CancellationToken, Task<bool>> healthCheck) : IChainSupervisor
 {
     public async Task<ChainState> GetStateAsync(CancellationToken ct)
     {

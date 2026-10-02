@@ -89,5 +89,6 @@ file static class AppConfigExtensions
         config.ForwardProxy.ActivityMarkerPath =
             Environment.ExpandEnvironmentVariables(config.ForwardProxy.ActivityMarkerPath);
         config.Chain.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.StateDir);
+        config.Launcher.AliasPath = Environment.ExpandEnvironmentVariables(config.Launcher.AliasPath);
     }
 }

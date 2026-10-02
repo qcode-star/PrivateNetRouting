@@ -40,6 +40,7 @@
     <s:String x:Key="Main.Button.CheckChain">Check chain</s:String>
     <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>
     <s:String x:Key="Main.Button.ChainDown">Stop chain</s:String>
+    <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Check.Running">checking (CONNECT roundtrip)...</s:String>
@@ -51,6 +52,26 @@
     <s:String x:Key="Main.Chain.StateUnknownFmt">state unknown: {0}</s:String>
     <s:String x:Key="Main.ErrorFmt">error: {0}</s:String>
     <s:String x:Key="Main.LanguageSavedFmt">language saved to config: {0}</s:String>
+
+    <!-- Claude launch -->
+    <s:String x:Key="Main.Launch.Busy">launching (confirm UAC if prompted)...</s:String>
+    <s:String x:Key="Main.Launch.DoneFmt">Claude launched (chain ready in {0} s)</s:String>
+
+    <!-- Splash (chain rise while launching Claude) -->
+    <s:String x:Key="Splash.Title">Launching Claude</s:String>
+    <s:String x:Key="Splash.Subtitle">bringing up the proxy chain</s:String>
+    <s:String x:Key="Splash.Subtitle.Fail">failed to bring up the chain</s:String>
+    <s:String x:Key="Splash.Step.Daemon">Sidecar daemon (UAC)</s:String>
+    <s:String x:Key="Splash.Step.Keeper">Keeper watch-ipn</s:String>
+    <s:String x:Key="Splash.Step.Node">Tailscale node (up)</s:String>
+    <s:String x:Key="Splash.Step.Proxy">Forward proxy</s:String>
+    <s:String x:Key="Splash.Step.Health">Chain responds (CONNECT)</s:String>
+    <s:String x:Key="Splash.SkipNote">already up</s:String>
+    <s:String x:Key="Splash.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
+    <s:String x:Key="Splash.CompleteFmt">Ready in {0} s</s:String>
+    <s:String x:Key="Splash.Fail.HintFmt">Details: {0}</s:String>
+    <s:String x:Key="Splash.Button.OpenLog">Open log</s:String>
+    <s:String x:Key="Splash.Button.Close">Close</s:String>
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Language</s:String>
