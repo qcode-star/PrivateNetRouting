@@ -113,6 +113,7 @@ Git-идентичность задана локально в репозитор
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
 | EnvSync | пересборка `NO_PROXY` и адреса прокси для Claude Code в Windows и WSL из доменов конфига | план | `sync-claude-noproxy.ps1` |
 | Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
+| Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` без правок кода | план | — |
 
 Замечания к архитектуре, которые нельзя потерять при портировании:
 
@@ -130,9 +131,12 @@ Git-идентичность задана локально в репозитор
 ```
 src/
   PrivateNetRouting.App/     # WPF: окна, одиночный экземпляр (mutex+событие), статус прокси
-                             # и цепочки; элевейтнутые helper-аргументы обрабатывает до UI
+                             # и цепочки, выбор языка; элевейтнутые helper-аргументы обрабатывает до UI
+    Localization/            # словари строк Strings.<код>.xaml + Loc: подмена словаря на лету
+                             # (DynamicResource в XAML, Loc.S/Loc.F в коде, Loc.LanguageChanged)
   PrivateNetRouting.Core/    # логика без UI
-    Configuration/           # AppConfig + загрузка из %APPDATA% (шаблон — config/*.example.json)
+    Configuration/           # AppConfig (вкл. ui.language), AppLanguage (auto → система → en),
+                             # загрузка из %APPDATA% (шаблон — config/*.example.json)
     Logging/                 # FileLog: ротация по размеру один раз на старте
     Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient, DohEndpointPool, кэш-резолвер,
                              # TailscaleNetmapDohSource (автодополнение пула из конфига tailnet)
@@ -182,7 +186,12 @@ dotnet format --verify-no-changes   # форматирование перед к
   в Core, реализации помечены документирующими комментариями о требуемых правах (UAC/админ).
 - Логирование: тихая норма (старт/варнинги/ошибки), ротация по размеру на старте — как в
   старом наборе; никаких per-request записей в штатном режиме.
-- Строки UI — русские, в ресурсах (не хардкод в XAML), если проект не покажет обратное.
+- Локализация UI: строки — в словарях `src/PrivateNetRouting.App/Localization/Strings.<код>.xaml`
+  (XAML — `{DynamicResource Ключ}`, код — `Loc.S`/`Loc.F`); язык — `ui.language` конфига: `auto`
+  (язык системы) или код, неподержанный — английский. Новый язык = словарь + код в
+  `AppLanguage.Supported`; тест сверяет наборы ключей и плейсхолдеров со словарём en.
+- CLI `pnr` и строки/исключения Core, попадающие в его вывод, — английские; записи лог-файлов
+  остаются на усмотрение модуля (исторически местами русские).
 
 ## Работа в оболочке (наследие машины, кратко)
 
