@@ -30,7 +30,7 @@ public static class ElevatedChainCommands
             {
                 StartDaemon => StartDaemonCore(config, log),
                 StopChain => StopChainCore(config, log),
-                _ => $"неизвестная команда: {command}",
+                _ => $"unknown command: {command}",
             };
             File.WriteAllText(resultFile, $"ok {detail}");
             return 0;
@@ -60,7 +60,7 @@ public static class ElevatedChainCommands
             new ElevatedRunner(chain, log, elevatedBypass: true));
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
-            return "демон уже слушает";
+            return "daemon is already listening";
         }
 
         daemon.StartProcess();
@@ -71,7 +71,7 @@ public static class ElevatedChainCommands
             if (new TcpPortProbe().IsListening(httpPort))
             {
                 log.Info("elevated: демон слушает");
-                return "демон запущен, слушатель поднят";
+                return "daemon started, listener is up";
             }
 
             Thread.Sleep(500);
@@ -79,7 +79,7 @@ public static class ElevatedChainCommands
 
         var errTail = ReadTail(Path.Combine(chain.StateDir, "daemon.err.log"), lines: 15);
         log.Error("elevated: демон не поднял слушатель");
-        throw new IOException($"демон не поднял слушатель за {chain.DaemonWaitSeconds}s; daemon.err.log: {errTail}");
+        throw new IOException($"daemon listener did not come up within {chain.DaemonWaitSeconds}s; daemon.err.log: {errTail}");
     }
 
     private static string StopChainCore(AppConfig config, FileLog log)
@@ -118,7 +118,7 @@ public static class ElevatedChainCommands
             }
         }
 
-        return $"остановлено процессов: {killed}";
+        return $"processes stopped: {killed}";
     }
 
     private static string ReadTail(string path, int lines)
@@ -127,7 +127,7 @@ public static class ElevatedChainCommands
         {
             if (!File.Exists(path))
             {
-                return "(нет файла)";
+                return "(no file)";
             }
 
             var tail = File.ReadLines(path).TakeLast(lines);
@@ -135,7 +135,7 @@ public static class ElevatedChainCommands
         }
         catch (IOException)
         {
-            return "(не прочитан)";
+            return "(unreadable)";
         }
     }
 }
@@ -153,7 +153,7 @@ public sealed class ElevatedRunner(ChainConfig config, FileLog log, bool elevate
         if (elevatedBypass || WindowsPrivilege.IsElevated())
         {
             var code = ElevatedChainCommands.Execute(command, MakeResultPath(command, out _), configPath: null);
-            var detail = code == 0 ? "выполнено в текущем процессе" : "сбой (см. лог)";
+            var detail = code == 0 ? "executed in the current process" : "failed (see log)";
             if (code == 0)
             {
                 log.Info($"elevated {command}: {detail}");
@@ -169,7 +169,7 @@ public sealed class ElevatedRunner(ChainConfig config, FileLog log, bool elevate
         var resultPath = MakeResultPath(command, out var nonce);
         _ = nonce; // уникальность гарантирована именем файла
         var exe = Environment.ProcessPath
-            ?? throw new InvalidOperationException("не удалось определить путь собственного exe");
+            ?? throw new InvalidOperationException("failed to determine own executable path");
 
         try
         {
@@ -184,7 +184,7 @@ public sealed class ElevatedRunner(ChainConfig config, FileLog log, bool elevate
         catch (System.ComponentModel.Win32Exception ex)
         {
             log.Warn($"elevated {command}: UAC отклонён: {ex.Message}");
-            return new ElevatedResult(false, $"UAC отклонён: {ex.Message}");
+            return new ElevatedResult(false, $"UAC declined: {ex.Message}");
         }
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.UacWaitSeconds);
@@ -214,12 +214,12 @@ public sealed class ElevatedRunner(ChainConfig config, FileLog log, bool elevate
             }
             catch (OperationCanceledException)
             {
-                return new ElevatedResult(false, "ожидание прервано");
+                return new ElevatedResult(false, "wait interrupted");
             }
         }
 
         log.Error($"elevated {command}: UAC/старт не подтверждён за {config.UacWaitSeconds}s");
-        return new ElevatedResult(false, $"UAC/старт не подтверждён за {config.UacWaitSeconds}s");
+        return new ElevatedResult(false, $"UAC/start not confirmed within {config.UacWaitSeconds}s");
     }
 
     private string MakeResultPath(string command, out string nonce)

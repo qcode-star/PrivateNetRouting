@@ -49,7 +49,7 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
         if (!IsRunning)
         {
             throw new IOException(
-                $"кипер watch-ipn вылетел сразу; лог: {Path.Combine(config.StateDir, "watch.err.log")}");
+                $"watch-ipn keeper exited immediately; log: {Path.Combine(config.StateDir, "watch.err.log")}");
         }
     }
 

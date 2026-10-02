@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Windows;
+using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
@@ -49,6 +51,7 @@ public partial class App : Application
             executeOnlyOnce: false);
 
         var config = AppConfigStore.LoadOrCreate();
+        Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
         _runtime = ProxyRuntime.FromConfig(config);
         if (config.ForwardProxy.Enabled)
         {
@@ -62,7 +65,7 @@ public partial class App : Application
             }
         }
 
-        var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath());
+        var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath(), config.Ui.Language);
         MainWindow = window;
         window.Show();
     }

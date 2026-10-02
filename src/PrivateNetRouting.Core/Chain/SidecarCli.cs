@@ -47,7 +47,7 @@ public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
         }
 
         using var process = Process.Start(info)
-            ?? throw new IOException($"не удалось запустить {config.TailscaleCliPath}");
+            ?? throw new IOException($"failed to start {config.TailscaleCliPath}");
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct);

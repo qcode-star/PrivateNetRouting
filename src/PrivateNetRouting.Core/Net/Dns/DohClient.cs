@@ -54,7 +54,7 @@ public static class DohClient
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException($"doh {endpoint}: таймаут {timeout.TotalSeconds:F0}s");
+            throw new TimeoutException($"doh {endpoint}: timeout after {timeout.TotalSeconds:F0}s");
         }
     }
 
@@ -63,7 +63,7 @@ public static class DohClient
         var separator = IndexOf(raw, "\r\n\r\n"u8);
         if (separator < 0)
         {
-            throw new FormatException("doh: ответ без разделителя заголовка");
+            throw new FormatException("doh: response without header delimiter");
         }
 
         var head = Encoding.ASCII.GetString(raw, 0, separator);
@@ -78,7 +78,7 @@ public static class DohClient
         var answer = DnsWire.ParseResponse(body);
         if (answer.Ips.Count == 0)
         {
-            throw new FormatException("doh: пустой ответ");
+            throw new FormatException("doh: empty response");
         }
 
         return answer;

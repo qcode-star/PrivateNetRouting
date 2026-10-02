@@ -1,0 +1,58 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:s="clr-namespace:System;assembly=mscorlib">
+    <!-- English UI strings. Keys and placeholder sets ({0}, ...) must match across
+         all Strings.*.xaml dictionaries; the language list is AppLanguage.Supported. -->
+
+    <!-- Header and status -->
+    <s:String x:Key="Main.Header">Forward proxy</s:String>
+    <s:String x:Key="Main.State.Unknown">unknown</s:String>
+    <s:String x:Key="Main.State.Running">running</s:String>
+    <s:String x:Key="Main.State.Stopped">stopped</s:String>
+
+    <!-- Status card -->
+    <s:String x:Key="Main.Listeners">Listeners</s:String>
+    <s:String x:Key="Main.ActiveConnections">Active connections</s:String>
+    <s:String x:Key="Main.TotalErrors">Total / errors</s:String>
+    <s:String x:Key="Main.SocksUpstream">SOCKS5 upstream</s:String>
+    <s:String x:Key="Main.Config">Config</s:String>
+    <s:String x:Key="Main.Log">Log</s:String>
+
+    <!-- Chain -->
+    <s:String x:Key="Main.Chain">Chain</s:String>
+    <s:String x:Key="Main.Chain.FullUp">fully up</s:String>
+    <s:String x:Key="Main.Chain.Partial">partial</s:String>
+    <s:String x:Key="Main.Chain.Daemon.Listening">listening</s:String>
+    <s:String x:Key="Main.Chain.Daemon.NoListener">no listener</s:String>
+    <s:String x:Key="Main.Chain.Daemon.Down">down</s:String>
+    <s:String x:Key="Main.Chain.Keeper.Running">running</s:String>
+    <s:String x:Key="Main.Chain.Keeper.Down">down</s:String>
+    <s:String x:Key="Main.Chain.Node.NoResponse">no response</s:String>
+    <s:String x:Key="Main.Chain.Proxy.Running">running</s:String>
+    <s:String x:Key="Main.Chain.Proxy.Stopped">stopped</s:String>
+    <s:String x:Key="Main.Chain.Health.Ok">ok</s:String>
+    <s:String x:Key="Main.Chain.Health.Fail">failed</s:String>
+    <s:String x:Key="Main.Chain.DetailsFmt">daemon: {0}    keeper: {1}    node: {2}&#10;proxy: {3}    health: {4}</s:String>
+
+    <!-- Buttons -->
+    <s:String x:Key="Main.Button.Start">Start</s:String>
+    <s:String x:Key="Main.Button.Stop">Stop</s:String>
+    <s:String x:Key="Main.Button.CheckChain">Check chain</s:String>
+    <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>
+    <s:String x:Key="Main.Button.ChainDown">Stop chain</s:String>
+
+    <!-- Operation results -->
+    <s:String x:Key="Main.Check.Running">checking (CONNECT roundtrip)...</s:String>
+    <s:String x:Key="Main.Check.AliveFmt">chain is alive: CONNECT via {0} succeeded</s:String>
+    <s:String x:Key="Main.Check.DeadFmt">chain is not responding: CONNECT via {0} failed</s:String>
+    <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
+    <s:String x:Key="Main.Chain.DownDone">chain is stopped</s:String>
+    <s:String x:Key="Main.Chain.Busy">operation in progress (confirm UAC if prompted)...</s:String>
+    <s:String x:Key="Main.Chain.StateUnknownFmt">state unknown: {0}</s:String>
+    <s:String x:Key="Main.ErrorFmt">error: {0}</s:String>
+    <s:String x:Key="Main.LanguageSavedFmt">language saved to config: {0}</s:String>
+
+    <!-- Settings -->
+    <s:String x:Key="Main.Language">Language</s:String>
+    <s:String x:Key="Main.Language.Auto">System default</s:String>
+</ResourceDictionary>

@@ -113,7 +113,7 @@ Git-идентичность задана локально в репозитор
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
 | EnvSync | пересборка `NO_PROXY` и адреса прокси для Claude Code в Windows и WSL из доменов конфига | план | `sync-claude-noproxy.ps1` |
 | Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
-| Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` без правок кода | план | — |
+| Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` | **готов** (en/ru; `PrivateNetRouting.App/Localization`, селектор в шапке окна) | — |
 
 Замечания к архитектуре, которые нельзя потерять при портировании:
 

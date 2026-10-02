@@ -28,7 +28,7 @@ public sealed class Socks5Client
     {
         if (destination.AddressFamily != AddressFamily.InterNetwork)
         {
-            throw new NotSupportedException($"socks5: дозвон поддерживается только по IPv4, получено {destination}");
+            throw new NotSupportedException($"socks5: dial is IPv4-only, got {destination}");
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -46,7 +46,7 @@ public sealed class Socks5Client
             await ReadExactAsync(stream, method, cts.Token);
             if (method[0] != 0x05 || method[1] != 0x00)
             {
-                throw new IOException("socks5: апстрим не принял метод без аутентификации");
+                throw new IOException("socks5: upstream rejected the no-auth method");
             }
 
             // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 порт
@@ -62,7 +62,7 @@ public sealed class Socks5Client
             await ReadExactAsync(stream, header, cts.Token);
             if (header[1] != 0x00)
             {
-                throw new IOException($"socks5: connect отклонён (rep={header[1]})");
+                throw new IOException($"socks5: connect rejected (rep={header[1]})");
             }
 
             // связанный адрес пропускаем, важно только то, что запрос принят
@@ -71,7 +71,7 @@ public sealed class Socks5Client
                 0x01 => 4,
                 0x03 => 1, // длина имени читается отдельно
                 0x04 => 16,
-                _ => throw new IOException($"socks5: неизвестный ATYP {header[3]}"),
+                _ => throw new IOException($"socks5: unknown ATYP {header[3]}"),
             };
             if (header[3] == 0x03)
             {
@@ -99,7 +99,7 @@ public sealed class Socks5Client
             var chunk = await stream.ReadAsync(buffer.AsMemory(read), ct);
             if (chunk == 0)
             {
-                throw new IOException("socks5: апстрим закрыл соединение досрочно");
+                throw new IOException("socks5: upstream closed the connection early");
             }
 
             read += chunk;
@@ -111,7 +111,7 @@ public sealed class Socks5Client
         var separator = hostPort.LastIndexOf(':');
         if (separator <= 0 || separator == hostPort.Length - 1)
         {
-            throw new FormatException($"ожидался 'host:port', получено '{hostPort}'");
+            throw new FormatException($"expected 'host:port', got '{hostPort}'");
         }
 
         var host = hostPort[..separator];
@@ -119,7 +119,7 @@ public sealed class Socks5Client
         if (!IPAddress.TryParse(host, out var ip))
         {
             // системный резолв не используется: апстрим — всегда IP из конфига
-            throw new FormatException($"socks5: апстрим должен быть IP-адресом, получено '{host}'");
+            throw new FormatException($"socks5: upstream must be an IP address, got '{host}'");
         }
 
         return new IPEndPoint(ip, port);

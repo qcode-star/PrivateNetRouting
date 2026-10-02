@@ -18,7 +18,7 @@ internal static class Program
         if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain)
         {
             var resultFile = ParseOption(args, "--result-file")
-                ?? throw new ArgumentException("элевейтнутому helper нужен --result-file");
+                ?? throw new ArgumentException("elevated helper requires --result-file");
             return ElevatedChainCommands.Execute(first, resultFile);
         }
 
@@ -35,7 +35,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"ошибка: {ex.Message}");
+            Console.Error.WriteLine($"error: {ex.Message}");
             return 1;
         }
     }
@@ -46,7 +46,7 @@ internal static class Program
         await using var runtime = ProxyRuntime.FromConfig(config);
         if (!config.ForwardProxy.Enabled)
         {
-            Console.WriteLine("forward-прокси выключен в конфиге (forwardProxy.enabled=false)");
+            Console.WriteLine("forward proxy is disabled in config (forwardProxy.enabled=false)");
             return 0;
         }
 
@@ -58,9 +58,9 @@ internal static class Program
         };
 
         await runtime.StartAsync(stop.Token);
-        Console.WriteLine($"forward-прокси: слушаю {string.Join(", ", runtime.Proxy.ListenerEndpoints)}");
-        Console.WriteLine($"лог: {runtime.Log.FilePath}");
-        Console.WriteLine("Ctrl+C — остановить");
+        Console.WriteLine($"forward proxy: listening on {string.Join(", ", runtime.Proxy.ListenerEndpoints)}");
+        Console.WriteLine($"log: {runtime.Log.FilePath}");
+        Console.WriteLine("Ctrl+C to stop");
         await Task.Delay(Timeout.Infinite, stop.Token);
         return 0;
     }
@@ -77,25 +77,25 @@ internal static class Program
         {
             case "status":
                 var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
-                Console.WriteLine($"демон:      слушатель {(state.DaemonHttpListening ? "есть" : "нет")}, процесс {(state.DaemonProcessAlive ? "жив" : "нет")}");
-                Console.WriteLine($"кипер:      {(state.KeeperRunning ? "работает" : "нет")}");
-                Console.WriteLine($"узел:       BackendState={state.BackendState ?? "нет ответа"}");
-                Console.WriteLine($"прокси:     {(state.ProxyRunning ? $"работает ({string.Join(", ", runtime.Proxy.ListenerEndpoints)})" : "остановлен")}, health {(state.ProxyHealthy ? "жив" : "не прошёл")}");
-                Console.WriteLine(state.IsFullyUp ? "цепочка: полностью поднята" : "цепочка: не полностью");
+                Console.WriteLine($"daemon:    listener {(state.DaemonHttpListening ? "up" : "down")}, process {(state.DaemonProcessAlive ? "alive" : "not found")}");
+                Console.WriteLine($"keeper:    {(state.KeeperRunning ? "running" : "not found")}");
+                Console.WriteLine($"node:      BackendState={state.BackendState ?? "no response"}");
+                Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.Proxy.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
+                Console.WriteLine(state.IsFullyUp ? "chain: fully up" : "chain: partial");
                 return 0;
 
             case "up":
                 await runtime.Chain.EnsureRunningAsync(progress, CancellationToken.None);
-                Console.WriteLine("цепочка поднята");
+                Console.WriteLine("chain is up");
                 return 0;
 
             case "down":
                 await runtime.Chain.StopAsync(progress, CancellationToken.None);
-                Console.WriteLine("цепочка остановлена");
+                Console.WriteLine("chain is stopped");
                 return 0;
 
             default:
-                Console.Error.WriteLine($"неизвестное действие: {action} (status | up | down)");
+                Console.Error.WriteLine($"unknown action: {action} (status | up | down)");
                 return 1;
         }
     }
@@ -108,7 +108,7 @@ internal static class Program
         Console.WriteLine($"CONNECT-roundtrip {endpoint} -> {fp.HealthCheckHost}:{fp.HealthCheckPort}...");
         await using var runtime = ProxyRuntime.FromConfig(config);
         var alive = await runtime.CheckHealthAsync(TimeSpan.FromSeconds(20));
-        Console.WriteLine(alive ? "цепочка жива" : "цепочка не отвечает");
+        Console.WriteLine(alive ? "chain is alive" : "chain is not responding");
         return alive ? 0 : 2;
     }
 
@@ -124,11 +124,11 @@ internal static class Program
                 var config = AppConfigStore.LoadOrCreate();
                 Console.WriteLine(AppConfigStore.GetDefaultConfigPath());
                 Console.WriteLine(config.ForwardProxy.Enabled
-                    ? "создан (или уже был) со значениями по умолчанию"
-                    : "создан (или уже был); forward-прокси выключен");
+                    ? "created (or already present) with default values"
+                    : "created (or already present); forward proxy is disabled");
                 return 0;
             default:
-                Console.Error.WriteLine($"неизвестное действие: {action} (path | init)");
+                Console.Error.WriteLine($"unknown action: {action} (path | init)");
                 return 1;
         }
     }
@@ -149,15 +149,15 @@ internal static class Program
     private static int Help()
     {
         Console.WriteLine("""
-            pnr — headless-режим PrivateNetRouting
+            pnr — PrivateNetRouting headless mode
 
-            pnr proxy            запустить forward-прокси (Ctrl+C — стоп)
-            pnr chain status     состояние цепочки (демон/кипер/узел/прокси/health)
-            pnr chain up         поднять цепочку (демон → кипер → узел → прокси; UAC)
-            pnr chain down       остановить цепочку (down → демон → кипер → прокси; UAC)
-            pnr check            проверить цепочку CONNECT-roundtrip'ом
-            pnr config path      путь пользовательского конфига
-            pnr config init      создать конфиг по умолчанию, если его нет
+            pnr proxy            run the forward proxy (Ctrl+C to stop)
+            pnr chain status     chain state (daemon/keeper/node/proxy/health)
+            pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
+            pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)
+            pnr check            check the chain with a CONNECT-roundtrip
+            pnr config path      user config path
+            pnr config init      create the default config if missing
             """);
         return 0;
     }

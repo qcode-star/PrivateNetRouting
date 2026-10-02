@@ -12,6 +12,7 @@ public class AppConfigTests : IDisposable
         Assert.False(File.Exists(_path));
         var config = AppConfigStore.LoadOrCreate(_path);
         Assert.True(File.Exists(_path));
+        Assert.Equal(AppLanguage.Auto, config.Ui.Language);
         Assert.Equal("127.0.0.1:18082", config.ForwardProxy.Listen);
         Assert.Equal("127.0.0.1:18083", config.ForwardProxy.Socks5Upstream);
         Assert.Equal("127.0.0.1:18081", config.Chain.DaemonHttpListen);
@@ -66,6 +67,26 @@ public class AppConfigTests : IDisposable
 
         Assert.False(config.ForwardProxy.Enabled);
         Assert.Equal("127.0.0.1:11055", config.ForwardProxy.Socks5Upstream);
+    }
+
+    [Fact]
+    public void UpdateChangesUiLanguageWithoutExpandingVariables()
+    {
+        File.WriteAllText(_path, """
+            {
+              "forwardProxy": {
+                "activityMarkerPath": "%TEMP%\\marker-file"
+              }
+            }
+            """);
+
+        AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
+
+        Assert.Contains("\"language\": \"ru\"", File.ReadAllText(_path));
+        Assert.Contains("%TEMP%", File.ReadAllText(_path)); // %VAR% хранится нераскрытым
+        var loaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal("ru", loaded.Ui.Language);
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "marker-file"), loaded.ForwardProxy.ActivityMarkerPath);
     }
 
     public void Dispose()

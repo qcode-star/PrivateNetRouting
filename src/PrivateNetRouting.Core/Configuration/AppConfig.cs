@@ -5,11 +5,20 @@ namespace PrivateNetRouting.Core.Configuration;
 /// <summary>Корневой пользовательский конфиг приложения (см. config/appsettings.example.json).</summary>
 public sealed class AppConfig
 {
+    public UiConfig Ui { get; set; } = new();
+
     public LoggingConfig Logging { get; set; } = new();
 
     public ForwardProxyConfig ForwardProxy { get; set; } = new();
 
     public ChainConfig Chain { get; set; } = new();
+}
+
+/// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
+public sealed class UiConfig
+{
+    /// <summary>Язык UI: "auto" — язык системы (фолбэк английский), иначе код ("en", "ru").</summary>
+    public string Language { get; set; } = AppLanguage.Auto;
 }
 
 /// <summary>

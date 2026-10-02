@@ -47,7 +47,7 @@ public sealed class SidecarDaemon(
 
         if (IsProcessAlive && !IsHttpListening)
         {
-            progress?.Report("демон: протухший процесс без слушателя, добиваю");
+            progress?.Report("daemon: stale process without listener, killing it");
             await KillAsync(ct);
         }
 
@@ -55,10 +55,10 @@ public sealed class SidecarDaemon(
         {
             // чужой слушатель на нашем порту (например, прежняя схема): стартовать нельзя
             throw new IOException(
-                $"порт {HttpPort} уже слушает чужой процесс (демон цепочки не найден) — см. конфиг chain.daemonHttpListen");
+                $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.daemonHttpListen");
         }
 
-        progress?.Report("демон: запускаю tailscaled (подтверди UAC)");
+        progress?.Report("daemon: starting tailscaled (confirm UAC)");
         if (WindowsPrivilege.IsElevated())
         {
             StartProcess();
@@ -68,7 +68,7 @@ public sealed class SidecarDaemon(
             var result = await elevated.RunAsync(ElevatedChainCommands.StartDaemon, ct);
             if (!result.Ok)
             {
-                throw new IOException($"демон не поднялся: {result.Detail}");
+                throw new IOException($"daemon failed to start: {result.Detail}");
             }
         }
 
@@ -85,7 +85,7 @@ public sealed class SidecarDaemon(
         }
 
         throw new IOException(
-            $"демон не поднял слушатель за {config.DaemonWaitSeconds}s; лог: {Path.Combine(config.StateDir, "daemon.err.log")}");
+            $"daemon listener did not come up within {config.DaemonWaitSeconds}s; log: {Path.Combine(config.StateDir, "daemon.err.log")}");
     }
 
     /// <summary>Прямой запуск процесса демона (контекст уже с правами администратора).</summary>
@@ -118,7 +118,7 @@ public sealed class SidecarDaemon(
         var result = await elevated.RunAsync(ElevatedChainCommands.StopChain, ct);
         if (!result.Ok)
         {
-            throw new IOException($"не удалось остановить демон: {result.Detail}");
+            throw new IOException($"failed to stop daemon: {result.Detail}");
         }
     }
 

@@ -78,41 +78,41 @@ public sealed class ChainSupervisor(
         // 1. демон (единственное возможное окно UAC на холодном старте)
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
-            Report(progress, "Демон", ChainStepStatus.Skipped, "уже слушает");
+            Report(progress, "Daemon", ChainStepStatus.Skipped, "already listening");
         }
         else
         {
-            Report(progress, "Демон", ChainStepStatus.Active, "поднимаю (подтверди UAC)");
+            Report(progress, "Daemon", ChainStepStatus.Active, "starting (confirm UAC)");
             try
             {
                 await daemon.EnsureStartedAsync(new Progress<string>(detail =>
-                    Report(progress, "Демон", ChainStepStatus.Active, detail)), ct);
-                Report(progress, "Демон", ChainStepStatus.Done, "слушатель поднят");
+                    Report(progress, "Daemon", ChainStepStatus.Active, detail)), ct);
+                Report(progress, "Daemon", ChainStepStatus.Done, "listener is up");
             }
             catch (Exception ex)
             {
-                Report(progress, "Демон", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("демон", ex);
+                Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
+                throw new ChainException("daemon", ex);
             }
         }
 
         // 2. кипер watch-ipn
         if (keeper.IsRunning)
         {
-            Report(progress, "Кипер", ChainStepStatus.Skipped, "уже работает");
+            Report(progress, "Keeper", ChainStepStatus.Skipped, "already running");
         }
         else
         {
-            Report(progress, "Кипер", ChainStepStatus.Active, "запускаю watch-ipn");
+            Report(progress, "Keeper", ChainStepStatus.Active, "starting watch-ipn");
             try
             {
                 await keeper.EnsureStartedAsync(ct);
-                Report(progress, "Кипер", ChainStepStatus.Done, "работает");
+                Report(progress, "Keeper", ChainStepStatus.Done, "running");
             }
             catch (Exception ex)
             {
-                Report(progress, "Кипер", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("кипер", ex);
+                Report(progress, "Keeper", ChainStepStatus.Failed, ex.Message);
+                throw new ChainException("keeper", ex);
             }
         }
 
@@ -120,57 +120,57 @@ public sealed class ChainSupervisor(
         var state = await cli.GetBackendStateAsync(ct);
         if (state == "Running")
         {
-            Report(progress, "Узел", ChainStepStatus.Skipped, "уже Running");
+            Report(progress, "Node", ChainStepStatus.Skipped, "already Running");
         }
         else
         {
-            Report(progress, "Узел", ChainStepStatus.Active, "tailscale up");
+            Report(progress, "Node", ChainStepStatus.Active, "tailscale up");
             try
             {
                 var up = await cli.UpAsync(ct);
                 state = await cli.GetBackendStateAsync(ct);
                 if (state != "Running")
                 {
-                    throw new IOException($"up не привёл к Running (сейчас {state ?? "нет ответа"}): {up.Output}");
+                    throw new IOException($"up did not reach Running (now {state ?? "no response"}): {up.Output}");
                 }
 
-                Report(progress, "Узел", ChainStepStatus.Done, "Running");
+                Report(progress, "Node", ChainStepStatus.Done, "Running");
             }
             catch (Exception ex) when (ex is not ChainException)
             {
-                Report(progress, "Узел", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("узел", ex);
+                Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
+                throw new ChainException("node", ex);
             }
         }
 
         // 4. forward-прокси (наш порт ts-fwd)
         if (proxy.IsRunning)
         {
-            Report(progress, "Прокси", ChainStepStatus.Skipped, "уже работает");
+            Report(progress, "Proxy", ChainStepStatus.Skipped, "already running");
         }
         else
         {
-            Report(progress, "Прокси", ChainStepStatus.Active, "запускаю слушателя");
+            Report(progress, "Proxy", ChainStepStatus.Active, "starting listener");
             try
             {
                 await proxy.StartAsync(ct);
-                Report(progress, "Прокси", ChainStepStatus.Done, "слушает");
+                Report(progress, "Proxy", ChainStepStatus.Done, "listening");
             }
             catch (Exception ex) when (ex is not ChainException)
             {
-                Report(progress, "Прокси", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("прокси", ex);
+                Report(progress, "Proxy", ChainStepStatus.Failed, ex.Message);
+                throw new ChainException("proxy", ex);
             }
         }
 
         // 5. здоровье: CONNECT-roundtrip через весь путь
-        Report(progress, "Здоровье", ChainStepStatus.Active, "CONNECT-roundtrip");
+        Report(progress, "Health", ChainStepStatus.Active, "CONNECT-roundtrip");
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.HealthWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
             if (await healthCheck(ct))
             {
-                Report(progress, "Здоровье", ChainStepStatus.Done, "цепочка жива");
+                Report(progress, "Health", ChainStepStatus.Done, "chain is alive");
                 log.Info("chain: полностью поднята");
                 return;
             }
@@ -178,43 +178,43 @@ public sealed class ChainSupervisor(
             await Task.Delay(1000, ct);
         }
 
-        Report(progress, "Здоровье", ChainStepStatus.Failed, "CONNECT не прошёл");
-        throw new ChainException("здоровье", new IOException("цепочка поднята, но CONNECT-roundtrip не прошёл"));
+        Report(progress, "Health", ChainStepStatus.Failed, "CONNECT failed");
+        throw new ChainException("health", new IOException("chain is up but CONNECT-roundtrip failed"));
     }
 
     public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
-        Report(progress, "Прокси", ChainStepStatus.Active, "останавливаю");
+        Report(progress, "Proxy", ChainStepStatus.Active, "stopping");
         await proxy.StopAsync();
-        Report(progress, "Прокси", ChainStepStatus.Done, "остановлен");
+        Report(progress, "Proxy", ChainStepStatus.Done, "stopped");
 
-        Report(progress, "Узел", ChainStepStatus.Active, "tailscale down");
+        Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
         try
         {
             await cli.DownAsync(ct);
-            Report(progress, "Узел", ChainStepStatus.Done, "отключён");
+            Report(progress, "Node", ChainStepStatus.Done, "down");
         }
         catch (Exception ex)
         {
-            Report(progress, "Узел", ChainStepStatus.Failed, ex.Message);
+            Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
             log.Warn($"chain: down не удался: {ex.Message}");
         }
 
-        Report(progress, "Демон", ChainStepStatus.Active, "останавливаю (нужны права)");
+        Report(progress, "Daemon", ChainStepStatus.Active, "stopping (needs elevation)");
         try
         {
             await daemon.KillAsync(ct);
-            Report(progress, "Демон", ChainStepStatus.Done, "остановлен");
+            Report(progress, "Daemon", ChainStepStatus.Done, "stopped");
         }
         catch (Exception ex)
         {
-            Report(progress, "Демон", ChainStepStatus.Failed, ex.Message);
-            throw new ChainException("демон", ex);
+            Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
+            throw new ChainException("daemon", ex);
         }
 
-        Report(progress, "Кипер", ChainStepStatus.Active, "останавливаю");
+        Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
         await keeper.KillAsync(ct);
-        Report(progress, "Кипер", ChainStepStatus.Done, "остановлен");
+        Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
         log.Info("chain: остановлена");
     }
 
@@ -223,4 +223,4 @@ public sealed class ChainSupervisor(
 }
 
 /// <summary>Ошибка конкретного звена цепочки (для понятных сообщений UI/CLI).</summary>
-public sealed class ChainException(string component, Exception inner) : Exception($"цепочка: {component}: {inner.Message}", inner);
+public sealed class ChainException(string component, Exception inner) : Exception($"chain: {component}: {inner.Message}", inner);

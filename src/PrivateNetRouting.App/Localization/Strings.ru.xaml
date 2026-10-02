@@ -1,0 +1,58 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:s="clr-namespace:System;assembly=mscorlib">
+    <!-- Русские строки UI. Ключи и набор плейсхолдеров ({0}, ...) должны совпадать
+         во всех словарях Strings.*.xaml; список языков — AppLanguage.Supported. -->
+
+    <!-- Заголовок и статус -->
+    <s:String x:Key="Main.Header">Forward-прокси</s:String>
+    <s:String x:Key="Main.State.Unknown">неизвестно</s:String>
+    <s:String x:Key="Main.State.Running">работает</s:String>
+    <s:String x:Key="Main.State.Stopped">остановлен</s:String>
+
+    <!-- Карточка статуса -->
+    <s:String x:Key="Main.Listeners">Слушатели</s:String>
+    <s:String x:Key="Main.ActiveConnections">Активные соединения</s:String>
+    <s:String x:Key="Main.TotalErrors">Всего / ошибок</s:String>
+    <s:String x:Key="Main.SocksUpstream">Апстрим SOCKS5</s:String>
+    <s:String x:Key="Main.Config">Конфиг</s:String>
+    <s:String x:Key="Main.Log">Лог</s:String>
+
+    <!-- Цепочка -->
+    <s:String x:Key="Main.Chain">Цепочка</s:String>
+    <s:String x:Key="Main.Chain.FullUp">полностью поднята</s:String>
+    <s:String x:Key="Main.Chain.Partial">не полностью</s:String>
+    <s:String x:Key="Main.Chain.Daemon.Listening">слушает</s:String>
+    <s:String x:Key="Main.Chain.Daemon.NoListener">без слушателя</s:String>
+    <s:String x:Key="Main.Chain.Daemon.Down">нет</s:String>
+    <s:String x:Key="Main.Chain.Keeper.Running">работает</s:String>
+    <s:String x:Key="Main.Chain.Keeper.Down">нет</s:String>
+    <s:String x:Key="Main.Chain.Node.NoResponse">нет ответа</s:String>
+    <s:String x:Key="Main.Chain.Proxy.Running">работает</s:String>
+    <s:String x:Key="Main.Chain.Proxy.Stopped">остановлен</s:String>
+    <s:String x:Key="Main.Chain.Health.Ok">живо</s:String>
+    <s:String x:Key="Main.Chain.Health.Fail">не прошло</s:String>
+    <s:String x:Key="Main.Chain.DetailsFmt">демон: {0}    кипер: {1}    узел: {2}&#10;прокси: {3}    здоровье: {4}</s:String>
+
+    <!-- Кнопки -->
+    <s:String x:Key="Main.Button.Start">Запустить</s:String>
+    <s:String x:Key="Main.Button.Stop">Остановить</s:String>
+    <s:String x:Key="Main.Button.CheckChain">Проверить цепочку</s:String>
+    <s:String x:Key="Main.Button.ChainUp">Поднять цепочку</s:String>
+    <s:String x:Key="Main.Button.ChainDown">Остановить цепочку</s:String>
+
+    <!-- Результаты операций -->
+    <s:String x:Key="Main.Check.Running">проверяю (CONNECT-roundtrip)...</s:String>
+    <s:String x:Key="Main.Check.AliveFmt">цепочка жива: CONNECT через {0} прошёл</s:String>
+    <s:String x:Key="Main.Check.DeadFmt">цепочка не отвечает: CONNECT через {0} не прошёл</s:String>
+    <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>
+    <s:String x:Key="Main.Chain.DownDone">цепочка остановлена</s:String>
+    <s:String x:Key="Main.Chain.Busy">выполняется операция (подтверди UAC, если появится)...</s:String>
+    <s:String x:Key="Main.Chain.StateUnknownFmt">состояние неизвестно: {0}</s:String>
+    <s:String x:Key="Main.ErrorFmt">ошибка: {0}</s:String>
+    <s:String x:Key="Main.LanguageSavedFmt">язык сохранён в конфиге: {0}</s:String>
+
+    <!-- Настройки -->
+    <s:String x:Key="Main.Language">Язык</s:String>
+    <s:String x:Key="Main.Language.Auto">Как в системе</s:String>
+</ResourceDictionary>

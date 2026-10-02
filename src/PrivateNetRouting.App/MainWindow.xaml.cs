@@ -1,16 +1,23 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
+using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Главное окно: статус forward-прокси и цепочки, управление. Состояние цепочки опрашивается
-/// реже, чем счётчики прокси: каждый опрос — это CLI-вызов и CONNECT-roundtrip.
+/// Главное окно: статус forward-прокси и цепочки, управление, выбор языка интерфейса.
+/// Состояние цепочки опрашивается реже, чем счётчики прокси: каждый опрос — это
+/// CLI-вызов и CONNECT-roundtrip. Все строки — из словарей Localization/Strings.*.xaml:
+/// XAML берёт их DynamicResource'ом, код — через Loc.S/Loc.F; смена языка перевязывает
+/// словарь на лету (Loc.LanguageChanged), ViewModel перерисовывает свои строки.
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -19,17 +26,19 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
     private bool _chainBusy;
+    private bool _fillingLanguages;
 
-    public MainWindow(ProxyRuntime runtime, string configPath)
+    public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
         InitializeComponent();
         _runtime = runtime;
-        _viewModel = new MainViewModel { ConfigPath = configPath };
+        _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
-        _viewModel.Refresh(runtime);
+        _viewModel.Refresh();
+        FillLanguages(languagePreference);
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _refreshTimer.Tick += (_, _) => _viewModel.Refresh(runtime);
+        _refreshTimer.Tick += (_, _) => _viewModel.Refresh();
         _refreshTimer.Start();
 
         _chainTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
@@ -42,6 +51,7 @@ public partial class MainWindow : Window
     {
         _refreshTimer.Stop();
         _chainTimer.Stop();
+        _viewModel.Dispose();
         base.OnClosed(e);
     }
 
@@ -59,29 +69,29 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.ChainSummary = $"состояние неизвестно: {ex.Message}";
+            _viewModel.SetChainStateError(ex.Message);
         }
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
     {
         await _runtime.StartAsync(CancellationToken.None);
-        _viewModel.Refresh(_runtime);
+        _viewModel.Refresh();
     }
 
     private async void OnStop(object sender, RoutedEventArgs e)
     {
         await _runtime.StopAsync();
-        _viewModel.Refresh(_runtime);
+        _viewModel.Refresh();
     }
 
     private async void OnCheckChain(object sender, RoutedEventArgs e)
     {
-        _viewModel.CheckResult = "проверяю (CONNECT-roundtrip)...";
+        _viewModel.SetCheckResult("Main.Check.Running");
         var alive = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
-        _viewModel.CheckResult = alive
-            ? $"цепочка жива: CONNECT через {_runtime.Config.ForwardProxy.Listen} прошёл"
-            : $"цепочка не отвечает: CONNECT через {_runtime.Config.ForwardProxy.Listen} не прошёл";
+        _viewModel.SetCheckResult(
+            alive ? "Main.Check.AliveFmt" : "Main.Check.DeadFmt",
+            _runtime.Config.ForwardProxy.Listen);
     }
 
     private async void OnChainUp(object sender, RoutedEventArgs e)
@@ -91,7 +101,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _viewModel.CheckResult = "цепочка поднята";
+        _viewModel.SetCheckResult("Main.Chain.UpDone");
         await RefreshChainAsync();
     }
 
@@ -102,7 +112,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _viewModel.CheckResult = "цепочка остановлена";
+        _viewModel.SetCheckResult("Main.Chain.DownDone");
         await RefreshChainAsync();
     }
 
@@ -115,7 +125,6 @@ public partial class MainWindow : Window
 
         _chainBusy = true;
         _viewModel.SetChainBusy(true);
-        _viewModel.ChainSummary = "выполняется операция (подтверди UAC, если появится)...";
         try
         {
             await action();
@@ -123,7 +132,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.CheckResult = $"ошибка: {ex.Message}";
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
             return false;
         }
         finally
@@ -132,24 +141,83 @@ public partial class MainWindow : Window
             _viewModel.SetChainBusy(false);
         }
     }
+
+    /// <summary>Наполняет селектор языка: авто + поддержанные; выбор — по значению конфига.</summary>
+    private void FillLanguages(string preference)
+    {
+        _fillingLanguages = true;
+        var wanted = preference?.Trim().ToLowerInvariant();
+        LanguageBox.Items.Clear();
+        LanguageBox.Items.Add(new ComboBoxItem { Tag = AppLanguage.Auto, Content = Loc.S("Main.Language.Auto") });
+        foreach (var code in AppLanguage.Supported)
+        {
+            LanguageBox.Items.Add(new ComboBoxItem { Tag = code, Content = LanguageDisplayName(code) });
+        }
+
+        LanguageBox.SelectedItem = LanguageBox.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(item => (string)item.Tag == wanted)
+            ?? LanguageBox.Items[0];
+        _fillingLanguages = false;
+    }
+
+    private static string LanguageDisplayName(string code)
+    {
+        var culture = CultureInfo.GetCultureInfo(code);
+        return culture.TextInfo.ToTitleCase(culture.NativeName);
+    }
+
+    private void OnLanguageSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingLanguages || LanguageBox.SelectedItem is not ComboBoxItem { Tag: string preference })
+        {
+            return;
+        }
+
+        try
+        {
+            Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
+            AppConfigStore.Update(config => config.Ui.Language = preference);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+            return;
+        }
+
+        FillLanguages(preference);
+        _viewModel.SetCheckResult(
+            "Main.LanguageSavedFmt",
+            preference == AppLanguage.Auto ? Loc.S("Main.Language.Auto") : preference);
+    }
 }
 
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
-    private string _stateText = "неизвестно";
+    private readonly ProxyRuntime _runtime;
+    private ChainState? _lastChainState;
+    private string? _chainStateError;
+    private string? _checkResultKey;
+    private object?[] _checkResultArgs = [];
+    private string _stateText = "";
     private Brush _stateBrush = Brushes.Gray;
     private string _endpoints = "—";
     private string _activeConnections = "0";
     private long _totalConnections;
     private long _failedConnections;
     private string _socksUpstream = "";
-    private string _checkResult = "";
     private string _configPath = "";
     private string _logPath = "";
     private bool _canStart;
     private bool _canStop;
     private string _chainSummary = "…";
     private string _chainDetails = "";
+    private bool _chainOperationRunning;
+
+    public MainViewModel(ProxyRuntime runtime)
+    {
+        _runtime = runtime;
+        Loc.LanguageChanged += OnLanguageChanged;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -207,11 +275,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set => SetField(ref _logPath, value);
     }
 
-    public string CheckResult
-    {
-        get => _checkResult;
-        set => SetField(ref _checkResult, value);
-    }
+    /// <summary>Форматируется из ключа+аргументов при каждом чтении — переживает смену языка.</summary>
+    public string CheckResult => _checkResultKey is null ? "" : Loc.F(_checkResultKey, _checkResultArgs);
 
     public bool CanStart
     {
@@ -228,7 +293,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string ChainSummary
     {
         get => _chainSummary;
-        set => SetField(ref _chainSummary, value);
+        private set => SetField(ref _chainSummary, value);
     }
 
     public string ChainDetails
@@ -241,20 +306,36 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool CanChainDown => !_chainOperationRunning;
 
-    private bool _chainOperationRunning;
-
     public void SetChainBusy(bool busy)
     {
         _chainOperationRunning = busy;
+        if (busy)
+        {
+            ChainSummary = Loc.S("Main.Chain.Busy");
+        }
+
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
     }
 
-    public void Refresh(ProxyRuntime runtime)
+    public void SetCheckResult(string key, params object?[] args)
     {
-        var proxy = runtime.Proxy;
+        _checkResultKey = key;
+        _checkResultArgs = args;
+        OnPropertyChanged(nameof(CheckResult));
+    }
+
+    public void SetChainStateError(string message)
+    {
+        _chainStateError = message;
+        ChainSummary = Loc.F("Main.Chain.StateUnknownFmt", message);
+    }
+
+    public void Refresh()
+    {
+        var proxy = _runtime.Proxy;
         var running = proxy.IsRunning;
-        StateText = running ? "работает" : "остановлен";
+        StateText = running ? Loc.S("Main.State.Running") : Loc.S("Main.State.Stopped");
         StateBrush = running
             ? new SolidColorBrush(Color.FromRgb(0x7C, 0xB9, 0x7C))
             : new SolidColorBrush(Color.FromRgb(0xD9, 0x6B, 0x6B));
@@ -264,23 +345,48 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ActiveConnections = proxy.ActiveConnections.ToString();
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;
-        SocksUpstream = runtime.Config.ForwardProxy.Socks5Upstream;
-        LogPath = runtime.Log.FilePath;
+        SocksUpstream = _runtime.Config.ForwardProxy.Socks5Upstream;
+        LogPath = _runtime.Log.FilePath;
         CanStart = !running;
         CanStop = running;
     }
 
     public void UpdateChain(ChainState state)
     {
-        ChainSummary = state.IsFullyUp ? "полностью поднята" : "не полностью";
-        var daemon = state.DaemonProcessAlive
-            ? state.DaemonHttpListening ? "слушает" : "без слушателя"
-            : "нет";
-        ChainDetails =
-            $"демон: {daemon}    кипер: {(state.KeeperRunning ? "работает" : "нет")}    " +
-            $"узел: {state.BackendState ?? "нет ответа"}\n" +
-            $"прокси: {(state.ProxyRunning ? "работает" : "остановлен")}    здоровье: {(state.ProxyHealthy ? "живо" : "не прошло")}";
+        _lastChainState = state;
+        _chainStateError = null;
+        ChainSummary = state.IsFullyUp ? Loc.S("Main.Chain.FullUp") : Loc.S("Main.Chain.Partial");
+        var daemon = !state.DaemonProcessAlive
+            ? Loc.S("Main.Chain.Daemon.Down")
+            : state.DaemonHttpListening ? Loc.S("Main.Chain.Daemon.Listening") : Loc.S("Main.Chain.Daemon.NoListener");
+        ChainDetails = Loc.F(
+            "Main.Chain.DetailsFmt",
+            daemon,
+            state.KeeperRunning ? Loc.S("Main.Chain.Keeper.Running") : Loc.S("Main.Chain.Keeper.Down"),
+            state.BackendState ?? Loc.S("Main.Chain.Node.NoResponse"),
+            state.ProxyRunning ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
+            state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"));
     }
+
+    private void OnLanguageChanged()
+    {
+        Refresh();
+        OnPropertyChanged(nameof(CheckResult));
+        if (_chainOperationRunning)
+        {
+            ChainSummary = Loc.S("Main.Chain.Busy");
+        }
+        else if (_chainStateError is not null)
+        {
+            ChainSummary = Loc.F("Main.Chain.StateUnknownFmt", _chainStateError);
+        }
+        else if (_lastChainState is not null)
+        {
+            UpdateChain(_lastChainState);
+        }
+    }
+
+    public void Dispose() => Loc.LanguageChanged -= OnLanguageChanged;
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
