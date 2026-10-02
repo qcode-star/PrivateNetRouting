@@ -2,12 +2,36 @@ using System.Net;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
 using PrivateNetRouting.Core.Runtime;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
 
 public class RuntimePiecesTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-runtime-").FullName;
+
+    [Fact]
+    public void CmdArgumentsWrapQuotedCommandLineOnce()
+    {
+        // каноническая форма ""cmd" args 1>out 2>err"": cmd срывает первую и последнюю
+        // кавычки; двойная оборачивка ломала пути с пробелами ("""C:\Program …")
+        var arguments = ProcessOps.BuildCmdArguments(
+            "\"C:\\Program Files\\Tailscale\\tailscaled.exe\" --port=0",
+            @"C:\logs\out.log",
+            @"C:\logs\err.log");
+
+        Assert.Equal(
+            "/c \"\"C:\\Program Files\\Tailscale\\tailscaled.exe\" --port=0 1>\"C:\\logs\\out.log\" 2>\"C:\\logs\\err.log\"\"",
+            arguments);
+    }
+
+    [Fact]
+    public void CmdArgumentsWithoutStdoutRedirectToNul()
+    {
+        var arguments = ProcessOps.BuildCmdArguments("cmd /c exit", null, @"C:\logs\err.log");
+
+        Assert.Equal("/c \"cmd /c exit 1>NUL 2>\"C:\\logs\\err.log\"\"", arguments);
+    }
 
     [Fact]
     public async Task CacheClampsShortTtlAndHits()

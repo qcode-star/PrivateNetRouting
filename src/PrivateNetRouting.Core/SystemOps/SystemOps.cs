@@ -29,6 +29,9 @@ public sealed record FoundProcess(int Id, string CommandLine);
 public interface IProcessFinder
 {
     IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains);
+
+    /// <summary>Поиск по подстроке в имени процесса (WQL LIKE), командная строка не фильтруется.</summary>
+    IReadOnlyList<FoundProcess> FindByNameContains(string namePart);
 }
 
 public sealed class WmiProcessFinder : IProcessFinder
@@ -37,11 +40,24 @@ public sealed class WmiProcessFinder : IProcessFinder
     {
         using var searcher = new ManagementObjectSearcher(
             new SelectQuery("Win32_Process", $"Name = '{processName.Replace("'", "''")}'"));
+        return Search(searcher, commandLineContains);
+    }
+
+    public IReadOnlyList<FoundProcess> FindByNameContains(string namePart)
+    {
+        using var searcher = new ManagementObjectSearcher(
+            new SelectQuery("Win32_Process", $"Name LIKE '%{namePart.Replace("'", "''")}%'"));
+        return Search(searcher, commandLineContains: string.Empty);
+    }
+
+    private static IReadOnlyList<FoundProcess> Search(ManagementObjectSearcher searcher, string commandLineContains)
+    {
         var found = new List<FoundProcess>();
         foreach (var item in searcher.Get())
         {
             var commandLine = item["CommandLine"] as string ?? string.Empty;
-            if (commandLine.Contains(commandLineContains, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(commandLineContains)
+                || commandLine.Contains(commandLineContains, StringComparison.OrdinalIgnoreCase))
             {
                 found.Add(new FoundProcess(Convert.ToInt32(item["ProcessId"]), commandLine));
             }
@@ -69,16 +85,22 @@ public static class ProcessOps
     /// и переживают выход нашего процесса — логи пишутся, пока жив потомок, а цепочка не зависит
     /// от жизни приложения. Так же устроены перенаправления в прежней схеме.
     /// </summary>
-    public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath)
-    {
-        var redirectOut = stdoutPath is null ? "NUL" : Quote(stdoutPath);
-        var arguments = $"/c \"\"{commandLine}\" 1>{redirectOut} 2>{Quote(stderrPath)}\"";
-        var info = new ProcessStartInfo("cmd.exe", arguments)
+    public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath) =>
+        Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-        };
-        return Process.Start(info);
+        });
+
+    /// <summary>
+    /// Форма /c "…1&gt;out 2&gt;err": внешняя кавычка в паре с собственной кавычкой команды даёт
+    /// каноническое ""cmd" args" — cmd срывает первую и последнюю кавычки, внутренние сохраняются.
+    /// Двойная оборачивка ломала пути с пробелами ("""C:\Program …" не является командой).
+    /// </summary>
+    internal static string BuildCmdArguments(string commandLine, string? stdoutPath, string stderrPath)
+    {
+        var redirectOut = stdoutPath is null ? "NUL" : Quote(stdoutPath);
+        return $"/c \"{commandLine} 1>{redirectOut} 2>{Quote(stderrPath)}\"";
     }
 
     public static string Quote(string value) => $"\"{value}\"";
