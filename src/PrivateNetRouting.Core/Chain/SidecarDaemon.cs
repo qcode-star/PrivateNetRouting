@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Socks;
@@ -35,7 +36,35 @@ public sealed class SidecarDaemon(
 
     public bool IsHttpListening => ports.IsListening(HttpPort);
 
-    public bool IsProcessAlive => processes.Find("tailscaled.exe", config.StateDir).Count > 0;
+    /// <summary>
+    /// Живость демона = отзывчивость его именованного пайпа. Командная строка элевейтнутого
+    /// демона не видна неэлевейтнутому читателю WMI (Windows 11 24H2+ отдаёт пустой CommandLine),
+    /// поэтому опознание «своих» по statedir в cmdline для статуса не работает; пайп же с нашим
+    /// именем может держать только демон, запущенный с нашим --socket (у системной службы
+    /// Tailscale свой). Элевейтнутый останов по-прежнему добивает процессы поиском по cmdline —
+    /// из элевейтнутого контекста командные строки видны.
+    /// </summary>
+    public bool IsProcessAlive => ProbePipe(config.Socket, TimeSpan.FromMilliseconds(500));
+
+    internal static bool ProbePipe(string socketPath, TimeSpan timeout)
+    {
+        const string prefix = @"\\.\pipe\";
+        if (!socketPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var client = new NamedPipeClientStream(".", socketPath[prefix.Length..], PipeDirection.Out);
+            client.Connect((int)timeout.TotalMilliseconds);
+            return true;
+        }
+        catch (Exception ex) when (ex is TimeoutException or IOException or ArgumentException)
+        {
+            return false;
+        }
+    }
 
     public async Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct)
     {
