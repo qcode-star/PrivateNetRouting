@@ -3,6 +3,7 @@ using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Socks;
+using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.Cli;
 
@@ -31,6 +32,7 @@ internal static class Program
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
+                "update" => await RunUpdateAsync(args.Skip(1).ToList()),
                 "watchdog" => await RunWatchdogAsync(),
                 "config" => ConfigCommand(args.Skip(1).ToList()),
                 _ => Help(),
@@ -182,6 +184,110 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Ручное обновление Claude Desktop (MSIX) через прокси-цепочку: порт ключей прежнего
+    /// движка обновления. Проверка версий идёт до подъёма цепочки — «нечего ставить»
+    /// не поднимает ничего и не просит UAC.
+    /// </summary>
+    private static async Task<int> RunUpdateAsync(List<string> rest)
+    {
+        var options = UpdateOptions.Default;
+        var checkOnly = false;
+        string? installFrom = null;
+        for (var i = 0; i < rest.Count; i++)
+        {
+            switch (rest[i])
+            {
+                case "--check":
+                    checkOnly = true;
+                    break;
+                case "--download-only":
+                    options = options with { DownloadOnly = true };
+                    break;
+                case "--force":
+                    options = options with { Force = true };
+                    break;
+                case "--keep-file":
+                    options = options with { KeepFile = true };
+                    break;
+                case "--keep-running":
+                    options = options with { KeepRunning = true };
+                    break;
+                case "--url":
+                    if (i + 1 >= rest.Count)
+                    {
+                        Console.Error.WriteLine("--url requires a value");
+                        return 1;
+                    }
+
+                    options = options with { ManualUrl = rest[++i] };
+                    break;
+                case "--install-from":
+                    if (i + 1 >= rest.Count)
+                    {
+                        Console.Error.WriteLine("--install-from requires a value");
+                        return 1;
+                    }
+
+                    installFrom = rest[++i];
+                    break;
+                default:
+                    Console.Error.WriteLine($"unknown option: {rest[i]} (--check | --download-only | --force | --keep-file | --keep-running | --url <url> | --install-from <path>)");
+                    return 1;
+            }
+        }
+
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        var progress = new SyncProgress<UpdateProgress>(p =>
+            Console.WriteLine(p.TotalBytes > 0 && p.Phase == UpdatePhase.Download
+                ? $"  download {ByteSize.Format(p.DoneBytes)} of {ByteSize.Format(p.TotalBytes)}"
+                : $"[{p.Phase.ToString().ToLowerInvariant()}] {p.Message}"));
+        var chainProgress = new SyncProgress<ChainStep>(step =>
+            Console.WriteLine($"  [{step.Status,-7}] {step.Component}: {step.Detail}"));
+
+        if (installFrom is not null)
+        {
+            var after = await runtime.Updater.InstallAsync(installFrom, options, progress, CancellationToken.None);
+            Console.WriteLine($"installed: {after.Version}");
+            return 0;
+        }
+
+        if (checkOnly)
+        {
+            var check = await runtime.Updater.CheckAsync(options, CancellationToken.None);
+            if (check.Installed is null)
+            {
+                Console.WriteLine("Claude Desktop is not installed as an MSIX package");
+                return 1;
+            }
+
+            Console.WriteLine($"installed: {check.Installed.Version}");
+            Console.WriteLine(check.PackageUrl is null
+                ? "offered:    no fresh package URL in the AppX journal (launch Claude Desktop or pass --url)"
+                : $"offered:    {check.OfferedVersion}  ({check.PackageUrl})");
+            Console.WriteLine(check.UpToDate ? "up to date — nothing to do" : "update available");
+            return 0;
+        }
+
+        var result = await runtime.Updater.RunAsync(options, progress, chainProgress, CancellationToken.None);
+        switch (result.Outcome)
+        {
+            case UpdateOutcome.UpToDate:
+                Console.WriteLine($"up to date: {result.Installed?.Version}");
+                return 0;
+            case UpdateOutcome.Downloaded:
+                Console.WriteLine($"package ready: {result.PackageFile}");
+                Console.WriteLine("install: pnr update --install-from <file>");
+                return 0;
+            case UpdateOutcome.Installed:
+                Console.WriteLine($"done: {result.Installed?.Version} -> {result.InstalledAfter?.Version}");
+                return 0;
+            default:
+                return 1;
+        }
+    }
+
     private static int ConfigCommand(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "path";
@@ -216,6 +322,20 @@ internal static class Program
         return null;
     }
 
+    /// <summary>Синхронный IProgress: без контекста синхронизации Progress&lt;T&gt; печатал бы из пула потоков не по порядку.</summary>
+    private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
+    {
+        private readonly object _gate = new();
+
+        public void Report(T value)
+        {
+            lock (_gate)
+            {
+                report(value);
+            }
+        }
+    }
+
     private static int Help()
     {
         Console.WriteLine("""
@@ -229,6 +349,12 @@ internal static class Program
             pnr launch [--check-only] [--no-splash]
                                  start Claude with --proxy-server/--proxy-bypass-list,
                                  bringing the chain up if needed (splash is GUI-only)
+            pnr update [--check] [--download-only] [--force] [--keep-file]
+                       [--keep-running] [--url <url>] [--install-from <path>]
+                                 update Claude Desktop (MSIX) through the proxy chain:
+                                 versions are checked first (no UAC when up to date),
+                                 then chain if needed, fragment download, publisher
+                                 check and Add-AppxPackage
             pnr watchdog         idle auto-stop supervisor: check Claude usage every
                                  watchdog.checkSeconds, on idle stop the WSL host and
                                  the chain (Ctrl+C to stop; starts nothing by itself)
