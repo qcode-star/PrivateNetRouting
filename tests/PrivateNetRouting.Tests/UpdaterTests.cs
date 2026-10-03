@@ -1,0 +1,592 @@
+using System.IO.Compression;
+using PrivateNetRouting.Core.Chain;
+using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.Runtime;
+using PrivateNetRouting.Core.Updater;
+
+namespace PrivateNetRouting.Tests;
+
+/// <summary>
+/// Оркестрация обновления: сравнение версий по префиксу, «нечего ставить» не трогает
+/// цепочку, ручной URL, Publisher-сверка, закрытие Claude, флаги, место на диске,
+/// разбор адресов из журнала и JSON Get-AppxPackage.
+/// </summary>
+public class UpdaterTests : IDisposable
+{
+    private const string MatchingPublisher = "CN=Anthropic LLM";
+    private static readonly Uri JournalUrl = new("https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-abc123.msix");
+
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"pnr-upd-{Guid.NewGuid():N}");
+    private readonly FileLog _log;
+    private readonly AppConfig _config;
+    private readonly FakeChain _chain = new();
+    private readonly FakeAppxSource _appx = new();
+    private readonly FakeDownloader _downloader = new();
+    private readonly FakeClaudeSource _claude = new();
+    private readonly ActivityMarker _marker;
+
+    public UpdaterTests()
+    {
+        Directory.CreateDirectory(_root);
+        _log = new FileLog(Path.Combine(_root, "updater.log"));
+        _config = new AppConfig
+        {
+            Updater = new UpdaterConfig
+            {
+                CacheDir = Path.Combine(_root, "cache"),
+                CloseWaitSeconds = 1,
+                KillSettleSeconds = 0,
+            },
+        };
+        _marker = new ActivityMarker(Path.Combine(_root, "activity"), TimeSpan.Zero);
+    }
+
+    private ClaudeUpdater Create(
+        bool healthy = true,
+        string? journalUrl = null,
+        Func<bool>? health = null,
+        Func<string, long>? freeSpace = null) =>
+        new(
+            _config,
+            _chain,
+            _ => Task.FromResult(health is not null ? health() : healthy),
+            _appx,
+            new FakeUrlFinder(journalUrl ?? JournalUrl.ToString()),
+            _downloader,
+            _marker,
+            _claude,
+            _log,
+            freeSpace);
+
+    // --- Проверка версий ---
+
+    [Fact]
+    public async Task CheckComparesVersionByPrefix()
+    {
+        var updater = Create(journalUrl: "https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-x.msix");
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.NotNull(check.Installed);
+        Assert.Equal("2.26455.1", check.OfferedVersion);
+        Assert.False(check.UpToDate); // 2.26454.2.0 не начинается с 2.26455.1
+    }
+
+    [Fact]
+    public async Task CheckMarksUpToDateByPrefix()
+    {
+        var updater = Create(journalUrl: "https://downloads.claude.ai/releases/win32/x64/2.26454.2/Claude-x.msix");
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.True(check.UpToDate); // 2.26454.2.0.StartsWith("2.26454.2")
+    }
+
+    [Fact]
+    public async Task CheckWithoutInstalledPackageHasNothingToUpdate()
+    {
+        _appx.Installed = null;
+        var updater = Create();
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.Null(check.Installed);
+        Assert.False(check.UpToDate);
+    }
+
+    [Fact]
+    public async Task ManualUrlOverridesJournal()
+    {
+        var updater = Create(journalUrl: "https://downloads.claude.ai/releases/win32/x64/9.9.9/Claude-old.msix");
+
+        var check = await updater.CheckAsync(
+            new UpdateOptions { ManualUrl = "https://downloads.claude.ai/releases/win32/x64/2.26460.0/Claude-new.msix" },
+            CancellationToken.None);
+
+        Assert.Equal("2.26460.0", check.OfferedVersion);
+        Assert.Contains("2.26460.0", check.PackageUrl);
+    }
+
+    // --- Полный цикл (CLI) ---
+
+    [Fact]
+    public async Task UpToDateRunTouchesNeitherChainNorDownloader()
+    {
+        var updater = Create(
+            healthy: false,
+            journalUrl: "https://downloads.claude.ai/releases/win32/x64/2.26454.2/Claude-x.msix");
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
+        Assert.Equal(0, _chain.EnsureCalls);
+        Assert.Empty(_downloader.Downloads);
+    }
+
+    [Fact]
+    public async Task MissingUrlFailsWithHintToLaunchClaude()
+    {
+        var updater = new ClaudeUpdater(
+            _config, _chain, _ => Task.FromResult(true),
+            _appx, new FakeUrlFinder(url: null), _downloader, _marker, _claude, _log);
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
+
+        Assert.Contains("package URL not found", error.Message);
+    }
+
+    [Fact]
+    public async Task DeadChainIsRaisedOnceAndCheckedAfter()
+    {
+        // цепочка считается живой, как только оркестратор её поднял (EnsureRunningAsync)
+        var updater = Create(health: () => _chain.EnsureCalls > 0);
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.Installed, result.Outcome);
+        Assert.Equal(1, _chain.EnsureCalls);
+    }
+
+    [Fact]
+    public async Task ChainFailureStopsBeforeDownload()
+    {
+        _chain.Failure = new ChainException("daemon", new IOException("UAC declined"));
+        var updater = Create(healthy: false);
+
+        await Assert.ThrowsAsync<ChainException>(() =>
+            updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
+
+        Assert.Empty(_downloader.Downloads);
+    }
+
+    [Fact]
+    public async Task DownloadOnlyDoesNotInstall()
+    {
+        var updater = Create();
+
+        var result = await updater.RunAsync(new UpdateOptions { DownloadOnly = true }, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.Downloaded, result.Outcome);
+        Assert.Empty(_appx.AddedFiles);
+        Assert.True(File.Exists(result.PackageFile));
+    }
+
+    [Fact]
+    public async Task FullRunDownloadsVerifiesInstalls()
+    {
+        var updater = Create();
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.Installed, result.Outcome);
+        Assert.Equal("2.26454.2.0", result.Installed?.Version);
+        Assert.Equal("2.26455.1.0", result.InstalledAfter?.Version);
+        var file = Assert.Single(_appx.AddedFiles);
+        Assert.Equal(result.PackageFile, file);
+        Assert.StartsWith(_config.Updater.CacheDir, file);
+        Assert.False(File.Exists(file)); // пакет удалён из кэша после установки
+    }
+
+    [Fact]
+    public async Task KeepFileLeavesPackageInCache()
+    {
+        var updater = Create();
+
+        var result = await updater.RunAsync(new UpdateOptions { KeepFile = true }, null, null, CancellationToken.None);
+
+        Assert.True(File.Exists(result.PackageFile));
+    }
+
+    [Fact]
+    public async Task ForceProceedsWhenUpToDate()
+    {
+        var updater = Create(
+            healthy: true,
+            journalUrl: "https://downloads.claude.ai/releases/win32/x64/2.26454.2/Claude-x.msix");
+
+        var result = await updater.RunAsync(new UpdateOptions { Force = true }, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.Installed, result.Outcome);
+        Assert.Single(_downloader.Downloads);
+    }
+
+    [Fact]
+    public async Task PublisherMismatchStopsBeforeInstall()
+    {
+        _downloader.Publisher = "CN=Someone Else";
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
+
+        Assert.Contains("publisher mismatch", error.Message);
+        Assert.Empty(_appx.AddedFiles);
+    }
+
+    // --- Установка и закрытие Claude ---
+
+    [Fact]
+    public async Task InstallClosesClaudeWhenItIsRunning()
+    {
+        var processes = new[] { new FakeClaudeProcess(), new FakeClaudeProcess() };
+        _claude.Processes = processes;
+        _claude.CloseAfterRequest = true; // после CloseMainWindow процессы исчезают
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.All(processes, p => Assert.Equal(1, p.Closes));
+        Assert.All(processes, p => Assert.Equal(0, p.Kills));
+    }
+
+    [Fact]
+    public async Task StubbornClaudeIsKilled()
+    {
+        var processes = new[] { new FakeClaudeProcess() };
+        _claude.Processes = processes;
+        _claude.CloseAfterRequest = false; // сам не закроется
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.True(processes[0].Closes >= 1);
+        Assert.Equal(1, processes[0].Kills);
+    }
+
+    [Fact]
+    public async Task KeepRunningSkipsClosingAndStillInstalls()
+    {
+        _claude.Processes = [new FakeClaudeProcess()];
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, new UpdateOptions { KeepRunning = true }, null, CancellationToken.None);
+
+        Assert.All(_claude.Processes, p => Assert.Equal(0, p.Closes));
+        Assert.Single(_appx.AddedFiles);
+    }
+
+    [Fact]
+    public async Task InstallWithoutClaudeRunningDoesNotCloseAnything()
+    {
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal(1, _claude.FindCalls); // один опрос «запущен ли» — и дальше ничего
+        Assert.Empty(_claude.Processes);
+    }
+
+    [Fact]
+    public async Task InstallFailsWhenAddPackageFails()
+    {
+        _appx.AddFailure = new IOException("deployment blocked (0x80073CF9)");
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None));
+
+        Assert.Contains("deployment blocked", error.Message); // текст движка доносится как есть
+        Assert.True(File.Exists(package)); // неудача — пакет не удаляем
+    }
+
+    // --- Скачивание: адрес, место, маркер ---
+
+    [Fact]
+    public async Task DownloadRejectsNonMsixUrl()
+    {
+        var updater = Create();
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            updater.DownloadAsync("https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude.zip", null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DownloadChecksDiskSpaceBeforeStarting()
+    {
+        string? asked = null;
+        var updater = Create(freeSpace: dir =>
+        {
+            asked = dir;
+            return 1024; // места нет
+        });
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.DownloadAsync(JournalUrl.ToString(), null, CancellationToken.None));
+
+        Assert.Contains("not enough disk space", error.Message);
+        Assert.Equal(_config.Updater.CacheDir, asked);
+        Assert.Empty(_downloader.Downloads);
+    }
+
+    [Fact]
+    public async Task DownloadKeepsActivityMarkerFresh()
+    {
+        var updater = Create();
+
+        await updater.DownloadAsync(JournalUrl.ToString(), null, CancellationToken.None);
+
+        Assert.True(File.Exists(_marker.Path)); // автостоп не погасит цепочку под загрузкой
+    }
+
+    [Fact]
+    public async Task IsClaudeRunningReflectsProcessSource()
+    {
+        var updater = Create();
+        Assert.False(updater.IsClaudeRunning());
+        _claude.Processes = [new FakeClaudeProcess()];
+        Assert.True(updater.IsClaudeRunning());
+    }
+
+    // --- Проверка пакета ---
+
+    [Fact]
+    public async Task VerifyFailsWithoutManifest()
+    {
+        // архив без AppxManifest.xml — не одиночный MSIX
+        var plain = Path.Combine(_root, "no-manifest.msix");
+        using (ZipFile.Open(plain, ZipArchiveMode.Create))
+        {
+            // пустой архив
+        }
+
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() => updater.VerifyAsync(plain, CancellationToken.None));
+
+        Assert.Contains("no AppxManifest.xml", error.Message);
+    }
+
+    // --- Разбор адресов и JSON ---
+
+    [Theory]
+    [InlineData(
+        "не удалось получить сеанс размещения для https://downloads.claude.ai/\nreleases/win32/x64/2.26455.1/Claude-abc.msix",
+        "https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-abc.msix")]
+    [InlineData("ошибка 0x80072EE2 для 'https://downloads.claude.ai/pkg/Claude-x.msix?token=1'", "https://downloads.claude.ai/pkg/Claude-x.msix")]
+    [InlineData("какая-то другая ошибка про https://example.com/a.msix", null)]
+    public void JournalMessageYieldsPackageUrl(string message, string? expected)
+    {
+        Assert.Equal(expected, PackageUrl.ExtractFromMessage(message, "downloads.claude.ai"));
+    }
+
+    [Theory]
+    [InlineData("https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-abc.msix", "2.26455.1")]
+    [InlineData("https://downloads.claude.ai/somewhere/else/Claude-abc.msix", null)]
+    public void OfferedVersionComesFromReleasePath(string url, string? expected)
+    {
+        Assert.Equal(expected, PackageUrl.ParseOfferedVersion(url));
+    }
+
+    [Theory]
+    [InlineData("https://downloads.claude.ai/x/Claude-a.msix?sig=123", "Claude-a.msix")]
+    [InlineData("https://downloads.claude.ai/x/Claude-a.zip", "")]
+    [InlineData("https://downloads.claude.ai/", "")]
+    public void FileNameIgnoresQueryAndRequiresMsix(string url, string expected)
+    {
+        Assert.Equal(expected, PackageUrl.ParseFileName(url));
+    }
+
+    [Theory]
+    [InlineData("https://downloads.claude.ai/x/Claude-a.msix", true)]
+    [InlineData("https://downloads.claude.ai/x/Claude-a.msix?sig=1", true)]
+    [InlineData("http://downloads.claude.ai/x/Claude-a.msix", false)]
+    [InlineData("https://downloads.claude.ai/x/Claude-a.zip", false)]
+    public void ManualUrlValidityRequiresHttpsAndMsix(string url, bool expected)
+    {
+        Assert.Equal(expected, PackageUrl.IsValidPackageUrl(url));
+    }
+
+    [Fact]
+    public void PackageJsonParsesSingleObject()
+    {
+        var package = PowerShellAppxPackageSource.ParsePackageJson(
+            """
+            {"Name":"Claude","Version":"2.26454.2.0","Publisher":"CN=Anthropic","InstallLocation":"C:\\Program Files\\WindowsApps\\Claude_1.0.2.0_x64__anthropic"}
+            """);
+
+        Assert.NotNull(package);
+        Assert.Equal("Claude", package.Name);
+        Assert.Equal("2.26454.2.0", package.Version);
+        Assert.Equal("CN=Anthropic", package.Publisher);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("[]")]
+    public void PackageJsonEmptyOutputMeansNoPackage(string json)
+    {
+        Assert.Null(PowerShellAppxPackageSource.ParsePackageJson(json));
+    }
+
+    [Fact]
+    public void MsixIdentityIsReadFromManifest()
+    {
+        var package = WritePackageSync(MatchingPublisher, _root);
+
+        var identity = MsixPackage.TryReadIdentity(package);
+
+        Assert.NotNull(identity);
+        Assert.Equal("Claude", identity.Name);
+        Assert.Equal("2.26455.1.0", identity.Version);
+        Assert.Equal(MatchingPublisher, identity.Publisher);
+        Assert.Equal("x64", identity.Architecture);
+    }
+
+    [Fact]
+    public void MsixWithoutManifestYieldsNullIdentity()
+    {
+        var path = Path.Combine(_root, "empty.msix");
+        using (ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+        }
+
+        Assert.Null(MsixPackage.TryReadIdentity(path));
+    }
+
+    public void Dispose()
+    {
+        _log.Dispose();
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private async Task<string> WritePackageAsync(string publisher)
+    {
+        var path = Path.Combine(_root, $"pkg-{Guid.NewGuid():N}.msix");
+        await Task.Run(() => WritePackage(path, publisher));
+        return path;
+    }
+
+    private static string WritePackageSync(string publisher, string root) =>
+        WritePackage(Path.Combine(root, $"pnr-pkg-{Guid.NewGuid():N}.msix"), publisher);
+
+    private static string WritePackage(string path, string publisher)
+    {
+        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        var entry = zip.CreateEntry("AppxManifest.xml");
+        using var writer = new StreamWriter(entry.Open());
+        writer.Write($"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Identity Name="Claude" Version="2.26455.1.0" Publisher="{publisher}" ProcessorArchitecture="x64"/>
+            </Package>
+            """);
+        return path;
+    }
+
+    private sealed class FakeChain : IChainSupervisor
+    {
+        public int EnsureCalls { get; private set; }
+
+        public ChainException? Failure { get; set; }
+
+        public Task<ChainState> GetStateAsync(CancellationToken ct) => Task.FromResult(new ChainState(
+            DaemonHttpListening: true, DaemonProcessAlive: true, KeeperRunning: true,
+            BackendState: "Running", ProxyRunning: true, ProxyHealthy: true));
+
+        public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+        {
+            EnsureCalls++;
+            return Failure is null ? Task.CompletedTask : Task.FromException(Failure);
+        }
+
+        public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class FakeAppxSource : IAppxPackageSource
+    {
+        public InstalledPackage? Installed { get; set; } = new("Claude", "2.26454.2.0", MatchingPublisher, @"C:\WindowsApps\Claude");
+
+        public InstalledPackage? AfterInstall { get; set; } = new("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude");
+
+        public List<string> AddedFiles { get; } = [];
+
+        public Exception? AddFailure { get; set; }
+
+        public Task<InstalledPackage?> GetInstalledAsync(string packageName, CancellationToken ct) =>
+            Task.FromResult(Installed);
+
+        public Task AddPackageAsync(string packageFile, CancellationToken ct)
+        {
+            AddedFiles.Add(packageFile);
+            if (AddFailure is not null)
+            {
+                return Task.FromException(AddFailure);
+            }
+
+            Installed = AfterInstall;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeUrlFinder(string? url) : IUpdateUrlFinder
+    {
+        public Task<string?> FindLatestPackageUrlAsync(CancellationToken ct) => Task.FromResult(url);
+    }
+
+    private sealed class FakeDownloader : IMsixDownloader
+    {
+        public string Publisher { get; set; } = MatchingPublisher;
+
+        public List<string> Downloads { get; } = [];
+
+        public Task<long> GetLengthAsync(string url, CancellationToken ct) => Task.FromResult(1_000L);
+
+        public async Task DownloadAsync(string url, string targetFile, long expectedLength, IProgress<(long DoneBytes, long TotalBytes)>? progress, CancellationToken ct)
+        {
+            Downloads.Add(url);
+            progress?.Report((expectedLength / 2, expectedLength));
+            await Task.Run(() => WritePackage(targetFile, Publisher));
+            progress?.Report((expectedLength, expectedLength));
+        }
+    }
+
+    private sealed class FakeClaudeProcess : IClaudeProcessHandle
+    {
+        public int Closes { get; private set; }
+
+        public int Kills { get; private set; }
+
+        public bool CloseMainWindow()
+        {
+            Closes++;
+            return true;
+        }
+
+        public void Kill() => Kills++;
+    }
+
+    private sealed class FakeClaudeSource : IClaudeProcessSource
+    {
+        public IReadOnlyList<FakeClaudeProcess> Processes { get; set; } = [];
+
+        /// <summary>Процессы исчезают, как только их попросили закрыться (вежливый выход).</summary>
+        public bool CloseAfterRequest { get; set; }
+
+        public int FindCalls { get; private set; }
+
+        public IReadOnlyList<IClaudeProcessHandle> Find(string processName)
+        {
+            FindCalls++;
+            if (CloseAfterRequest && Processes.All(p => p.Closes > 0))
+            {
+                return [];
+            }
+
+            return Processes.Cast<IClaudeProcessHandle>().ToList();
+        }
+    }
+}

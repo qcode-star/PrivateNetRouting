@@ -16,6 +16,8 @@ public sealed class AppConfig
     public LauncherConfig Launcher { get; set; } = new();
 
     public WatchdogConfig Watchdog { get; set; } = new();
+
+    public UpdaterConfig Updater { get; set; } = new();
 }
 
 /// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
@@ -93,6 +95,53 @@ public sealed class WatchdogConfig
 
     /// <summary>Дистрибутив WSL с хостом Claude Desktop; пусто — WSL-хост при автостопе не трогается.</summary>
     public string WslDistro { get; set; } = "";
+}
+
+/// <summary>
+/// Ручное обновление Claude Desktop (MSIX): установленная версия, адрес пакета из журнала
+/// AppX (или вручную), многопоточная докачка фрагментами через прокси-цепочку, сверка
+/// Publisher, закрытие Claude и Add-AppxPackage (порт схемы claude-desktop-update).
+/// </summary>
+public sealed class UpdaterConfig
+{
+    /// <summary>Имя MSIX-пакета Claude Desktop (Get-AppxPackage -Name).</summary>
+    public string PackageName { get; set; } = "Claude";
+
+    /// <summary>Хост раздачи пакетов (публичная константа Anthropic; адрес ищется в журнале AppX).</summary>
+    public string PackageHost { get; set; } = "downloads.claude.ai";
+
+    /// <summary>Кэш пакетов и фрагментов докачки; переменные окружения раскрываются.</summary>
+    public string CacheDir { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\update-cache";
+
+    /// <summary>Windows PowerShell (Get-AppxPackage/Add-AppxPackage/Get-WinEvent) — компонент ОС.</summary>
+    public string PowerShellPath { get; set; } = @"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe";
+
+    /// <summary>Имя процесса Claude Desktop — закрывается перед установкой.</summary>
+    public string ClaudeProcessName { get; set; } = "Claude";
+
+    /// <summary>Сколько свежих событий журнала AppX просматривать при поиске адреса.</summary>
+    public int JournalMaxEvents { get; set; } = 400;
+
+    /// <summary>Размер фрагмента докачки.</summary>
+    public int ChunkBytes { get; set; } = 8 * 1024 * 1024;
+
+    /// <summary>Фрагментов качать параллельно (один поток через цепочку упирается в задержку DoH).</summary>
+    public int ParallelChunks { get; set; } = 6;
+
+    /// <summary>Повторных попыток на фрагмент после неудачи.</summary>
+    public int ChunkRetries { get; set; } = 3;
+
+    /// <summary>Пауза между попытками фрагмента, сек.</summary>
+    public int RetryDelaySeconds { get; set; } = 5;
+
+    /// <summary>Таймаут одной попытки фрагмента, сек (как --max-time curl прежней схемы).</summary>
+    public int ChunkTimeoutSeconds { get; set; } = 1800;
+
+    /// <summary>Сколько секунд ждать самостоятельного закрытия Claude перед гашением процесса.</summary>
+    public int CloseWaitSeconds { get; set; } = 25;
+
+    /// <summary>Пауза после гашения процессов Claude перед установкой, сек.</summary>
+    public int KillSettleSeconds { get; set; } = 3;
 }
 
 public sealed class LoggingConfig

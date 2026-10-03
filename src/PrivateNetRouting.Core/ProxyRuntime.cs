@@ -7,7 +7,9 @@ using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Runtime;
 using PrivateNetRouting.Core.SystemOps;
+using PrivateNetRouting.Core.Updater;
 using PrivateNetRouting.Core.Watchdog;
+using System.Net;
 
 namespace PrivateNetRouting.Core;
 
@@ -31,13 +33,19 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public WatchdogService Watchdog { get; }
 
+    public ClaudeUpdater Updater { get; }
+
     private readonly FileLog _chainLog;
 
     private readonly FileLog _launcherLog;
 
     private readonly FileLog _watchdogLog;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog)
+    private readonly FileLog _updaterLog;
+
+    private readonly HttpClient _updaterHttp;
+
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp)
     {
         Config = config;
         Log = log;
@@ -49,6 +57,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _launcherLog = launcherLog;
         Watchdog = watchdog;
         _watchdogLog = watchdogLog;
+        Updater = updater;
+        _updaterLog = updaterLog;
+        _updaterHttp = updaterHttp;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -135,7 +146,33 @@ public sealed class ProxyRuntime : IAsyncDisposable
             fp.ActivityMarkerPath);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog);
+        var updaterLog = new FileLog(
+            Path.Combine(config.Logging.Directory, "updater.log"),
+            config.Logging.MaxBytes,
+            config.Logging.Keep);
+        // скачивание идёт через собственный forward-прокси (DoH-резолв, дозвон SOCKS5);
+        // общий таймаут HttpClient отключён — лимит задаётся на фрагмент (chunkTimeoutSeconds)
+        var updaterHttp = new HttpClient(new SocketsHttpHandler
+        {
+            Proxy = new WebProxy("http://" + fp.Listen),
+            UseProxy = true,
+        })
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
+        var powershell = new PowerShellRunner(config.Updater.PowerShellPath);
+        var updater = new ClaudeUpdater(
+            config,
+            chain,
+            ct => ChainHealthAsync(config, ct),
+            new PowerShellAppxPackageSource(powershell, updaterLog),
+            new PowerShellJournalUrlFinder(config.Updater, powershell, updaterLog),
+            new FragmentDownloader(updaterHttp, config.Updater, updaterLog),
+            marker,
+            new RunningClaudeProcessSource(),
+            updaterLog);
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
@@ -174,6 +211,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _chainLog.Dispose();
         _launcherLog.Dispose();
         _watchdogLog.Dispose();
+        _updaterLog.Dispose();
+        _updaterHttp.Dispose();
         Log.Dispose();
     }
 }
