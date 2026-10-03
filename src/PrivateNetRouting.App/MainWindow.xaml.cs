@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private bool _chainBusy;
     private bool _launchBusy;
     private bool _fillingLanguages;
+    private UpdateWindow? _updateWindow;
     private CancellationTokenSource? _watchdogCts;
     private bool _watchdogSyncing;
 
@@ -250,6 +251,23 @@ public partial class MainWindow : Window
             _viewModel.SetLaunchBusy(false);
             await RefreshChainAsync();
         }
+    }
+
+    /// <summary>
+    /// Окно обновления Claude Desktop (MSIX через прокси-цепочку): одно на приложение,
+    /// повторный клик активирует открытое.
+    /// </summary>
+    private void OnUpdateClaude(object sender, RoutedEventArgs e)
+    {
+        if (_updateWindow is not null)
+        {
+            _updateWindow.Activate();
+            return;
+        }
+
+        _updateWindow = new UpdateWindow(_runtime) { Owner = this };
+        _updateWindow.Closed += (_, _) => _updateWindow = null;
+        _updateWindow.Show();
     }
 
     /// <summary>Наполняет селектор языка: авто + поддержанные; выбор — по значению конфига.</summary>

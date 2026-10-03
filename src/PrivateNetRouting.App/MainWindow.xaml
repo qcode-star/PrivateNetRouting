@@ -98,6 +98,8 @@
         <!-- Запуск Claude: проверка/подъём цепочки и старт с флагами прокси (заставка — при ожидании) -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
             <Button Content="{DynamicResource Main.Button.LaunchClaude}" Width="160" Click="OnLaunchClaude" IsEnabled="{Binding CanLaunch}"/>
+            <Button Content="{DynamicResource Main.Button.UpdateClaude}" Width="150" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
+                    Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
         </StackPanel>
 
         <!-- Кнопки -->

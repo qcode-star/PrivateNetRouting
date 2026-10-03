@@ -1,0 +1,603 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using PrivateNetRouting.App.Localization;
+using PrivateNetRouting.Core;
+using PrivateNetRouting.Core.Chain;
+using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Updater;
+
+namespace PrivateNetRouting.App;
+
+/// <summary>
+/// Окно обновления Claude Desktop (порт ТЗ claude-update-gui): шаги «Проверка версий →
+/// Прокси-цепочка → Скачивание → Установка», проверка версий до подъёма цепочки (без
+/// лишнего UAC), полоса прогресса со скоростью/ETA по сэмплам, пауза перед установкой при
+/// запущенном Claude, отложенная установка и «Повторить». Установка не прерывается:
+/// «Остановить» и закрытие на этом шаге недоступны. Все обращения к ядру — await,
+/// окно не блокируется; прогресс приходит через Progress&lt;T&gt; в UI-поток.
+/// </summary>
+public partial class UpdateWindow : Window
+{
+    private static readonly string[] StepOrder = ["Check", "Chain", "Download", "Install"];
+
+    private readonly ProxyRuntime _runtime;
+    private readonly string _logPath;
+    private readonly TextBlock[] _glyphs;
+    private readonly TextBlock[] _labels;
+    private readonly TextBlock[] _details;
+    private readonly ChainStepStatus[] _states;
+    private readonly DispatcherTimer _clock;
+    private readonly Stopwatch _watch = new();
+    private readonly Queue<(DateTimeOffset At, long Bytes)> _samples = new();
+    private readonly object _sampleGate = new();
+
+    private CancellationTokenSource? _cts;
+    private TaskCompletionSource<bool>? _pauseDecision;
+    private UpdatePhase _phase = UpdatePhase.Check;
+    private string? _packageFile;
+    private string? _beforeVersion;
+    private bool _terminal;
+    private long _doneBytes;
+    private long _totalBytes;
+    private DateTimeOffset _lastProgressAt = DateTimeOffset.Now;
+    private bool _stallWarned;
+    private string? _detailKey;
+    private object?[] _detailArgs = [];
+    private string _detailDirect = "";
+    private string? _hintKey;
+    private object?[] _hintArgs = [];
+    private string _hintDirect = "";
+
+    public UpdateWindow(ProxyRuntime runtime)
+    {
+        InitializeComponent();
+        _runtime = runtime;
+        _logPath = runtime.Updater.Log.FilePath;
+
+        _glyphs = new TextBlock[StepOrder.Length];
+        _labels = new TextBlock[StepOrder.Length];
+        _details = new TextBlock[StepOrder.Length];
+        _states = new ChainStepStatus[StepOrder.Length];
+        for (var i = 0; i < StepOrder.Length; i++)
+        {
+            _states[i] = ChainStepStatus.Pending;
+            var row = new Grid { Height = 30 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _glyphs[i] = new TextBlock { FontSize = 13 };
+            Grid.SetColumn(_glyphs[i], 0);
+            _labels[i] = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(_labels[i], 1);
+            _details[i] = new TextBlock
+            {
+                FontSize = 11,
+                Foreground = FindResource("Brush.Idle") as Brush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            Grid.SetColumn(_details[i], 2);
+            row.Children.Add(_glyphs[i]);
+            row.Children.Add(_labels[i]);
+            row.Children.Add(_details[i]);
+            StepsPanel.Children.Add(row);
+        }
+
+        _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
+        _clock.Tick += (_, _) => OnClockTick();
+        Closed += (_, _) =>
+        {
+            Loc.LanguageChanged -= OnLanguageChanged;
+            _clock.Stop();
+        };
+        Loc.LanguageChanged += OnLanguageChanged;
+        ApplyStrings();
+        Loaded += async (_, _) =>
+        {
+            if (_cts is null && !_terminal)
+            {
+                await StartAsync(null);
+            }
+        };
+    }
+
+    /// <summary>Полный цикл: проверка → цепочка → скачивание → проверка пакета → пауза → установка.</summary>
+    private async Task StartAsync(string? manualUrl)
+    {
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        _terminal = false;
+        _stallWarned = false;
+        _doneBytes = 0;
+        _totalBytes = 0;
+        _samples.Clear();
+        _beforeVersion = null;
+        _watch.Restart();
+        _clock.Start();
+        ElapsedText.Text = "0:00";
+        Progress.Visibility = Visibility.Visible;
+        Progress.IsIndeterminate = true;
+        Progress.Value = 0;
+        UrlPanel.Visibility = Visibility.Collapsed;
+        BtnStop.Visibility = Visibility.Visible;
+        BtnRetry.Visibility = Visibility.Collapsed;
+        BtnLaunch.Visibility = Visibility.Collapsed;
+        BtnInstallNow.Visibility = Visibility.Collapsed;
+        BtnDefer.Visibility = Visibility.Collapsed;
+        SetHintDirect("");
+        for (var i = 0; i < StepOrder.Length; i++)
+        {
+            SetStep(i, ChainStepStatus.Pending);
+        }
+
+        try
+        {
+            // Проверка версий — до цепочки: «нечего ставить» не поднимает ничего и не просит UAC
+            SetPhase(UpdatePhase.Check);
+            SetStep(0, ChainStepStatus.Active);
+            SetDetailKey("Update.Check.Running");
+
+            if (manualUrl is not null && !PackageUrl.IsValidPackageUrl(manualUrl))
+            {
+                UrlBox.Text = manualUrl;
+                UrlPanel.Visibility = Visibility.Visible;
+                SetDetailKey("Update.Check.InvalidUrl");
+                _clock.Stop();
+                UrlBox.Focus();
+                return; // ждём другой адрес от пользователя
+            }
+
+            var check = await _runtime.Updater.CheckAsync(new UpdateOptions { ManualUrl = manualUrl }, ct);
+            if (check.Installed is null)
+            {
+                SetStep(0, ChainStepStatus.Failed);
+                SetDetailKey("Update.Check.NotInstalled");
+                Finish(success: false);
+                return;
+            }
+
+            _beforeVersion = check.Installed.Version;
+            SetStep(0, ChainStepStatus.Done, check.Installed.Version);
+
+            if (check.UpToDate)
+            {
+                for (var i = 1; i < StepOrder.Length; i++)
+                {
+                    SetStep(i, ChainStepStatus.Skipped);
+                }
+
+                SetDetailKey("Update.Check.UpToDateFmt", check.Installed.Version);
+                Finish(success: true);
+                return;
+            }
+
+            if (check.PackageUrl is null)
+            {
+                UrlPanel.Visibility = Visibility.Visible;
+                SetDetailKey("Update.Check.NoUrl");
+                _clock.Stop();
+                UrlBox.Focus();
+                return; // адрес вводится вручную
+            }
+
+            SetDetailKey("Update.Check.AvailableFmt", check.Installed.Version, check.OfferedVersion ?? "?");
+
+            // Цепочка: живой CONNECT сразу закрывает шаг, мёртвая — подъём с подшагами (возможен UAC)
+            SetPhase(UpdatePhase.Chain);
+            SetStep(1, ChainStepStatus.Active);
+            await _runtime.Updater.EnsureChainAsync(new Progress<ChainStep>(OnChainStep), null, ct);
+            SetStep(1, ChainStepStatus.Done);
+            SetHintDirect("");
+
+            // Скачивание фрагментами: полоса определённая, скорость/ETA — по сэмплам окна ~10 с
+            SetPhase(UpdatePhase.Download);
+            SetStep(2, ChainStepStatus.Active);
+            var updateProgress = new Progress<UpdateProgress>(OnUpdateProgress);
+            _packageFile = await _runtime.Updater.DownloadAsync(check.PackageUrl, updateProgress, ct);
+            SetStep(2, ChainStepStatus.Done, ByteSize.Format(_totalBytes));
+            SetHintDirect("");
+
+            // Проверка пакета: манифест и Publisher
+            var identity = await _runtime.Updater.VerifyAsync(_packageFile, ct);
+            SetDetailKey("Update.Verify.OkFmt", identity.Version, identity.Publisher);
+
+            // Пауза перед установкой — только если Claude запущен (закроется)
+            if (_runtime.Updater.IsClaudeRunning())
+            {
+                Progress.Visibility = Visibility.Collapsed;
+                SetDetailKey("Update.Pause.Message");
+                BtnInstallNow.Visibility = Visibility.Visible;
+                BtnDefer.Visibility = Visibility.Visible;
+                BtnStop.IsEnabled = true;
+                _pauseDecision = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var installNow = await _pauseDecision.Task;
+                _pauseDecision = null;
+                BtnInstallNow.Visibility = Visibility.Collapsed;
+                BtnDefer.Visibility = Visibility.Collapsed;
+                if (!installNow)
+                {
+                    SetStep(3, ChainStepStatus.Skipped);
+                    SetDetailKey("Update.Done.DeferredFmt", _packageFile);
+                    Finish(success: true);
+                    return;
+                }
+
+                Progress.Visibility = Visibility.Visible;
+            }
+
+            // Установка: не прерывается — «Остановить»/закрытие недоступны
+            SetPhase(UpdatePhase.Install);
+            SetStep(3, ChainStepStatus.Active);
+            Progress.IsIndeterminate = true;
+            var after = await _runtime.Updater.InstallAsync(_packageFile, UpdateOptions.Default, updateProgress, ct);
+            SetStep(3, ChainStepStatus.Done, after.Version);
+            SetDetailKey("Update.Done.InstalledFmt", _beforeVersion, after.Version);
+            if (after.Version == _beforeVersion)
+            {
+                SetHintKey("Update.Install.VersionWarn");
+            }
+
+            Finish(success: true, showLaunch: true, progressFull: true);
+        }
+        catch (OperationCanceledException)
+        {
+            if (_totalBytes > 0)
+            {
+                SetDetailKey("Update.Done.StoppedFmt", ByteSize.Format(_doneBytes), ByteSize.Format(_totalBytes));
+            }
+            else
+            {
+                SetDetailKey("Update.Done.Stopped");
+            }
+
+            Finish(success: false);
+        }
+        catch (Exception ex)
+        {
+            MarkCurrentStepFailed();
+            SetDetailDirect(ex.Message);
+            if (_phase == UpdatePhase.Install && _packageFile is not null)
+            {
+                SetHintKey("Update.Install.RightsHintFmt", _packageFile);
+            }
+
+            Finish(success: false);
+        }
+    }
+
+    private void OnChainStep(ChainStep step)
+    {
+        if (_phase != UpdatePhase.Chain)
+        {
+            return;
+        }
+
+        _details[1].Text = $"{step.Component}: {step.Detail}";
+        if (step.Status == ChainStepStatus.Active && !string.IsNullOrEmpty(step.Detail))
+        {
+            SetDetailDirect(step.Detail);
+        }
+
+        if (step.Component == "Daemon" && step.Status == ChainStepStatus.Active)
+        {
+            SetHintKey("Update.Hint.Uac");
+        }
+    }
+
+    private void OnUpdateProgress(UpdateProgress p)
+    {
+        if (p.Phase == UpdatePhase.Download && p.TotalBytes > 0)
+        {
+            _doneBytes = p.DoneBytes;
+            _totalBytes = p.TotalBytes;
+            _lastProgressAt = DateTimeOffset.Now;
+            _stallWarned = false;
+            lock (_sampleGate)
+            {
+                var now = DateTimeOffset.Now;
+                _samples.Enqueue((now, p.DoneBytes));
+                var cutoff = now - TimeSpan.FromSeconds(12);
+                while (_samples.Count > 2 && _samples.Peek().At < cutoff)
+                {
+                    _samples.Dequeue();
+                }
+            }
+
+            Progress.IsIndeterminate = false;
+            Progress.Value = 100.0 * p.DoneBytes / p.TotalBytes;
+            UpdateDownloadDetail();
+        }
+        else if (p.Message.Length > 0)
+        {
+            SetDetailDirect(p.Message);
+        }
+    }
+
+    private void UpdateDownloadDetail()
+    {
+        double rate = 0;
+        lock (_sampleGate)
+        {
+            if (_samples.Count >= 2)
+            {
+                var oldest = _samples.Peek();
+                var newest = _samples.Last();
+                var seconds = (newest.At - oldest.At).TotalSeconds;
+                if (seconds >= 1)
+                {
+                    rate = (newest.Bytes - oldest.Bytes) / seconds;
+                }
+            }
+        }
+
+        var eta = rate > 1 && _totalBytes > _doneBytes
+            ? TimeSpan.FromSeconds((_totalBytes - _doneBytes) / rate)
+            : TimeSpan.Zero;
+        SetDetailKey(
+            "Update.Download.RunningFmt",
+            ByteSize.Format(_doneBytes),
+            ByteSize.Format(_totalBytes),
+            ByteSize.Format((long)Math.Max(rate, 0)),
+            FormatEta(eta));
+    }
+
+    private void OnClockTick()
+    {
+        ElapsedText.Text = $"{(int)_watch.Elapsed.TotalMinutes}:{_watch.Elapsed.Seconds:00}";
+        if (!_terminal && _phase == UpdatePhase.Download && _totalBytes > 0)
+        {
+            UpdateDownloadDetail();
+            if (!_stallWarned && DateTimeOffset.Now - _lastProgressAt > TimeSpan.FromMinutes(3))
+            {
+                _stallWarned = true;
+                SetHintKey("Update.Download.StalledFmt", 3);
+            }
+        }
+    }
+
+    private void SetPhase(UpdatePhase phase)
+    {
+        _phase = phase;
+        BtnStop.IsEnabled = phase is UpdatePhase.Chain or UpdatePhase.Download;
+        BtnClose.IsEnabled = phase != UpdatePhase.Install;
+    }
+
+    private void SetStep(int index, ChainStepStatus status, string detail = "")
+    {
+        _states[index] = status;
+        _glyphs[index].Text = status switch
+        {
+            ChainStepStatus.Done => "✓",
+            ChainStepStatus.Active => "●",
+            ChainStepStatus.Failed => "✕",
+            ChainStepStatus.Skipped => "—",
+            _ => "○",
+        };
+        var brush = (status switch
+        {
+            ChainStepStatus.Done => FindResource("Brush.Ok"),
+            ChainStepStatus.Active => FindResource("Brush.Accent"),
+            ChainStepStatus.Failed => FindResource("Brush.Bad"),
+            _ => FindResource("Brush.Idle"),
+        }) as Brush;
+        _glyphs[index].Foreground = brush;
+        _labels[index].Foreground = status == ChainStepStatus.Pending ? FindResource("Brush.Idle") as Brush : brush;
+        _details[index].Text = detail;
+    }
+
+    private void MarkCurrentStepFailed()
+    {
+        var index = _phase switch
+        {
+            UpdatePhase.Check => 0,
+            UpdatePhase.Chain => 1,
+            UpdatePhase.Download or UpdatePhase.Verify => 2,
+            UpdatePhase.Install => 3,
+            _ => -1,
+        };
+        if (index >= 0 && _states[index] is ChainStepStatus.Pending or ChainStepStatus.Active)
+        {
+            SetStep(index, ChainStepStatus.Failed);
+        }
+    }
+
+    /// <summary>Терминальное состояние: часики замирают, «Остановить» исчезает, появляется «Повторить»/«Запустить Claude».</summary>
+    private void Finish(bool success, bool showLaunch = false, bool progressFull = false)
+    {
+        _terminal = true;
+        _clock.Stop();
+        _pauseDecision?.TrySetResult(false);
+        _pauseDecision = null;
+        Progress.IsIndeterminate = false;
+        if (!success)
+        {
+            Progress.Visibility = Visibility.Collapsed;
+        }
+        else if (progressFull)
+        {
+            Progress.Value = 100;
+        }
+        else
+        {
+            Progress.Visibility = Visibility.Collapsed;
+        }
+
+        BtnStop.Visibility = Visibility.Collapsed;
+        BtnInstallNow.Visibility = Visibility.Collapsed;
+        BtnDefer.Visibility = Visibility.Collapsed;
+        BtnRetry.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
+        BtnLaunch.Visibility = showLaunch ? Visibility.Visible : Visibility.Collapsed;
+        BtnClose.IsEnabled = true;
+    }
+
+    private void OnStop(object sender, RoutedEventArgs e)
+    {
+        if (_pauseDecision is not null)
+        {
+            // в паузе стоп = отложка: пакет остаётся в кэше
+            _pauseDecision.TrySetResult(false);
+            return;
+        }
+
+        _cts?.Cancel();
+    }
+
+    private void OnInstallNow(object sender, RoutedEventArgs e) => _pauseDecision?.TrySetResult(true);
+
+    private void OnDefer(object sender, RoutedEventArgs e) => _pauseDecision?.TrySetResult(false);
+
+    private void OnRetry(object sender, RoutedEventArgs e) => _ = StartAsync(null);
+
+    private void OnContinueWithUrl(object sender, RoutedEventArgs e)
+    {
+        var url = UrlBox.Text.Trim();
+        if (url.Length == 0)
+        {
+            return;
+        }
+
+        _ = StartAsync(url);
+    }
+
+    private async void OnLaunchClaude(object sender, RoutedEventArgs e)
+    {
+        BtnLaunch.IsEnabled = false;
+        try
+        {
+            // лончер сам проверит/поднимет цепочку и передаст флаги прокси (как ярлык прежней схемы)
+            await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+            SetHintKey("Update.Launch.Done");
+        }
+        catch (Exception ex)
+        {
+            SetHintDirect(ex.Message);
+        }
+        finally
+        {
+            BtnLaunch.IsEnabled = true;
+        }
+    }
+
+    private void OnOpenLog(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (File.Exists(_logPath))
+            {
+                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{_logPath}\"")
+                {
+                    UseShellExecute = true,
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            SetHintDirect(ex.Message);
+        }
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_terminal)
+        {
+            if (_phase == UpdatePhase.Install)
+            {
+                e.Cancel = true;
+                SetHintKey("Update.Install.NoClose");
+                return;
+            }
+
+            if (_phase is UpdatePhase.Chain or UpdatePhase.Download)
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    Loc.S("Update.ConfirmClose"),
+                    Loc.S("Update.Title"),
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer == MessageBoxResult.No)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+
+            _pauseDecision?.TrySetResult(false);
+            _cts?.Cancel();
+        }
+
+        base.OnClosing(e);
+    }
+
+    private void SetDetailKey(string key, params object?[] args)
+    {
+        _detailKey = key;
+        _detailArgs = args;
+        _detailDirect = "";
+        RefreshDetail();
+    }
+
+    private void SetDetailDirect(string text)
+    {
+        _detailKey = null;
+        _detailDirect = text;
+        RefreshDetail();
+    }
+
+    private void RefreshDetail() => DetailText.Text = _detailKey is not null ? Loc.F(_detailKey, _detailArgs) : _detailDirect;
+
+    private void SetHintKey(string key, params object?[] args)
+    {
+        _hintKey = key;
+        _hintArgs = args;
+        _hintDirect = "";
+        RefreshHint();
+    }
+
+    private void SetHintDirect(string text)
+    {
+        _hintKey = null;
+        _hintDirect = text;
+        RefreshHint();
+    }
+
+    private void RefreshHint() => HintText.Text = _hintKey is not null ? Loc.F(_hintKey, _hintArgs) : _hintDirect;
+
+    private static string FormatEta(TimeSpan eta) => eta <= TimeSpan.Zero
+        ? "—"
+        : eta.TotalHours >= 1 ? $"~{(int)eta.TotalHours}h{eta.Minutes:00}m" : $"~{(int)eta.TotalMinutes}:{eta.Seconds:00}";
+
+    private void ApplyStrings()
+    {
+        Title = Loc.S("Update.Title");
+        HeaderText.Text = Loc.S("Update.Header");
+        SubHeaderText.Text = Loc.S("Update.SubHeader");
+        for (var i = 0; i < StepOrder.Length; i++)
+        {
+            _labels[i].Text = Loc.S($"Update.Step.{StepOrder[i]}");
+        }
+
+        BtnStop.Content = Loc.S("Update.Button.Stop");
+        BtnLog.Content = Loc.S("Update.Button.OpenLog");
+        BtnInstallNow.Content = Loc.S("Update.Button.InstallNow");
+        BtnDefer.Content = Loc.S("Update.Button.Defer");
+        BtnRetry.Content = Loc.S("Update.Button.Retry");
+        BtnLaunch.Content = Loc.S("Update.Button.LaunchClaude");
+        BtnClose.Content = Loc.S("Update.Button.Close");
+        UrlLabel.Text = Loc.S("Update.Url.Label");
+        BtnContinueUrl.Content = Loc.S("Update.Button.ContinueWithUrl");
+        RefreshDetail();
+        RefreshHint();
+    }
+
+    private void OnLanguageChanged() => ApplyStrings();
+}

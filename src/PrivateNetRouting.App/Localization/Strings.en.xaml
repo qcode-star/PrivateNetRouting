@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>
     <s:String x:Key="Main.Button.ChainDown">Stop chain</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
+    <s:String x:Key="Main.Button.UpdateClaude">Update Claude…</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Check.Running">checking (CONNECT roundtrip)...</s:String>
@@ -78,6 +79,44 @@
     <s:String x:Key="Splash.Fail.HintFmt">Details: {0}</s:String>
     <s:String x:Key="Splash.Button.OpenLog">Open log</s:String>
     <s:String x:Key="Splash.Button.Close">Close</s:String>
+
+    <!-- Update window (manual Claude Desktop MSIX update) -->
+    <s:String x:Key="Update.Title">Update Claude Desktop</s:String>
+    <s:String x:Key="Update.Header">Claude Desktop</s:String>
+    <s:String x:Key="Update.SubHeader">Manual update (MSIX)</s:String>
+    <s:String x:Key="Update.Step.Check">Versions</s:String>
+    <s:String x:Key="Update.Step.Chain">Proxy chain</s:String>
+    <s:String x:Key="Update.Step.Download">Download</s:String>
+    <s:String x:Key="Update.Step.Install">Install</s:String>
+    <s:String x:Key="Update.Check.Running">checking the installed version and the AppX journal</s:String>
+    <s:String x:Key="Update.Check.UpToDateFmt">Installed {0} — the version is up to date, nothing to install.</s:String>
+    <s:String x:Key="Update.Check.AvailableFmt">Installed {0} → offered {1}</s:String>
+    <s:String x:Key="Update.Check.NoUrl">The package URL was not found in the AppX journal. Launch Claude Desktop: its updater leaves a fresh address in the journal about once an hour. Or paste the package address (.msix) below.</s:String>
+    <s:String x:Key="Update.Check.InvalidUrl">This address does not point to an .msix package — paste another one.</s:String>
+    <s:String x:Key="Update.Check.NotInstalled">Claude Desktop is not installed as an MSIX package — there is nothing to update.</s:String>
+    <s:String x:Key="Update.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
+    <s:String x:Key="Update.Download.RunningFmt">{0} of {1} · {2}/s · {3} left</s:String>
+    <s:String x:Key="Update.Download.StalledFmt">No progress for {0} min — the downloader keeps retrying on its own.</s:String>
+    <s:String x:Key="Update.Verify.OkFmt">Package verified: {0}; the publisher matches ({1}).</s:String>
+    <s:String x:Key="Update.Pause.Message">The package is ready. Installation will close Claude — continue?</s:String>
+    <s:String x:Key="Update.Install.NoClose">Installation is in progress — do not close the window.</s:String>
+    <s:String x:Key="Update.Install.RightsHintFmt">If it complains about rights, run from an admin console:&#10;Add-AppxPackage -Path "{0}" -ForceApplicationShutdown</s:String>
+    <s:String x:Key="Update.Install.VersionWarn">Warning: the version did not change after installation — check the AppX journal.</s:String>
+    <s:String x:Key="Update.Done.InstalledFmt">Installed: {0} → {1}</s:String>
+    <s:String x:Key="Update.Done.Stopped">Stopped.</s:String>
+    <s:String x:Key="Update.Done.StoppedFmt">Stopped: downloaded {0} of {1}; the partial download is kept in the cache.</s:String>
+    <s:String x:Key="Update.Done.DeferredFmt">Installation deferred; the package is in the cache: {0}</s:String>
+    <s:String x:Key="Update.Launch.Done">Claude launched.</s:String>
+    <s:String x:Key="Update.Url.Label">Package address (.msix)</s:String>
+    <s:String x:Key="Update.Button.Stop">Stop</s:String>
+    <s:String x:Key="Update.Button.OpenLog">Open log</s:String>
+    <s:String x:Key="Update.Button.Close">Close</s:String>
+    <s:String x:Key="Update.Button.Retry">Retry</s:String>
+    <s:String x:Key="Update.Button.LaunchClaude">Launch Claude</s:String>
+    <s:String x:Key="Update.Button.InstallNow">Install now</s:String>
+    <s:String x:Key="Update.Button.Defer">Defer</s:String>
+    <s:String x:Key="Update.Button.ContinueWithUrl">Continue with this URL</s:String>
+    <s:String x:Key="Update.ConfirmClose">Stop the update and close?</s:String>
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Language</s:String>

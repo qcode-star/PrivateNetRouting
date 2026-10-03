@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Button.ChainUp">Поднять цепочку</s:String>
     <s:String x:Key="Main.Button.ChainDown">Остановить цепочку</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
+    <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude…</s:String>
 
     <!-- Результаты операций -->
     <s:String x:Key="Main.Check.Running">проверяю (CONNECT-roundtrip)...</s:String>
@@ -78,6 +79,44 @@
     <s:String x:Key="Splash.Fail.HintFmt">Подробности: {0}</s:String>
     <s:String x:Key="Splash.Button.OpenLog">Открыть лог</s:String>
     <s:String x:Key="Splash.Button.Close">Закрыть</s:String>
+
+    <!-- Окно обновления (ручное обновление Claude Desktop, MSIX) -->
+    <s:String x:Key="Update.Title">Обновление Claude Desktop</s:String>
+    <s:String x:Key="Update.Header">Claude Desktop</s:String>
+    <s:String x:Key="Update.SubHeader">Ручное обновление (MSIX)</s:String>
+    <s:String x:Key="Update.Step.Check">Версии</s:String>
+    <s:String x:Key="Update.Step.Chain">Прокси-цепочка</s:String>
+    <s:String x:Key="Update.Step.Download">Скачивание</s:String>
+    <s:String x:Key="Update.Step.Install">Установка</s:String>
+    <s:String x:Key="Update.Check.Running">смотрю установленную версию и журнал AppX</s:String>
+    <s:String x:Key="Update.Check.UpToDateFmt">Установлено {0} — версия актуальна, ставить нечего.</s:String>
+    <s:String x:Key="Update.Check.AvailableFmt">Установлено {0} → предлагается {1}</s:String>
+    <s:String x:Key="Update.Check.NoUrl">Адрес пакета не найден в журнале AppX. Запусти Claude Desktop — его апдейтер примерно раз в час оставляет свежий адрес в журнале; или вставь адрес пакета (.msix) ниже.</s:String>
+    <s:String x:Key="Update.Check.InvalidUrl">По этому адресу нет .msix-пакета — вставь другой.</s:String>
+    <s:String x:Key="Update.Check.NotInstalled">Claude Desktop не установлен как MSIX-пакет — обновлять нечего.</s:String>
+    <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>
+    <s:String x:Key="Update.Download.RunningFmt">{0} из {1} · {2}/с · осталось {3}</s:String>
+    <s:String x:Key="Update.Download.StalledFmt">Нет прогресса {0} мин — докачка продолжит попытки сама.</s:String>
+    <s:String x:Key="Update.Verify.OkFmt">Пакет проверен: {0}; Publisher совпадает ({1}).</s:String>
+    <s:String x:Key="Update.Pause.Message">Пакет готов. Установка закроет Claude — продолжить?</s:String>
+    <s:String x:Key="Update.Install.NoClose">Идёт установка — не закрывайте окно.</s:String>
+    <s:String x:Key="Update.Install.RightsHintFmt">Если жалуется на права — запусти из консоли администратора:&#10;Add-AppxPackage -Path "{0}" -ForceApplicationShutdown</s:String>
+    <s:String x:Key="Update.Install.VersionWarn">ВНИМАНИЕ: версия после установки не сменилась — проверь журнал AppX.</s:String>
+    <s:String x:Key="Update.Done.InstalledFmt">Установлено: {0} → {1}</s:String>
+    <s:String x:Key="Update.Done.Stopped">Остановлено.</s:String>
+    <s:String x:Key="Update.Done.StoppedFmt">Остановлено: докачано {0} из {1}; докачка сохранена в кэше.</s:String>
+    <s:String x:Key="Update.Done.DeferredFmt">Установка отложена; пакет в кэше: {0}</s:String>
+    <s:String x:Key="Update.Launch.Done">Claude запущен.</s:String>
+    <s:String x:Key="Update.Url.Label">Адрес пакета (.msix)</s:String>
+    <s:String x:Key="Update.Button.Stop">Остановить</s:String>
+    <s:String x:Key="Update.Button.OpenLog">Открыть лог</s:String>
+    <s:String x:Key="Update.Button.Close">Закрыть</s:String>
+    <s:String x:Key="Update.Button.Retry">Повторить</s:String>
+    <s:String x:Key="Update.Button.LaunchClaude">Запустить Claude</s:String>
+    <s:String x:Key="Update.Button.InstallNow">Установить сейчас</s:String>
+    <s:String x:Key="Update.Button.Defer">Отложить</s:String>
+    <s:String x:Key="Update.Button.ContinueWithUrl">Продолжить с этим URL</s:String>
+    <s:String x:Key="Update.ConfirmClose">Остановить обновление и закрыть?</s:String>
 
     <!-- Настройки -->
     <s:String x:Key="Main.Language">Язык</s:String>
