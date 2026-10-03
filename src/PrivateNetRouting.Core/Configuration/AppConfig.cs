@@ -14,6 +14,8 @@ public sealed class AppConfig
     public ChainConfig Chain { get; set; } = new();
 
     public LauncherConfig Launcher { get; set; } = new();
+
+    public WatchdogConfig Watchdog { get; set; } = new();
 }
 
 /// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
@@ -79,6 +81,20 @@ public sealed class ChainConfig
     public int HealthWaitSeconds { get; set; } = 90;
 }
 
+/// <summary>
+/// Автостоп по простою (порт ts-sidecar-watch-claude.ps1). Сам ничего не запускает:
+/// сторож стартует по явному действию пользователя (команда CLI, переключатель приложения)
+/// и живёт, пока жив запустивший его процесс — в автозапуск не прописывается (правило №4).
+/// </summary>
+public sealed class WatchdogConfig
+{
+    /// <summary>Интервал проверки занятости, сек; это же окно свежести маркера активности.</summary>
+    public int CheckSeconds { get; set; } = 600;
+
+    /// <summary>Дистрибутив WSL с хостом Claude Desktop; пусто — WSL-хост при автостопе не трогается.</summary>
+    public string WslDistro { get; set; } = "";
+}
+
 public sealed class LoggingConfig
 {
     /// <summary>Каталог логов; переменные окружения (%LOCALAPPDATA% и т.п.) раскрываются при загрузке.</summary>
@@ -109,8 +125,8 @@ public sealed class ForwardProxyConfig
 
     public DohDiscoveryConfig DohDiscovery { get; set; } = new();
 
-    /// <summary>Цель health-check (CONNECT-roundtrip через собственный прокси).</summary>
-    public string HealthCheckHost { get; set; } = "example.com";
+    /// <summary>Цель health-check (CONNECT-roundtrip через собственный прокси); публичный API-хост Anthropic.</summary>
+    public string HealthCheckHost { get; set; } = "api.anthropic.com";
 
     public int HealthCheckPort { get; set; } = 443;
 
@@ -129,8 +145,8 @@ public sealed class ForwardProxyConfig
     /// <summary>Кулдаун отбракованного DoH-эндпоинта.</summary>
     public int DohDeadCooldownSeconds { get; set; } = 300;
 
-    /// <summary>Домен для пробы DoH-эндпоинтов.</summary>
-    public string DohProbeName { get; set; } = "example.com";
+    /// <summary>Домен для пробы DoH-эндпоинтов (уже маршрутизируется, побочных эффектов нет).</summary>
+    public string DohProbeName { get; set; } = "claude.ai";
 
     /// <summary>Кэш резолва: TTL ответа клампится в [Min, Max].</summary>
     public int CacheTtlMinSeconds { get; set; } = 60;

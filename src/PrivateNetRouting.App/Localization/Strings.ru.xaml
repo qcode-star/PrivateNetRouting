@@ -34,6 +34,12 @@
     <s:String x:Key="Main.Chain.Health.Fail">не прошло</s:String>
     <s:String x:Key="Main.Chain.DetailsFmt">демон: {0}    кипер: {1}    узел: {2}&#10;прокси: {3}    здоровье: {4}</s:String>
 
+    <!-- Сторож автостопа -->
+    <s:String x:Key="Main.Watchdog">Автостоп по простою (гасит WSL-хост и цепочку, когда Claude не используется)</s:String>
+    <s:String x:Key="Main.Watchdog.StartedFmt">сторож запущен: проверка каждые {0} с</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedIdle">сторож: простой — WSL-хост и цепочка остановлены</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedManual">сторож остановлен</s:String>
+
     <!-- Кнопки -->
     <s:String x:Key="Main.Button.Start">Запустить</s:String>
     <s:String x:Key="Main.Button.Stop">Остановить</s:String>

@@ -31,6 +31,7 @@ internal static class Program
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
+                "watchdog" => await RunWatchdogAsync(),
                 "config" => ConfigCommand(args.Skip(1).ToList()),
                 _ => Help(),
             };
@@ -148,6 +149,39 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> RunWatchdogAsync()
+    {
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        using var stop = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            stop.Cancel();
+        };
+
+        Console.WriteLine($"watchdog: checking Claude usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
+        if (string.IsNullOrWhiteSpace(config.Watchdog.WslDistro))
+        {
+            Console.WriteLine("watchdog: watchdog.wslDistro is not set, the WSL host will not be stopped on idle");
+        }
+
+        var progress = new Progress<ChainStep>(step =>
+            Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
+        try
+        {
+            await runtime.Watchdog.RunAsync(progress, stop.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("watchdog: cancelled");
+            return 0;
+        }
+
+        Console.WriteLine("watchdog: idle stop complete");
+        return 0;
+    }
+
     private static int ConfigCommand(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "path";
@@ -195,6 +229,9 @@ internal static class Program
             pnr launch [--check-only] [--no-splash]
                                  start Claude with --proxy-server/--proxy-bypass-list,
                                  bringing the chain up if needed (splash is GUI-only)
+            pnr watchdog         idle auto-stop supervisor: check Claude usage every
+                                 watchdog.checkSeconds, on idle stop the WSL host and
+                                 the chain (Ctrl+C to stop; starts nothing by itself)
             pnr config path      user config path
             pnr config init      create the default config if missing
             """);

@@ -7,6 +7,7 @@ using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Runtime;
 using PrivateNetRouting.Core.SystemOps;
+using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Core;
 
@@ -28,11 +29,15 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public ClaudeLauncher Launcher { get; }
 
+    public WatchdogService Watchdog { get; }
+
     private readonly FileLog _chainLog;
 
     private readonly FileLog _launcherLog;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog)
+    private readonly FileLog _watchdogLog;
+
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog)
     {
         Config = config;
         Log = log;
@@ -42,6 +47,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _chainLog = chainLog;
         Launcher = launcher;
         _launcherLog = launcherLog;
+        Watchdog = watchdog;
+        _watchdogLog = watchdogLog;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -114,7 +121,21 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             launcherLog);
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog);
+        var watchdogLog = new FileLog(
+            Path.Combine(config.Logging.Directory, "watchdog.log"),
+            config.Logging.MaxBytes,
+            config.Logging.Keep);
+        IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
+            ? null
+            : new WslClaudeHostStopper(config.Watchdog.WslDistro, new WslProcessRunner());
+        var usage = new ClaudeUsageProbe(
+            processes,
+            new TcpEstablishedConnectionCounter(),
+            Socks5Client.ParseEndPoint(fp.Listen).Port,
+            fp.ActivityMarkerPath);
+        var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
@@ -152,6 +173,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         DohPool.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();
+        _watchdogLog.Dispose();
         Log.Dispose();
     }
 }

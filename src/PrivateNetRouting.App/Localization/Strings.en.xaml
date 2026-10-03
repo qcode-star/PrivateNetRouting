@@ -34,6 +34,12 @@
     <s:String x:Key="Main.Chain.Health.Fail">failed</s:String>
     <s:String x:Key="Main.Chain.DetailsFmt">daemon: {0}    keeper: {1}    node: {2}&#10;proxy: {3}    health: {4}</s:String>
 
+    <!-- Idle watchdog -->
+    <s:String x:Key="Main.Watchdog">Idle auto-stop (stops the WSL host and the chain when Claude is not in use)</s:String>
+    <s:String x:Key="Main.Watchdog.StartedFmt">watchdog started: checking every {0}s</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedIdle">watchdog: idle — the WSL host and the chain are stopped</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedManual">watchdog stopped</s:String>
+
     <!-- Buttons -->
     <s:String x:Key="Main.Button.Start">Start</s:String>
     <s:String x:Key="Main.Button.Stop">Stop</s:String>

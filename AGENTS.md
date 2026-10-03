@@ -107,7 +107,7 @@ Git-идентичность задана локально в репозитор
 | ForwardProxy | локальный CONNECT-прокси: DoH-резолв имён через резолверы из конфига, дозвон через SOCKS5-апстрим userspace-sidecar, бинд на localhost и шлюз WSL, маркер активности (mtime) для сторожа | **готов** (`PrivateNetRouting.Core.Net.*`) | `ts-fwd.py` |
 | ChainSupervisor | идемпотентный подъём/останов цепочки (демон userspace-tailscaled → кипер watch-ipn → up → forward-прокси → health-check), элевация старта демона через runas-копию себя (единственный UAC), «свои» процессы опознаются по statedir/пайпу в командной строке; логи демона/кипера — файловые ручки через cmd, переживают выход приложения. Живой прогон `pnr launch --check-only` подтвердил элевацию (UAC → helper → старт демона) и поймал баг кавычек cmd (починен, форма аргументов покрыта тестом); **полный подъём не проверялся** — нужен запуск с владельцем и решение о statedir — новый (потребуется вход в tailnet) или существующий из прежней схемы (замещение легаси, правило №3) | **готов** (`PrivateNetRouting.Core.Chain`) | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs` |
 | Launcher | запуск Claude Desktop с `--proxy-server`/`--proxy-bypass-list` (список обхода собирается из доменов конфига, обе формы записи каждой зоны; базовые записи — localhost/приватные диапазоны — фиксированы в коде), проверка и подъём цепочки (живой CONNECT, затем идемпотентный chain up), заставка с шагами подъёма (на живой цепочке окна нет), контрольные предупреждения в лог про managed-политику `egressProxyUrl` и уже запущенный без флагов Claude, флаги режимов (только-проверка/без-заставки) | **готов** (`PrivateNetRouting.Core.Launcher` + `SplashWindow` в App; CLI `pnr launch [--check-only] [--no-splash]`; заставка — GUI-only). Живой запуск Claude не проверялся — вместе с полным подъёмом цепочки | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
-| Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown, эскалация SIGTERM→SIGKILL на осиротевшем), затем останов цепочки | план | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
+| Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности; первый опрос — через интервал, в лог пишется только смена причины), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown своим бинарником, эскалация SIGTERM→SIGKILL на осиротевших, дистрибутив ради проверки не поднимается), затем останов цепочки существующим оркестратором; запуск — только явный (`pnr watchdog` / галка в окне приложения), живёт, пока жив запустивший процесс, в автозапуск не пишется; ручной сторож WSL-хоста по mtime (`claude-wsl-watch.ps1`) не переносился | **готов** (`PrivateNetRouting.Core.Watchdog`; интервал и дистрибутив WSL — в конфиге `watchdog.*`). Живой автостоп не проверялся — вместе с полным подъёмом цепочки | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
 | Updater | ручное обновление MSIX: установленная версия, адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через прокси-цепочку, сверка Publisher, закрытие приложения, `Add-AppxPackage`, GUI с шагами/прогрессом/стоп-кнопкой и машиной состояний | план | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
 | Guard | managed-политика `egressProxyUrl` (+ `disableWslSessions=0`); запрет прямого доступа тремя слоями: hosts (точные имена), одно NRPT-правило на поддеревья, firewall outbound Block по подсетям; системный прокси on/off на время входа; кнопка «прописать порты в Claude» — согласовать адрес прокси в настройках Claude с конфигом приложения (решение владельца: порты 18081/18082/18083) | план | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1` |
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
@@ -147,16 +147,21 @@ src/
                              # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
     Launcher/                # ClaudeLauncher (bypass-list, подъём цепочки при отказе, запуск
                              # с флагами прокси, предупреждения о политике/запущенном Claude)
+    Watchdog/                # автостоп по простою: ClaudeUsageProbe (процессы/коннекты/маркер),
+                             # WslClaudeHostStopper (остановка WSL-хоста Claude через wsl.exe:
+                             # RPC + эскалация сигналов), WatchdogService (цикл, WSL → цепочка)
     SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым редиректом
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
-    ProxyRuntime.cs          # композиция прокси+цепочки+лончера из AppConfig (для App и Cli)
+    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа из AppConfig (для App и Cli)
   PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check |
-                             # launch [--check-only] [--no-splash] | config)
+                             # launch [--check-only] [--no-splash] | watchdog | config)
 tests/
   PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
                              # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
                              # оркестрация цепочки на фейках (порядок/идемпотентность/отказы),
-                             # лончер на фейках (bypass-list/порядок/режимы), форма аргументов cmd
+                             # лончер на фейках (bypass-list/порядок/режимы), сторож на фейках
+                             # (порядок WSL→цепочка, парсер вывода остановщика, проба занятости),
+                             # форма аргументов cmd
 config/
   appsettings.example.json   # шаблон пользовательского конфига с плейсхолдерами
 ```

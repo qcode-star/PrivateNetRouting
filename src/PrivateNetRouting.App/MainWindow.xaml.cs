@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private bool _chainBusy;
     private bool _launchBusy;
     private bool _fillingLanguages;
+    private CancellationTokenSource? _watchdogCts;
+    private bool _watchdogSyncing;
 
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
@@ -53,6 +55,7 @@ public partial class MainWindow : Window
     {
         _refreshTimer.Stop();
         _chainTimer.Stop();
+        _watchdogCts?.Cancel();
         _viewModel.Dispose();
         base.OnClosed(e);
     }
@@ -141,6 +144,57 @@ public partial class MainWindow : Window
         {
             _chainBusy = false;
             _viewModel.SetChainBusy(false);
+        }
+    }
+
+    /// <summary>
+    /// Сторож автостопа по простою (порт ts-sidecar-watch-claude.ps1): цикл живёт, пока
+    /// открыт запускший его процесс — здесь это окно приложения. Включение/выключение —
+    /// явное действие пользователя; при простое сторож сам гасит WSL-хост и цепочку
+    /// (подтверждение UAC на останов демона) и снимает галку.
+    /// </summary>
+    private void OnWatchdogToggled(object sender, RoutedEventArgs e)
+    {
+        if (_watchdogSyncing)
+        {
+            return;
+        }
+
+        if (WatchdogBox.IsChecked == true)
+        {
+            _watchdogCts = new CancellationTokenSource();
+            _viewModel.SetCheckResult("Main.Watchdog.StartedFmt", _runtime.Config.Watchdog.CheckSeconds);
+            _ = RunWatchdogAsync(_watchdogCts.Token);
+        }
+        else
+        {
+            _watchdogCts?.Cancel();
+        }
+    }
+
+    private async Task RunWatchdogAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _runtime.Watchdog.RunAsync(null, ct);
+            _viewModel.SetCheckResult("Main.Watchdog.StoppedIdle");
+        }
+        catch (OperationCanceledException)
+        {
+            _viewModel.SetCheckResult("Main.Watchdog.StoppedManual");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _watchdogCts?.Dispose();
+            _watchdogCts = null;
+            _watchdogSyncing = true;
+            WatchdogBox.IsChecked = false;
+            _watchdogSyncing = false;
+            await RefreshChainAsync();
         }
     }
 
