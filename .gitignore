@@ -39,6 +39,7 @@ appsettings.*.local.json
 *.local.json
 config/local/
 secrets.*
+.secret.agents.md
 *.env
 .env.*
 *.pem
