@@ -113,7 +113,7 @@ Git-идентичность задана локально в репозитор
 | ChainSupervisor | идемпотентный подъём/останов цепочки (демон userspace-tailscaled → кипер watch-ipn → up → forward-прокси → health-check), элевация старта демона через runas-копию себя (единственный UAC), «свои» процессы опознаются по statedir/пайпу в командной строке; логи демона/кипера — файловые ручки через cmd, переживают выход приложения. Живость демона — отзывчивостью его именованного пайпа: WMI прячет CommandLine элевейтнутого процесса от неэлевейтнутого читателя (Windows 11 24H2+), элевейтнутый останов по-прежнему добивает процессы поиском по cmdline. **Проверен живьём с новым statedir**: UAC-старт демона → кипер → вход узла по login-server (блокирующийся `tailscale login`, URL аутентификации владельцем) → health CONNECT-roundtrip; повторные подъёмы идемпотентны, узел входит молча по ключу; полный цикл «подъём → автостоп → подъём» прошёл без повторного входа | **готов** (`PrivateNetRouting.Core.Chain`) | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs`, `ts-sidecar-login.ps1` |
 | Launcher | запуск Claude Desktop с `--proxy-server`/`--proxy-bypass-list` (список обхода собирается из доменов конфига, обе формы записи каждой зоны; базовые записи — localhost/приватные диапазоны — фиксированы в коде), проверка и подъём цепочки (живой CONNECT, затем идемпотентный chain up), заставка с шагами подъёма (на живой цепочке окна нет), контрольные предупреждения в лог про managed-политику `egressProxyUrl` и уже запущенный без флагов Claude, флаги режимов (только-проверка/без-заставки) | **готов** (`PrivateNetRouting.Core.Launcher` + `SplashWindow` в App; CLI `pnr launch [--check-only] [--no-splash]`; заставка — GUI-only). Живой запуск Claude не проверялся. Ограничение: forward-прокси живёт в процессе команды — по выходе `pnr launch` слушатель гаснет (в прежней схеме ts-fwd был detached); нужен detached-режим прокси для полного паритета | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
 | Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности; первый опрос — через интервал, в лог пишется только смена причины), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown своим бинарником, эскалация SIGTERM→SIGKILL на осиротевших, дистрибутив ради проверки не поднимается), затем останов цепочки существующим оркестратором; запуск — только явный (`pnr watchdog` / галка в окне приложения), живёт, пока жив запустивший процесс, в автозапуск не пишется; ручной сторож WSL-хоста по mtime (`claude-wsl-watch.ps1`) не переносился | **готов** (`PrivateNetRouting.Core.Watchdog`; интервал и дистрибутив WSL — в конфиге `watchdog.*`). Живой автостоп проверен: простой → WSL-хост (no-op при отсутствии хоста) → down → UAC-останов демона → кипер → выход | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
-| Updater | ручное обновление MSIX: установленная версия, адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через прокси-цепочку, сверка Publisher, закрытие приложения, `Add-AppxPackage`, GUI с шагами/прогрессом/стоп-кнопкой и машиной состояний | план | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
+| Updater | ручное обновление MSIX: проверка версий ДО подъёма цепочки («нечего ставить» — без UAC), адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через собственный forward-прокси, сверка Publisher, закрытие Claude, `Add-AppxPackage`; GUI с шагами/прогрессом/стоп-кнопкой, паузой перед установкой и отложенной установкой (`--install-from`); во время скачивания держится свежим маркер активности (автостоп не гасит цепочку под загрузкой) | **реализован** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; окно `UpdateWindow`). Живьём проверен только `--check` (версия и журнал читаются, отсутствие URL отрабатывается); скачивание и установка живьём не выполнялись | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
 | Guard | managed-политика `egressProxyUrl` (+ `disableWslSessions=0`); запрет прямого доступа тремя слоями: hosts (точные имена), одно NRPT-правило на поддеревья, firewall outbound Block по подсетям; системный прокси on/off на время входа; кнопка «прописать порты в Claude» — согласовать адрес прокси в настройках Claude с конфигом приложения (решение владельца: порты 18081/18082/18083) | план | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1` |
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
 | EnvSync | пересборка `NO_PROXY` и адреса прокси для Claude Code в Windows и WSL из доменов конфига | план | `sync-claude-noproxy.ps1` |
@@ -140,7 +140,8 @@ Git-идентичность задана локально в репозитор
 src/
   PrivateNetRouting.App/     # WPF: окна, одиночный экземпляр (mutex+событие), статус прокси
                              # и цепочки, выбор языка, запуск Claude с заставкой подъёма
-                             # (SplashWindow); элевейтнутые helper-аргументы обрабатывает до UI
+                             # (SplashWindow), окно обновления Claude (UpdateWindow);
+                             # элевейтнутые helper-аргументы обрабатывает до UI
     Localization/            # словари строк Strings.<код>.xaml + Loc: подмена словаря на лету
                              # (DynamicResource в XAML, Loc.S/Loc.F в коде, Loc.LanguageChanged)
   PrivateNetRouting.Core/    # логика без UI
@@ -155,21 +156,30 @@ src/
                              # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
     Launcher/                # ClaudeLauncher (bypass-list, подъём цепочки при отказе, запуск
                              # с флагами прокси, предупреждения о политике/запущенном Claude)
+    Updater/                 # ClaudeUpdater (оркестрация MSIX-обновления: проверка → цепочка →
+                             # докачка → Publisher-сверка → установка), PowerShellRunner,
+                             # PowerShellAppxPackageSource (Get-AppxPackage/Add-AppxPackage),
+                             # PowerShellJournalUrlFinder + PackageUrl (адрес из журнала AppX),
+                             # FragmentDownloader (фрагментная докачка с ретраями и возобновлением),
+                             # MsixPackage (Identity/Publisher из AppxManifest.xml)
     Watchdog/                # автостоп по простою: ClaudeUsageProbe (процессы/коннекты/маркер),
                              # WslClaudeHostStopper (остановка WSL-хоста Claude через wsl.exe:
                              # RPC + эскалация сигналов), WatchdogService (цикл, WSL → цепочка)
     SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым редиректом
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
-    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа из AppConfig (для App и Cli)
+    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора из AppConfig
   PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check |
-                             # launch [--check-only] [--no-splash] | watchdog | config)
+                             # launch [--check-only] [--no-splash] | update [--check] ... |
+                             # watchdog | config)
 tests/
   PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
                              # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
                              # оркестрация цепочки на фейках (порядок/идемпотентность/отказы),
                              # лончер на фейках (bypass-list/порядок/режимы), сторож на фейках
                              # (порядок WSL→цепочка, парсер вывода остановщика, проба занятости),
-                             # форма аргументов cmd
+                             # обновлятор на фейках (версии/URL из журнала, докачка фрагментами
+                             # на фейковом HTTP: возобновление/ретраи/отмена, Publisher,
+                             # закрытие Claude, полный цикл), форма аргументов cmd
 config/
   appsettings.example.json   # шаблон пользовательского конфига с плейсхолдерами
 ```
