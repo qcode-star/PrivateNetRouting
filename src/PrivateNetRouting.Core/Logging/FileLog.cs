@@ -1,9 +1,10 @@
 namespace PrivateNetRouting.Core.Logging;
 
 /// <summary>
-/// Простой потокобезопасный файловый лог. Политика прежнего набора: старт/стоп/варнинги/ошибки,
-/// ничего per-request в штатном режиме; ротация по размеру выполняется один раз на старте
-/// процесса, во время работы файл не трогается.
+/// Простой потокобезопасный файловый лог с уровнями (logging.level конфига, по умолчанию
+/// Info). Политика прежнего набора: в Info — разовые события (старт/стоп/варнинги/ошибки),
+/// периодические и per-request подробности (таймеры, коннекты, резолвы) — Debug и в штатном
+/// режиме молчат; ротация по размеру выполняется один раз на старте процесса.
 /// </summary>
 public sealed class FileLog : IDisposable
 {
@@ -12,9 +13,12 @@ public sealed class FileLog : IDisposable
 
     public string FilePath { get; }
 
-    public FileLog(string path, int maxBytes = 1_000_000, int keep = 2)
+    public LogLevel Level { get; }
+
+    public FileLog(string path, LogLevel level = LogLevel.Info, int maxBytes = 1_000_000, int keep = 2)
     {
         FilePath = path;
+        Level = level;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         RotateAtStartup(path, maxBytes, keep);
         _writer = new StreamWriter(
@@ -22,20 +26,37 @@ public sealed class FileLog : IDisposable
             new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
-    public void Info(string message) => Write("INFO", message);
+    public bool IsDebugEnabled => Level <= LogLevel.Debug;
 
-    public void Warn(string message) => Write("WARN", message);
+    public void Debug(string message) => Write(LogLevel.Debug, message);
 
-    public void Error(string message) => Write("ERROR", message);
+    public void Info(string message) => Write(LogLevel.Info, message);
 
-    private void Write(string level, string message)
+    public void Warn(string message) => Write(LogLevel.Warn, message);
+
+    public void Error(string message) => Write(LogLevel.Error, message);
+
+    private void Write(LogLevel level, string message)
     {
+        if (level < Level)
+        {
+            return;
+        }
+
         lock (_gate)
         {
-            _writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {level} {message}");
+            _writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {LevelTag(level)} {message}");
             _writer.Flush();
         }
     }
+
+    private static string LevelTag(LogLevel level) => level switch
+    {
+        LogLevel.Debug => "DEBUG",
+        LogLevel.Info => "INFO",
+        LogLevel.Warn => "WARN",
+        _ => "ERROR",
+    };
 
     private static void RotateAtStartup(string path, int maxBytes, int keep)
     {

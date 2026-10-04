@@ -22,7 +22,7 @@ public static class ConnectRequestParser
         var lineEnd = header.IndexOf((byte)'\r');
         if (lineEnd < 0)
         {
-            error = "нет конца строки запроса";
+            error = "no request line terminator";
             return false;
         }
 
@@ -30,7 +30,7 @@ public static class ConnectRequestParser
         var parts = line.Split(' ', StringSplitOptions.TrimEntries);
         if (parts.Length != 3 || !parts[0].Equals("CONNECT", StringComparison.OrdinalIgnoreCase))
         {
-            error = $"не-CONNECT запрос: {Truncate(line)}";
+            error = $"not a CONNECT request: {Truncate(line)}";
             return false;
         }
 
@@ -43,7 +43,7 @@ public static class ConnectRequestParser
             host = authority[..separator];
             if (!int.TryParse(authority[(separator + 1)..], out port) || port is < 1 or > 65535)
             {
-                error = $"некорректный порт: {Truncate(authority)}";
+                error = $"invalid port: {Truncate(authority)}";
                 return false;
             }
         }
@@ -55,7 +55,7 @@ public static class ConnectRequestParser
 
         if (host.Length == 0)
         {
-            error = "пустый хост";
+            error = "empty host";
             return false;
         }
 

@@ -27,7 +27,7 @@ public static class DnsWire
             var bytes = Encoding.ASCII.GetBytes(label);
             if (bytes.Length is < 1 or > 63)
             {
-                throw new ArgumentException($"некорректная метка '{label}' в имени {name}");
+                throw new ArgumentException($"invalid label '{label}' in name {name}");
             }
 
             writer.WriteByte((byte)bytes.Length);
@@ -47,13 +47,13 @@ public static class DnsWire
     {
         if (data.Length < 12)
         {
-            throw new FormatException("dns: сообщение короче заголовка");
+            throw new FormatException("dns: message shorter than the header");
         }
 
         var rcode = data[3] & 0x0F;
         if (rcode != 0)
         {
-            throw new FormatException($"dns: сервер вернул rcode {rcode}");
+            throw new FormatException($"dns: server returned rcode {rcode}");
         }
 
         var qdcount = BinaryPrimitives.ReadUInt16BigEndian(data[4..6]);
@@ -73,7 +73,7 @@ public static class DnsWire
             offset = SkipName(data, offset);
             if (offset + 10 > data.Length)
             {
-                throw new FormatException("dns: обрезанная запись ответа");
+                throw new FormatException("dns: truncated answer record");
             }
 
             var rtype = BinaryPrimitives.ReadUInt16BigEndian(data[offset..(offset + 2)]);
@@ -82,7 +82,7 @@ public static class DnsWire
             offset += 10;
             if (offset + rdlen > data.Length)
             {
-                throw new FormatException("dns: обрезанный RDATA");
+                throw new FormatException("dns: truncated RDATA");
             }
 
             if (rtype == QtypeA && rdlen == 4)
@@ -105,7 +105,7 @@ public static class DnsWire
         {
             if (offset >= data.Length)
             {
-                throw new FormatException("dns: имя выходит за границы сообщения");
+                throw new FormatException("dns: name out of message bounds");
             }
 
             var length = data[offset];

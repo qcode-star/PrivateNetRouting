@@ -32,7 +32,7 @@ public sealed partial class TailscaleNetmapDohSource(DohDiscoveryConfig config) 
         };
 
         using var process = Process.Start(info)
-            ?? throw new IOException($"не удалось запустить {config.CliPath}");
+            ?? throw new IOException($"failed to start {config.CliPath}");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(config.NetmapTimeout);
 

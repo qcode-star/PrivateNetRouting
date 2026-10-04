@@ -26,7 +26,9 @@ public static class GuardElevatedCommands
         try
         {
             var config = AppConfigStore.LoadOrCreate(configPath);
-            var log = new FileLog(Path.Combine(config.Logging.Directory, "guard-elevated.log"));
+            var log = new FileLog(
+                Path.Combine(config.Logging.Directory, "guard-elevated.log"),
+                config.Logging.EffectiveLevel);
             var powershell = new PowerShellRunner(config.Updater.PowerShellPath);
             var detail = command switch
             {
@@ -71,7 +73,7 @@ public static class GuardElevatedCommands
             var probeBlocked = ProbeBlocked(guard.BanProbeName);
             if (!probeBlocked)
             {
-                log.Warn($"elevated ban: проба {guard.BanProbeName} всё ещё резолвится — поддеревья не закрыты");
+                log.Warn($"elevated ban: probe {guard.BanProbeName} still resolves — subtrees are not closed");
             }
 
             return $"hosts {guard.BanHosts.Count} names, NRPT rule on {guard.BanTrees.Count * 2} namespaces, "

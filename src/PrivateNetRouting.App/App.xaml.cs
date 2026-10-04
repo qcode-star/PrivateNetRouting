@@ -75,7 +75,7 @@ public partial class App : Application
             }
             catch (Exception ex)
             {
-                _runtime.Log.Error($"старт прокси не удался: {ex.Message}");
+                _runtime.Log.Error($"proxy start failed: {ex.Message}");
             }
         }
 
@@ -181,7 +181,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            _runtime.Updater.Log.Warn($"стартовая проверка обновления не удалась: {ex.Message}");
+            _runtime.Updater.Log.Warn($"startup update check failed: {ex.Message}");
         }
     }
 

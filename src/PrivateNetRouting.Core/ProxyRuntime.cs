@@ -72,10 +72,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
     {
         var fp = config.ForwardProxy;
-        var log = new FileLog(
-            Path.Combine(config.Logging.Directory, logFileName),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        FileLog NewLog(string fileName) =>
+            new(Path.Combine(config.Logging.Directory, fileName), config.Logging.EffectiveLevel, config.Logging.MaxBytes, config.Logging.Keep);
+        var log = NewLog(logFileName);
 
         var socks = new Socks5Client(fp.Socks5Upstream);
 
@@ -86,7 +85,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var rejected = fp.DohSeed.Count - seed.Count;
         if (rejected > 0)
         {
-            log.Warn($"doh: пропущено некорректных seed-эндпоинтов: {rejected}");
+            log.Warn($"doh: skipped malformed seed endpoints: {rejected}");
         }
 
         IDohEndpointSource? source = fp.DohDiscovery.Enabled
@@ -114,10 +113,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
-        var chainLog = new FileLog(
-            Path.Combine(config.Logging.Directory, "chain.log"),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        var chainLog = NewLog("chain.log");
         var elevated = new ElevatedRunner(config.Chain, chainLog);
         var chain = new ChainSupervisor(
             config.Chain,
@@ -128,10 +124,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             chainLog,
             ct => ChainHealthAsync(config, ct));
 
-        var launcherLog = new FileLog(
-            Path.Combine(config.Logging.Directory, "launcher.log"),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        var launcherLog = NewLog("launcher.log");
         var launcher = new ClaudeLauncher(
             config,
             chain,
@@ -139,10 +132,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             launcherLog);
 
-        var watchdogLog = new FileLog(
-            Path.Combine(config.Logging.Directory, "watchdog.log"),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        var watchdogLog = NewLog("watchdog.log");
         IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
             ? null
             : new WslClaudeHostStopper(config.Watchdog.WslDistro, new WslProcessRunner());
@@ -153,10 +143,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             fp.ActivityMarkerPath);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
-        var updaterLog = new FileLog(
-            Path.Combine(config.Logging.Directory, "updater.log"),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        var updaterLog = NewLog("updater.log");
         // скачивание идёт через собственный forward-прокси (DoH-резолв, дозвон SOCKS5);
         // общий таймаут HttpClient отключён — лимит задаётся на фрагмент (chunkTimeoutSeconds)
         var updaterHttp = new HttpClient(new SocketsHttpHandler
@@ -179,10 +166,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new RunningClaudeProcessSource(),
             updaterLog);
 
-        var guardLog = new FileLog(
-            Path.Combine(config.Logging.Directory, "guard.log"),
-            config.Logging.MaxBytes,
-            config.Logging.Keep);
+        var guardLog = NewLog("guard.log");
         var guard = new GuardService(
             config,
             new RegistryEgressPolicyStore(),

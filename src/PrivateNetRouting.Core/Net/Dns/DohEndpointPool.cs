@@ -7,8 +7,9 @@ namespace PrivateNetRouting.Core.Net.Dns;
 /// Пул DoH-резолверов. Стартовый набор — из конфига; при наличии источника обнаружения
 /// (конфиг tailnet) список пополняется и перепроверяется по таймеру. Пробы гонятся параллельно,
 /// живые эндпоинты ставятся вперёд (мёртвый узел вверху админского списка не тормозит резолв);
-/// отказавший эндпоинт уходит в кулдаун. Изменение живого набора пишется в лог одной строкой,
-/// повторы молчат. Если обнаружение ничего не вернуло — остаётся стартовый набор.
+/// отказавший эндпоинт уходит в кулдаун. Каждое обновление пула пишется в Debug, изменение
+/// живого набора — одной строкой в Info, повторы молчат. Если обнаружение ничего не вернуло —
+/// остаётся стартовый набор.
 /// </summary>
 public sealed partial class DohEndpointPool : IDisposable
 {
@@ -100,7 +101,7 @@ public sealed partial class DohEndpointPool : IDisposable
         }
         catch (Exception ex)
         {
-            _log.Error($"doh pool: сбой обновления: {ex.Message}");
+            _log.Error($"doh pool: refresh failed: {ex.Message}");
         }
     }
 
@@ -144,10 +145,11 @@ public sealed partial class DohEndpointPool : IDisposable
                 _deadUntil.Clear();
             }
 
+            _log.Debug($"doh pool: refresh: live=[{string.Join(", ", live)}] rest=[{string.Join(", ", rest)}]");
             if (!live.SequenceEqual(_lastLive ?? []))
             {
                 _lastLive = live;
-                _log.Info($"doh pool: набор изменился: live=[{string.Join(", ", live)}] rest=[{string.Join(", ", rest)}]");
+                _log.Info($"doh pool: live set changed: live=[{string.Join(", ", live)}] rest=[{string.Join(", ", rest)}]");
             }
         }
         finally
@@ -164,7 +166,7 @@ public sealed partial class DohEndpointPool : IDisposable
         }
         catch (Exception ex)
         {
-            _log.Warn($"doh pool: обнаружение не сработало, остаётся стартовый набор: {ex.Message}");
+            _log.Warn($"doh pool: discovery failed, keeping the seed set: {ex.Message}");
             return [];
         }
     }

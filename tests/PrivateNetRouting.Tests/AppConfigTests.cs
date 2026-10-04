@@ -1,4 +1,5 @@
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Tests;
 
@@ -68,6 +69,23 @@ public class AppConfigTests : IDisposable
 
         Assert.False(config.ForwardProxy.Enabled);
         Assert.Equal("127.0.0.1:11055", config.ForwardProxy.Socks5Upstream);
+    }
+
+    [Fact]
+    public void LoggingLevelDefaultsToInfoAndParses()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal("info", config.Logging.Level);
+        Assert.Equal(LogLevel.Info, config.Logging.EffectiveLevel);
+
+        File.WriteAllText(_path, """
+            {
+              "logging": { "level": "debug" }
+            }
+            """);
+
+        var loaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(LogLevel.Debug, loaded.Logging.EffectiveLevel);
     }
 
     [Fact]

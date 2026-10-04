@@ -70,7 +70,7 @@ public sealed class SidecarDaemon(
     {
         if (IsHttpListening && IsProcessAlive)
         {
-            log.Info("daemon: уже слушает, пропуск");
+            log.Debug("daemon: already listening, skipping");
             return;
         }
 
@@ -106,7 +106,7 @@ public sealed class SidecarDaemon(
         {
             if (IsHttpListening)
             {
-                log.Info("daemon: слушатель поднят");
+                log.Info("daemon: listener is up");
                 return;
             }
 
@@ -133,7 +133,7 @@ public sealed class SidecarDaemon(
             commandLine,
             stdoutPath: Path.Combine(config.StateDir, "daemon.out.log"),
             stderrPath: Path.Combine(config.StateDir, "daemon.err.log"));
-        log.Info($"daemon: запущен через cmd, pid={started?.Id}");
+        log.Info($"daemon: started via cmd, pid={started?.Id}");
     }
 
     public async Task KillAsync(CancellationToken ct)
@@ -158,11 +158,11 @@ public sealed class SidecarDaemon(
             try
             {
                 Process.GetProcessById(found.Id).Kill();
-                log.Info($"daemon: убит pid={found.Id}");
+                log.Info($"daemon: killed pid={found.Id}");
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                log.Warn($"daemon: не удалось убить pid={found.Id}: {ex.Message}");
+                log.Warn($"daemon: failed to kill pid={found.Id}: {ex.Message}");
             }
         }
     }

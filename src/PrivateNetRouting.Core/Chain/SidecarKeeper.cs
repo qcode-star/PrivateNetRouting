@@ -30,7 +30,7 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
     {
         if (IsRunning)
         {
-            log.Info("keeper: уже работает, пропуск");
+            log.Debug("keeper: already running, skipping");
             return;
         }
 
@@ -43,7 +43,7 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
             commandLine,
             stdoutPath: null, // NUL: netmap-JSON не нужен никому
             stderrPath: Path.Combine(config.StateDir, "watch.err.log"));
-        log.Info($"keeper: запущен через cmd, pid={started?.Id}");
+        log.Info($"keeper: started via cmd, pid={started?.Id}");
 
         await Task.Delay(TimeSpan.FromSeconds(config.KeeperCheckSeconds), ct);
         if (!IsRunning)
@@ -61,11 +61,11 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
             try
             {
                 Process.GetProcessById(found.Id).Kill();
-                log.Info($"keeper: убит pid={found.Id}");
+                log.Info($"keeper: killed pid={found.Id}");
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                log.Warn($"keeper: не удалось убить pid={found.Id}: {ex.Message}");
+                log.Warn($"keeper: failed to kill pid={found.Id}: {ex.Message}");
             }
         }
 

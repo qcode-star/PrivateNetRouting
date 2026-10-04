@@ -43,6 +43,7 @@ public class DohEndpointPoolTests : IDisposable
         using var pool = CreatePool([a, b, c], (ep, _) => Task.FromResult(ep != b), time);
 
         await pool.RefreshAsync(CancellationToken.None);
+        await UntilAsync(() => pool.SnapshotAlive() is { Count: > 0 } alive && alive[^1].Equals(b));
 
         var alive = pool.SnapshotAlive();
         Assert.Equal(b, alive[^1]); // мёртвый уходит в конец
@@ -81,6 +82,8 @@ public class DohEndpointPoolTests : IDisposable
         }, time, source);
 
         await pool.RefreshAsync(CancellationToken.None);
+        // фоновое обновление из конструктора гоняется с явным за общий gate — ждём результат
+        await UntilAsync(() => probed.Count >= 2);
 
         Assert.Contains(seed, probed);
         Assert.Contains(discovered, probed);
@@ -97,6 +100,15 @@ public class DohEndpointPoolTests : IDisposable
         await pool.RefreshAsync(CancellationToken.None);
 
         Assert.Equal([seed], pool.SnapshotAlive());
+    }
+
+    private static async Task UntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
     }
 
     private sealed class StaticSource(IReadOnlyList<DohEndpoint> endpoints) : IDohEndpointSource

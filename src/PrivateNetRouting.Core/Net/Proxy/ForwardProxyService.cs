@@ -13,7 +13,7 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// Локальный CONNECT-прокси (порт ts-fwd). Имена резолвит DoH через SOCKS5-апстрим —
 /// системный резолв не используется (он перекрыт банами), дозвон идёт по IP тем же SOCKS5.
 /// Биндится на основной адрес из конфига и один раз на шлюзе WSL NAT, когда адаптер появится.
-/// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки.
+/// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки; per-request трассировка — Debug.
 /// </summary>
 public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
 {
@@ -86,7 +86,7 @@ public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
         var listen = Socks5Client.ParseEndPoint(_config.Listen);
         var listener = BindListener(listen);
         _ = AcceptLoopAsync(listener);
-        _log.Info($"forward-proxy: слушаю {listen}");
+        _log.Info($"forward-proxy: listening on {listen}");
 
         if (_config.BindWslGateway)
         {
@@ -116,7 +116,7 @@ public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
             _listeners.Clear();
         }
 
-        _log.Info("forward-proxy: остановлен");
+        _log.Info("forward-proxy: stopped");
     }
 
     /// <summary>Одноразовый бинд на шлюзе WSL: ждём адаптер с повторами, биндим, выходим.</summary>
@@ -131,16 +131,17 @@ public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
                 {
                     var listener = BindListener(new IPEndPoint(gateway, ((IPEndPoint)Socks5Client.ParseEndPoint(_config.Listen)).Port));
                     _ = AcceptLoopAsync(listener);
-                    _log.Info($"forward-proxy: слушаю WSL-шлюз {gateway} (одноразовый бинд)");
+                    _log.Info($"forward-proxy: listening on WSL gateway {gateway} (one-time bind)");
                 }
                 catch (SocketException ex)
                 {
-                    _log.Error($"forward-proxy: бинд на WSL-шлюзе {gateway} не удался: {ex.Message}");
+                    _log.Error($"forward-proxy: bind on WSL gateway {gateway} failed: {ex.Message}");
                 }
 
                 return;
             }
 
+            _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token);
@@ -217,10 +218,7 @@ public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
 
             await stream.WriteAsync(EstablishResponse, _cts.Token);
             _marker.Touch();
-            if (_config.Verbose)
-            {
-                _log.Info($"forward-proxy: {target} -> {destination.Ip} ({destination.Source})");
-            }
+            _log.Debug($"forward-proxy: {target} -> {destination.Ip} ({destination.Source})");
 
             var upstreamStream = new NetworkStream(upstreamClient, ownsSocket: false);
             await TunnelAsync(stream, upstreamStream);
@@ -233,7 +231,7 @@ public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
         {
             Interlocked.Increment(ref _failedConnections);
             var detail = ex is OperationCanceledException
-                ? "таймаут"
+                ? "timeout"
                 : ex.Message;
             _log.Error($"forward-proxy: {client.Client.RemoteEndPoint}: {detail}");
             try

@@ -22,7 +22,9 @@ public static class ElevatedChainCommands
         try
         {
             var config = AppConfigStore.LoadOrCreate(configPath);
-            var log = new FileLog(Path.Combine(config.Logging.Directory, "chain-elevated.log"));
+            var log = new FileLog(
+                Path.Combine(config.Logging.Directory, "chain-elevated.log"),
+                config.Logging.EffectiveLevel);
             var stateDir = config.Chain.StateDir;
             Directory.CreateDirectory(stateDir);
 
@@ -70,7 +72,7 @@ public static class ElevatedChainCommands
         {
             if (new TcpPortProbe().IsListening(httpPort))
             {
-                log.Info("elevated: демон слушает");
+                log.Info("elevated: daemon listener is up");
                 return "daemon started, listener is up";
             }
 
@@ -78,7 +80,7 @@ public static class ElevatedChainCommands
         }
 
         var errTail = ReadTail(Path.Combine(chain.StateDir, "daemon.err.log"), lines: 15);
-        log.Error("elevated: демон не поднял слушатель");
+        log.Error("elevated: daemon did not bring up the listener");
         throw new IOException($"daemon listener did not come up within {chain.DaemonWaitSeconds}s; daemon.err.log: {errTail}");
     }
 
@@ -93,7 +95,7 @@ public static class ElevatedChainCommands
         }
         catch (Exception ex)
         {
-            log.Warn($"elevated: down не удался (продолжаю): {ex.Message}");
+            log.Warn($"elevated: down failed (continuing): {ex.Message}");
         }
 
         var killed = 0;
@@ -108,12 +110,12 @@ public static class ElevatedChainCommands
                 try
                 {
                     Process.GetProcessById(found.Id).Kill();
-                    log.Info($"elevated: убит {name} pid={found.Id}");
+                    log.Info($"elevated: killed {name} pid={found.Id}");
                     killed++;
                 }
                 catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
                 {
-                    log.Warn($"elevated: не удалось убить {name} pid={found.Id}: {ex.Message}");
+                    log.Warn($"elevated: failed to kill {name} pid={found.Id}: {ex.Message}");
                 }
             }
         }
@@ -200,7 +202,7 @@ public sealed class ElevatedRunner(
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            log.Warn($"elevated {command}: UAC отклонён: {ex.Message}");
+            log.Warn($"elevated {command}: UAC declined: {ex.Message}");
             return new ElevatedResult(false, $"UAC declined: {ex.Message}");
         }
 
@@ -235,7 +237,7 @@ public sealed class ElevatedRunner(
             }
         }
 
-        log.Error($"elevated {command}: UAC/старт не подтверждён за {config.UacWaitSeconds}s");
+        log.Error($"elevated {command}: UAC/start not confirmed within {config.UacWaitSeconds}s");
         return new ElevatedResult(false, $"UAC/start not confirmed within {config.UacWaitSeconds}s");
     }
 

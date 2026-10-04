@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Configuration;
 
@@ -270,11 +271,20 @@ public sealed class LoggingConfig
     /// <summary>Каталог логов; переменные окружения (%LOCALAPPDATA% и т.п.) раскрываются при загрузке.</summary>
     public string Directory { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\logs";
 
+    /// <summary>
+    /// Минимальный уровень записей: "debug" | "info" | "warn" | "error". По умолчанию "info" —
+    /// разовые события без per-request шума; "debug" — для разбора проблем (незнакомое → info).
+    /// </summary>
+    public string Level { get; set; } = "info";
+
     /// <summary>Порог ротации; сама ротация выполняется один раз на старте процесса.</summary>
     public int MaxBytes { get; set; } = 1_000_000;
 
     /// <summary>Сколько старых файлов (.1, .2, ...) держать.</summary>
     public int Keep { get; set; } = 2;
+
+    [JsonIgnore]
+    public LogLevel EffectiveLevel => LogLevelParser.Parse(Level);
 }
 
 public sealed class ForwardProxyConfig
@@ -327,9 +337,6 @@ public sealed class ForwardProxyConfig
     public string ActivityMarkerPath { get; set; } = @"%APPDATA%\PrivateNetRouting\proxy-activity";
 
     public int ActivityTouchIntervalSeconds { get; set; } = 60;
-
-    /// <summary>Отладочная трассировка запросов (только для наладки).</summary>
-    public bool Verbose { get; set; }
 }
 
 public sealed class DohDiscoveryConfig

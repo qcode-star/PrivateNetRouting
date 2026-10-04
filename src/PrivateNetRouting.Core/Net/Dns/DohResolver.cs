@@ -27,7 +27,7 @@ public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSp
             }
         }
 
-        throw new IOException($"doh: все эндпоинты не ответили для {host}: {lastError?.Message}", lastError);
+        throw new IOException($"doh: all endpoints failed for {host}: {lastError?.Message}", lastError);
     }
 }
 

@@ -181,10 +181,11 @@ public sealed class ChainSupervisor(
             if (await healthCheck(ct))
             {
                 Report(progress, "Health", ChainStepStatus.Done, "chain is alive");
-                log.Info("chain: полностью поднята");
+                log.Info("chain: fully up");
                 return;
             }
 
+            log.Debug("chain: CONNECT-roundtrip not passing yet, retrying in 1 s");
             await Task.Delay(1000, ct);
         }
 
@@ -207,7 +208,7 @@ public sealed class ChainSupervisor(
         catch (Exception ex)
         {
             Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
-            log.Warn($"chain: down не удался: {ex.Message}");
+            log.Warn($"chain: down failed: {ex.Message}");
         }
 
         Report(progress, "Daemon", ChainStepStatus.Active, "stopping (needs elevation)");
@@ -225,11 +226,15 @@ public sealed class ChainSupervisor(
         Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
         await keeper.KillAsync(ct);
         Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
-        log.Info("chain: остановлена");
+        log.Info("chain: stopped");
     }
 
-    private static void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail) =>
+    /// <summary>Шаг в UI/CLI-прогресс; он же — Debug-строка в лог (полная картина подъёма).</summary>
+    private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail)
+    {
+        log.Debug($"chain: {component}: {status.ToString().ToLowerInvariant()}: {detail}");
         progress?.Report(new ChainStep(component, status, detail));
+    }
 }
 
 /// <summary>Ошибка конкретного звена цепочки (для понятных сообщений UI/CLI).</summary>

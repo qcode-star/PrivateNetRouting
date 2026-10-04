@@ -101,6 +101,7 @@ public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, Fi
                     {
                         await DownloadChunkAsync(chunk, url, ct);
                         var done = Interlocked.Add(ref doneBytes, chunk.Size);
+                        log.Debug($"updater: fragment {Path.GetFileName(chunk.File)} done ({ByteSize.Format(chunk.Size)}, total {ByteSize.Format(done)})");
                         progress?.Report((done, expectedLength));
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
