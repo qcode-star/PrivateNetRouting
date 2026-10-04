@@ -902,7 +902,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void Refresh()
     {
-        var proxy = _runtime.Proxy;
+        // порт — истина: в detached-режиме слушатель держит воркер, карточка показывает его
+        var proxy = _runtime.ProxyControl;
         var running = proxy.IsRunning;
         StateText = running ? Loc.S("Main.State.Running") : Loc.S("Main.State.Stopped");
         StateBrush = running

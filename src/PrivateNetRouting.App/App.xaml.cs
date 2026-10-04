@@ -5,6 +5,7 @@ using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
+using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
@@ -13,10 +14,11 @@ namespace PrivateNetRouting.App;
 /// Точка входа GUI-режимов: обычный (окно + трей), ярлыковый (--launch: если Claude уже
 /// запущен — только окно, иначе окно с процессом запуска цепочки/Claude) и элевейтнутые
 /// helper-команды (--elevated-*, выполняются до всего прочего и сразу завершают процесс —
-/// их запускает ElevatedRunner через runas). Одиночный экземпляр — mutex + событие
-/// активации: повторный запуск показывает уже открытое (или свёрнутое в трей) окно.
-/// Закрытие окна и минимизация прячут приложение в трей; настоящий выход — «Выход»
-/// в меню трея (или завершение сеанса Windows).
+/// их запускает ElevatedRunner через runas), а также тело detached-воркера прокси
+/// (--proxy-worker, до mutex одиночного экземпляра и до UI — это второй процесс).
+/// Одиночный экземпляр — mutex + событие активации: повторный запуск показывает уже
+/// открытое (или свёрнутое в трей) окно. Закрытие окна и минимизация прячут приложение
+/// в трей; настоящий выход — «Выход» в меню трея (или завершение сеанса Windows).
 /// </summary>
 public partial class App : Application
 {
@@ -33,6 +35,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // detached-воркер прокси (spawnится супервизором цепочки): никакого UI и
+        // одиночного экземпляра — живёт, пока его не убьёт останов цепочки
+        if (e.Args.Contains(ForwardProxySupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
+        {
+            Shutdown(ProxyWorker.RunAsync(CancellationToken.None).GetAwaiter().GetResult());
+            return;
+        }
 
         if (TryRunElevatedHelper(e.Args, out var helperCode))
         {

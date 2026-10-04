@@ -360,6 +360,8 @@ public class BrowserLauncherTests : IDisposable
         public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains) => Processes;
 
         public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => Processes;
+
+        public FoundProcess? FindById(int processId) => null;
     }
 
     public void Dispose()

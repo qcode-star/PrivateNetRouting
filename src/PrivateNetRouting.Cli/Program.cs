@@ -4,22 +4,35 @@ using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Diagnostics;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.Cli;
 
 /// <summary>
-/// Headless-режим (паритет со старыми скриптами): proxy — крутить forward-прокси в консоли,
-/// chain — управление цепочкой (status/up/down), check — CONNECT-roundtrip, status — сводка
-/// диагностики (порт proxy-status.ps1), logs — просмотр/ротация логов, config — путь/инициализация.
-/// Элевейтнутые команды (--elevated-*) выполняет внутренний helper и выходит.
+/// Headless-режим (паритет со старыми скриптами): proxy — крутить forward-прокси в консоли
+/// (или поднять detached-воркер), chain — управление цепочкой (status/up/down), check —
+/// CONNECT-roundtrip, status — сводка диагностики (порт proxy-status.ps1), logs —
+/// просмотр/ротация логов, config — путь/инициализация. Элевейтнутые команды (--elevated-*)
+/// выполняет внутренний helper и выходит; --proxy-worker — тело detached-воркера прокси.
 /// </summary>
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
         var first = args.FirstOrDefault() ?? "help";
+        if (first == ForwardProxySupervisor.WorkerMarker)
+        {
+            using var stop = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                stop.Cancel();
+            };
+            return await ProxyWorker.RunAsync(stop.Token);
+        }
+
         if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain || GuardElevatedCommands.IsCommand(first))
         {
             var resultFile = ParseOption(args, "--result-file")
@@ -33,7 +46,7 @@ internal static class Program
         {
             return first switch
             {
-                "proxy" => await RunProxyAsync(),
+                "proxy" => await RunProxyAsync(args.Skip(1).ToList()),
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
                 "status" => await RunStatusAsync(),
@@ -54,16 +67,50 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunProxyAsync()
+    /// <summary>
+    /// Без флагов — экспертный режим: прокси крутится в этом процессе (Ctrl+C — стоп),
+    /// независимо от forwardProxy.detached. С --detached — поднять detached-воркер
+    /// (переживёт выход команды, паритет ts-fwd) и вернуться.
+    /// </summary>
+    private static async Task<int> RunProxyAsync(List<string> rest)
     {
+        var detached = false;
+        foreach (var argument in rest)
+        {
+            switch (argument)
+            {
+                case "--detached":
+                    detached = true;
+                    break;
+                default:
+                    Console.Error.WriteLine($"unknown option: {argument} (--detached)");
+                    return 1;
+            }
+        }
+
         var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
         if (!config.ForwardProxy.Enabled)
         {
             Console.WriteLine("forward proxy is disabled in config (forwardProxy.enabled=false)");
             return 0;
         }
 
+        if (detached)
+        {
+            config.ForwardProxy.Detached = true; // флаг сильнее конфига — только на этот запуск
+            await using var runtime = ProxyRuntime.FromConfig(config);
+            await runtime.ProxyControl.StartAsync(CancellationToken.None);
+            Console.WriteLine($"forward proxy: listening on {string.Join(", ", runtime.ProxyControl.ListenerEndpoints)} (detached worker)");
+            Console.WriteLine($"log: {runtime.Log.FilePath}");
+            return 0;
+        }
+
+        if (config.ForwardProxy.Detached)
+        {
+            Console.WriteLine("note: forwardProxy.detached=true — the detached worker may hold the port; stop it first (pnr chain down)");
+        }
+
+        await using var consoleRuntime = ProxyRuntime.FromConfig(config);
         using var stop = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
         {
@@ -71,9 +118,9 @@ internal static class Program
             stop.Cancel();
         };
 
-        await runtime.StartAsync(stop.Token);
-        Console.WriteLine($"forward proxy: listening on {string.Join(", ", runtime.Proxy.ListenerEndpoints)}");
-        Console.WriteLine($"log: {runtime.Log.FilePath}");
+        await consoleRuntime.ProxyService.StartAsync(stop.Token);
+        Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyService.ListenerEndpoints)}");
+        Console.WriteLine($"log: {consoleRuntime.Log.FilePath}");
         Console.WriteLine("Ctrl+C to stop");
         await Task.Delay(Timeout.Infinite, stop.Token);
         return 0;
@@ -94,7 +141,7 @@ internal static class Program
                 Console.WriteLine($"daemon:    listener {(state.DaemonHttpListening ? "up" : "down")}, process {(state.DaemonProcessAlive ? "alive" : "not found")}");
                 Console.WriteLine($"keeper:    {(state.KeeperRunning ? "running" : "not found")}");
                 Console.WriteLine($"node:      BackendState={state.BackendState ?? "no response"}");
-                Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.Proxy.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
+                Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
                 Console.WriteLine(state.IsFullyUp ? "chain: fully up" : "chain: partial");
                 return 0;
 
@@ -694,7 +741,11 @@ internal static class Program
         Console.WriteLine("""
             pnr — PrivateNetRouting headless mode
 
-            pnr proxy            run the forward proxy (Ctrl+C to stop)
+            pnr proxy [--detached]
+                                 run the forward proxy in this console (Ctrl+C to stop);
+                                 --detached starts the detached worker instead and
+                                 returns — the worker survives this command (parity
+                                 with the old scheme, forwardProxy.detached)
             pnr chain status     chain state (daemon/keeper/node/proxy/health)
             pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)

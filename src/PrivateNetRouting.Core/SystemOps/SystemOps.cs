@@ -32,6 +32,9 @@ public interface IProcessFinder
 
     /// <summary>Поиск по подстроке в имени процесса (WQL LIKE), командная строка не фильтруется.</summary>
     IReadOnlyList<FoundProcess> FindByNameContains(string namePart);
+
+    /// <summary>Процесс по PID с его командной строкой; null — процесса уже нет.</summary>
+    FoundProcess? FindById(int processId);
 }
 
 public sealed class WmiProcessFinder : IProcessFinder
@@ -48,6 +51,13 @@ public sealed class WmiProcessFinder : IProcessFinder
         using var searcher = new ManagementObjectSearcher(
             new SelectQuery("Win32_Process", $"Name LIKE '%{namePart.Replace("'", "''")}%'"));
         return Search(searcher, commandLineContains: string.Empty);
+    }
+
+    public FoundProcess? FindById(int processId)
+    {
+        using var searcher = new ManagementObjectSearcher(
+            new SelectQuery("Win32_Process", $"ProcessId = {processId}"));
+        return Search(searcher, commandLineContains: string.Empty).FirstOrDefault();
     }
 
     private static IReadOnlyList<FoundProcess> Search(ManagementObjectSearcher searcher, string commandLineContains)

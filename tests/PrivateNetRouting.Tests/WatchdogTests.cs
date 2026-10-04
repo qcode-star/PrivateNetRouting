@@ -279,6 +279,8 @@ public class WatchdogTests : IDisposable
 
         public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) =>
             Enumerable.Range(0, count).Select(i => new FoundProcess(i, "")).ToList();
+
+        public FoundProcess? FindById(int processId) => null;
     }
 
     private sealed class ThrowingFinder : IProcessFinder
@@ -286,6 +288,8 @@ public class WatchdogTests : IDisposable
         public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains) => throw new System.Management.ManagementException("wmi down");
 
         public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => throw new System.Management.ManagementException("wmi down");
+
+        public FoundProcess? FindById(int processId) => throw new System.Management.ManagementException("wmi down");
     }
 
     private sealed class FakeCounter(int count) : IEstablishedConnectionCounter

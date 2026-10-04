@@ -23,7 +23,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
 {
     public AppConfig Config { get; }
 
-    public ForwardProxyService Proxy { get; }
+    /// <summary>Сам прокси-сервер (in-process); консольный режим и воркер стартуют его напрямую.</summary>
+    public ForwardProxyService ProxyService { get; }
+
+    /// <summary>Управление слушателем порта: in-process или detached-воркер (forwardProxy.detached).</summary>
+    public ForwardProxySupervisor ProxyControl { get; }
 
     public FileLog Log { get; }
 
@@ -61,12 +65,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
         DohPool = pool;
-        Proxy = proxy;
+        ProxyService = proxy;
+        ProxyControl = proxyControl;
         Chain = chain;
         _chainLog = chainLog;
         Launcher = launcher;
@@ -129,11 +134,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
+        var tcpTable = new TcpConnectionTable();
+        var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log);
         var chainLog = NewLog("chain.log");
         var elevated = new ElevatedRunner(config.Chain, chainLog);
         var chain = new ChainSupervisor(
             config.Chain,
-            proxy,
+            proxyControl,
             new SidecarDaemon(config.Chain, ports, processes, chainLog, elevated),
             new SidecarKeeper(config.Chain, processes, chainLog),
             new SidecarCli(config.Chain),
@@ -208,13 +215,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
             config,
             chain,
             proxy,
-            new TcpConnectionTable(),
+            tcpTable,
             processes,
             ct => ChainProbeAsync(config, ct),
             guard.GetCoreStatusAsync,
             logs);
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
+        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
@@ -232,9 +239,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             ct);
     }
 
-    public Task StartAsync(CancellationToken ct = default) => Proxy.StartAsync(ct);
+    public Task StartAsync(CancellationToken ct = default) => ProxyControl.StartAsync(ct);
 
-    public Task StopAsync() => Proxy.StopAsync();
+    public Task StopAsync() => ProxyControl.StopAsync();
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {
@@ -269,7 +276,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await Proxy.DisposeAsync();
+        await ProxyService.DisposeAsync();
         DohPool.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();

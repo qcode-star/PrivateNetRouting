@@ -364,6 +364,19 @@ public sealed class ForwardProxyConfig
     /// <summary>Одноразовый бинд на шлюзе WSL NAT (адрес адаптера ищется на старте с повторами).</summary>
     public bool BindWslGateway { get; set; } = true;
 
+    /// <summary>
+    /// Прокси в отдельном detached-воркере (свой exe с маркером --proxy-worker), переживающем
+    /// выход команды/GUI (паритет ts-fwd прежней схемы): chain up поднимает воркер, chain down
+    /// останавливает. Выключено — прокси живёт в процессе GUI/команды, как раньше.
+    /// </summary>
+    public bool Detached { get; set; }
+
+    /// <summary>Сколько секунд ждать слушатель detached-воркера после его запуска.</summary>
+    public int WorkerStartWaitSeconds { get; set; } = 15;
+
+    /// <summary>Сколько секунд ждать освобождения порта после останова detached-воркера.</summary>
+    public int WorkerStopWaitSeconds { get; set; } = 10;
+
     /// <summary>SOCKS5-апстрим "host:port" (userspace-sidecar), дозвон по IP после резолва.</summary>
     public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
 

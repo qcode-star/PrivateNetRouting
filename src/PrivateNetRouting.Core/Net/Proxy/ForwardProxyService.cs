@@ -24,12 +24,21 @@ public interface IProxyStatistics
 }
 
 /// <summary>
+/// Один экземпляр прокси с точки зрения супервизора: управление и статистика.
+/// IsRunning переобъявлен, чтобы снять неоднозначность двух родительских интерфейсов.
+/// </summary>
+public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
+{
+    new bool IsRunning { get; }
+}
+
+/// <summary>
 /// Локальный CONNECT-прокси (порт ts-fwd). Имена резолвит DoH через SOCKS5-апстрим —
 /// системный резолв не используется (он перекрыт банами), дозвон идёт по IP тем же SOCKS5.
 /// Биндится на основной адрес из конфига и один раз на шлюзе WSL NAT, когда адаптер появится.
 /// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки; per-request трассировка — Debug.
 /// </summary>
-public sealed class ForwardProxyService : IProxyControl, IProxyStatistics, IAsyncDisposable
+public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposable
 {
     private static readonly byte[] EstablishResponse =
         "HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray();

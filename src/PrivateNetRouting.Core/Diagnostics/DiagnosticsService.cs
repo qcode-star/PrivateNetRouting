@@ -143,7 +143,11 @@ public sealed class DiagnosticsService(
                 wslBind.Count > 0 ? DiagMark.Good : DiagMark.Neutral),
             new(
                 "connections",
-                $"active {proxy.ActiveConnections}, total {proxy.TotalConnections}, failed {proxy.FailedConnections}"),
+                proxy.IsRunning
+                    ? $"active {proxy.ActiveConnections}, total {proxy.TotalConnections}, failed {proxy.FailedConnections}"
+                    : proxyListeners.Count > 0
+                        ? "n/a (the proxy lives in another process)"
+                        : "-"),
             ActivityLine(),
         };
         return new DiagSection("proxy", lines);
