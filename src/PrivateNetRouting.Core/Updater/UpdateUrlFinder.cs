@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 
@@ -16,7 +17,7 @@ public interface IUpdateUrlFinder
 /// (первые события журнала — самые свежие). Сообщение целиком забирается через Get-WinEvent,
 /// разбор адреса — <see cref="PackageUrl.ExtractFromMessage"/>.
 /// </summary>
-public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, PowerShellRunner powershell, FileLog log) : IUpdateUrlFinder
+public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, IPowerShellExecutor powershell, FileLog log) : IUpdateUrlFinder
 {
     private const string LogName = "Microsoft-Windows-AppXDeploymentServer/Operational";
 

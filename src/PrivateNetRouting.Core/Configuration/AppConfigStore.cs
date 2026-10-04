@@ -92,5 +92,7 @@ file static class AppConfigExtensions
         config.Launcher.AliasPath = Environment.ExpandEnvironmentVariables(config.Launcher.AliasPath);
         config.Updater.CacheDir = Environment.ExpandEnvironmentVariables(config.Updater.CacheDir);
         config.Updater.PowerShellPath = Environment.ExpandEnvironmentVariables(config.Updater.PowerShellPath);
+        config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);
+        config.Guard.ClaudeSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.ClaudeSettingsPath);
     }
 }

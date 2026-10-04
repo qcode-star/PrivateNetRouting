@@ -1,5 +1,6 @@
 using System.Text.Json;
 using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Updater;
 
@@ -18,7 +19,7 @@ public interface IAppxPackageSource
 /// Get-AppxPackage (версия/Publisher установленного пакета; при нескольких берётся старшая)
 /// и Add-AppxPackage -ForceApplicationShutdown — как в прежней схеме обновления.
 /// </summary>
-public sealed class PowerShellAppxPackageSource(PowerShellRunner powershell, FileLog log) : IAppxPackageSource
+public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, FileLog log) : IAppxPackageSource
 {
     public async Task<InstalledPackage?> GetInstalledAsync(string packageName, CancellationToken ct)
     {

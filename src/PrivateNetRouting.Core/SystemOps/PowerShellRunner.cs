@@ -1,13 +1,18 @@
 using System.Diagnostics;
 
-namespace PrivateNetRouting.Core.Updater;
+namespace PrivateNetRouting.Core.SystemOps;
 
 /// <summary>
-/// Запуск Windows PowerShell без окна: Get-AppxPackage/Add-AppxPackage/Get-WinEvent —
-/// те же командлеты, что в прежней схеме обновления. PowerShell 5.1 — компонент ОС,
+/// Запуск Windows PowerShell без окна (обновлятор: Get-AppxPackage/Add-AppxPackage/Get-WinEvent;
+/// гард: Get-DnsClientNrptRule/NetFirewall). PowerShell 5.1 — компонент ОС,
 /// путь берётся из конфига (updater.powerShellPath).
 /// </summary>
-public sealed class PowerShellRunner(string powerShellPath)
+public interface IPowerShellExecutor
+{
+    Task<(int Code, string Output)> RunScriptAsync(string script, CancellationToken ct);
+}
+
+public sealed class PowerShellRunner(string powerShellPath) : IPowerShellExecutor
 {
     public async Task<(int Code, string Output)> RunScriptAsync(string script, CancellationToken ct)
     {

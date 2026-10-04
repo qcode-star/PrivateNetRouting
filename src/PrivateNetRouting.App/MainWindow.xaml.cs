@@ -9,6 +9,7 @@ using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 
 namespace PrivateNetRouting.App;
@@ -26,6 +27,9 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
+    private readonly DispatcherTimer _guardTimer;
+    private GuardSnapshot? _lastGuards;
+    private bool _guardBusy;
     private bool _chainBusy;
     private bool _launchBusy;
     private bool _fillingLanguages;
@@ -51,6 +55,14 @@ public partial class MainWindow : Window
         _chainTimer.Tick += async (_, _) => await RefreshChainAsync();
         _chainTimer.Start();
         _ = RefreshChainAsync();
+
+        // статусы гардов — только чтение (реестр/hosts/NRPT/firewall/WSL), но NRPT и firewall
+        // читаются командлетами PowerShell — опрос реже, чем состояние цепочки
+        _guardTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        _guardTimer.Tick += async (_, _) => await RefreshGuardsAsync();
+        _guardTimer.Start();
+        Loc.LanguageChanged += RenderGuardsFromCache;
+        _ = RefreshGuardsAsync();
     }
 
     /// <summary>Минимизация прячется в трей (приложение продолжает работать) — как и закрытие окна.</summary>
@@ -67,6 +79,8 @@ public partial class MainWindow : Window
     {
         _refreshTimer.Stop();
         _chainTimer.Stop();
+        _guardTimer.Stop();
+        Loc.LanguageChanged -= RenderGuardsFromCache;
         _watchdogCts?.Cancel();
         _viewModel.Dispose();
         base.OnClosed(e);
@@ -87,6 +101,224 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _viewModel.SetChainStateError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Гарды прямого доступа: статусы читаются целиком (реестр, hosts, NRPT/firewall,
+    /// settings.json, WSL) и раскрашивают карточку; «Обновить» и таймер — тот же путь.
+    /// </summary>
+    private async Task RefreshGuardsAsync()
+    {
+        if (_guardBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            _lastGuards = await _runtime.Guard.GetStatusAsync(CancellationToken.None);
+            RenderGuards();
+        }
+        catch (Exception ex)
+        {
+            _lastGuards = null;
+            BanDetail.Text = PolicyDetail.Text = SettingsDetail.Text = WslDetail.Text = ex.Message;
+            SetGuardDots(GuardState.Unknown, GuardState.Unknown, GuardState.Unknown, GuardState.Unknown);
+        }
+    }
+
+    private void RenderGuardsFromCache() => RenderGuards();
+
+    private void RenderGuards()
+    {
+        var snapshot = _lastGuards;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        SetGuardDots(snapshot.Ban.State, snapshot.Policy.State, snapshot.Settings.State, snapshot.Wsl.State);
+
+        BanDetail.Text = snapshot.Ban.Detail ?? (snapshot.Ban.State switch
+        {
+            GuardState.Off => Loc.S("Main.Guard.Ban.Off"),
+            GuardState.Unknown => Loc.S("Main.Guard.Unknown"),
+            _ => Loc.F("Main.Guard.Ban.DetailFmt", snapshot.Ban.HostsEntries, snapshot.Ban.NrptNamespaces.Count, snapshot.Ban.FirewallRules),
+        });
+        BanDetail.ToolTip = snapshot.Ban.HostsEntries > 0 && !snapshot.Ban.HostsCurrent
+            ? Loc.S("Main.Guard.Ban.Stale")
+            : null;
+
+        PolicyDetail.Text = snapshot.Policy.State switch
+        {
+            GuardState.On => Loc.F("Main.Guard.Policy.DetailFmt", snapshot.Policy.CurrentUrl),
+            GuardState.Off => Loc.S("Main.Guard.Policy.Off"),
+            GuardState.Partial => Loc.F("Main.Guard.Policy.OtherFmt", snapshot.Policy.CurrentUrl, snapshot.Policy.ExpectedUrl),
+            _ => snapshot.Policy.Detail ?? Loc.S("Main.Guard.Unknown"),
+        };
+
+        SettingsDetail.Text = snapshot.Settings.State switch
+        {
+            GuardState.On => Loc.F("Main.Guard.Settings.OkFmt", snapshot.Settings.ExpectedProxy),
+            GuardState.Off => Loc.S("Main.Guard.Settings.NoFile"),
+            GuardState.Partial => Loc.F(
+                "Main.Guard.Settings.MismatchFmt",
+                snapshot.Settings.CurrentProxy ?? "—",
+                snapshot.Settings.CurrentNoProxy ?? "—"),
+            _ => snapshot.Settings.Detail ?? Loc.S("Main.Guard.Unknown"),
+        };
+
+        WslDetail.Text = snapshot.Wsl.Distros.Count == 0
+            ? LocalizeWslReason(snapshot.Wsl.Reason)
+            : string.Join("; ", snapshot.Wsl.Distros.Select(LocalizeDistroStatus));
+        WslDetail.ToolTip = snapshot.Wsl.Distros.Count == 0
+            ? null
+            : string.Join("\n", snapshot.Wsl.Distros.Select(d => $"{d.Distro}: {d.Reason}"));
+    }
+
+    /// <summary>Строка одного дистрибутива: имя + локализованное состояние (детали — в тултипе).</summary>
+    private static string LocalizeDistroStatus(WslDistroStatus distro) => distro.State switch
+    {
+        GuardState.On => Loc.F("Main.Guard.Wsl.DistroOnFmt", distro.Distro, distro.ScriptPort),
+        GuardState.Off => $"{distro.Distro}: {Loc.S("Main.Guard.State.Off")}",
+        GuardState.Partial => $"{distro.Distro}: {Loc.S("Main.Guard.State.Partial")}",
+        _ => $"{distro.Distro}: {LocalizeWslReason(distro.Reason)}",
+    };
+
+    private static string LocalizeWslReason(string reason)
+    {
+        if (reason.Contains("mode=off", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.Off.Mode");
+        }
+
+        if (reason.Contains("no distros configured", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.NotConfigured");
+        }
+
+        if (reason.Contains("auto", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.AutoNone");
+        }
+
+        if (reason.Contains("not running", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.NotRunning");
+        }
+
+        if (reason.Contains("not installed", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.NotInstalled");
+        }
+
+        if (reason.Contains("startup script not found", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.NoScript");
+        }
+
+        return reason;
+    }
+
+    private void SetGuardDots(GuardState ban, GuardState policy, GuardState settings, GuardState wsl)
+    {
+        BanDot.Fill = BrushFor(ban);
+        PolicyDot.Fill = BrushFor(policy);
+        SettingsDot.Fill = BrushFor(settings);
+        WslDot.Fill = BrushFor(wsl);
+    }
+
+    private static Brush BrushFor(GuardState state) => state switch
+    {
+        GuardState.On => new SolidColorBrush(Color.FromRgb(0x7C, 0xB9, 0x7C)),
+        GuardState.Partial => new SolidColorBrush(Color.FromRgb(0xE0, 0xA8, 0x3E)),
+        GuardState.Off => new SolidColorBrush(Color.FromRgb(0xD9, 0x6B, 0x6B)),
+        _ => Brushes.Gray,
+    };
+
+    /// <summary>Бан и политика идут через элевейтнутый helper (UAC); живые проверки — сразу после.</summary>
+    private async void OnGuardBanOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        var result = await _runtime.Guard.BanAsync(enable: true, CancellationToken.None);
+        _viewModel.SetCheckResult(
+            "Main.Guard.Ban.LiveFmt",
+            Loc.S(result.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"),
+            Loc.S(result.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"));
+    });
+
+    private async void OnGuardBanOff(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        var result = await _runtime.Guard.BanAsync(enable: false, CancellationToken.None);
+        _viewModel.SetCheckResult(
+            "Main.Guard.Ban.LiveFmt",
+            Loc.S(result.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"),
+            Loc.S(result.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"));
+    });
+
+    private async void OnGuardPolicyOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        await _runtime.Guard.PolicyAsync(enable: true, CancellationToken.None);
+        _viewModel.SetCheckResult("Main.Guard.Policy.OnDone");
+    });
+
+    private async void OnGuardPolicyOff(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        await _runtime.Guard.PolicyAsync(enable: false, CancellationToken.None);
+        _viewModel.SetCheckResult("Main.Guard.Policy.OffDone");
+    });
+
+    /// <summary>Запись env (прокси + NO_PROXY) в settings.json Claude Code; бэкап рядом с файлом.</summary>
+    private async void OnGuardSettingsSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        var result = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+        _viewModel.SetCheckResult(
+            "Main.Guard.Settings.DoneFmt",
+            result.ProxyUrl,
+            result.BackupPath ?? Loc.S("Main.Guard.Backup.None"));
+    });
+
+    /// <summary>Обновление стартового скрипта WSL и settings.json дистрибутивов (не поднимает их).</summary>
+    private async void OnGuardWslSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
+    {
+        var result = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
+        if (result.LayerDisabled)
+        {
+            _viewModel.SetCheckResult("Main.Guard.Wsl.SkippedFmt", LocalizeWslReason(result.Reason ?? ""));
+            return;
+        }
+
+        var lines = result.Distros.Select(d => d.Skipped
+            ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
+            : Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? ""));
+        _viewModel.SetCheckText(string.Join("; ", lines));
+    });
+
+    private async void OnRefreshGuards(object sender, RoutedEventArgs e) => await RefreshGuardsAsync();
+
+    private async Task RunGuardAsync(Func<Task> action)
+    {
+        if (_guardBusy)
+        {
+            return;
+        }
+
+        _guardBusy = true;
+        _viewModel.SetGuardBusy(true);
+        _viewModel.SetCheckResult("Main.Guard.Busy");
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _guardBusy = false;
+            _viewModel.SetGuardBusy(false);
+            await RefreshGuardsAsync();
         }
     }
 
@@ -383,6 +615,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string? _chainStateError;
     private string? _checkResultKey;
     private object?[] _checkResultArgs = [];
+    private string? _checkResultLiteral;
     private string _stateText = "";
     private Brush _stateBrush = Brushes.Gray;
     private string _endpoints = "—";
@@ -464,7 +697,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>Форматируется из ключа+аргументов при каждом чтении — переживает смену языка.</summary>
-    public string CheckResult => _checkResultKey is null ? "" : Loc.F(_checkResultKey, _checkResultArgs);
+    public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
+
+    /// <summary>Готовый текст без локализации (составные результаты операций гардов).</summary>
+    public void SetCheckText(string text)
+    {
+        _checkResultKey = null;
+        _checkResultLiteral = text;
+        OnPropertyChanged(nameof(CheckResult));
+    }
 
     /// <summary>Сигнал о найденном на старте обновлении Claude; пуст, когда обновления нет.</summary>
     public string UpdateNotice => _updateNoticeKey is null ? "" : Loc.F(_updateNoticeKey, _updateNoticeArgs);
@@ -514,6 +755,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool CanChainDown => !_chainOperationRunning && !_launchRunning;
 
     public bool CanLaunch => !_chainOperationRunning && !_launchRunning;
+
+    public bool CanGuard { get; private set; } = true;
+
+    /// <summary>Занятость операций гардов (UAC/запись): кнопки карточки гаснут на время действия.</summary>
+    public void SetGuardBusy(bool busy)
+    {
+        CanGuard = !busy;
+        OnPropertyChanged(nameof(CanGuard));
+    }
 
     public void SetLaunchBusy(bool busy)
     {

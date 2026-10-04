@@ -1,6 +1,7 @@
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Updater;
@@ -17,11 +18,13 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         var first = args.FirstOrDefault() ?? "help";
-        if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain)
+        if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain || GuardElevatedCommands.IsCommand(first))
         {
             var resultFile = ParseOption(args, "--result-file")
                 ?? throw new ArgumentException("elevated helper requires --result-file");
-            return ElevatedChainCommands.Execute(first, resultFile);
+            return GuardElevatedCommands.IsCommand(first)
+                ? GuardElevatedCommands.Execute(first, resultFile)
+                : ElevatedChainCommands.Execute(first, resultFile);
         }
 
         try
@@ -34,6 +37,7 @@ internal static class Program
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
                 "update" => await RunUpdateAsync(args.Skip(1).ToList()),
                 "watchdog" => await RunWatchdogAsync(),
+                "guard" => await RunGuardAsync(args.Skip(1).ToList()),
                 "config" => ConfigCommand(args.Skip(1).ToList()),
                 _ => Help(),
             };
@@ -288,6 +292,154 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Гарды прямого доступа: статус (только чтение), локальный бан hosts/NRPT/firewall
+    /// и managed-политика (обе — UAC), env в settings.json Claude Code (Windows и WSL),
+    /// системный прокси WinINET. После ban on/off — живые проверки (DNS/прямое/проксируемое).
+    /// </summary>
+    private static async Task<int> RunGuardAsync(List<string> rest)
+    {
+        var action = rest.FirstOrDefault() ?? "status";
+        rest = rest.Skip(1).ToList();
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+
+        switch (action)
+        {
+            case "status":
+                var live = rest.Contains("--live");
+                var snapshot = await runtime.Guard.GetStatusAsync(CancellationToken.None);
+                foreach (var item in snapshot.Items.Where(item => item.Kind != GuardKind.SystemProxy))
+                {
+                    Console.WriteLine($"{Name(item.Kind),-15} {State(item.State)}  {item.Detail}");
+                }
+
+                Console.WriteLine($"{"sysproxy",-15} {State(snapshot.SystemProxy.Enabled ? GuardState.On : GuardState.Off)}  {snapshot[GuardKind.SystemProxy].Detail}");
+                if (!live)
+                {
+                    return 0;
+                }
+
+                Console.WriteLine();
+                var checks = await runtime.Guard.LiveChecksAsync(CancellationToken.None);
+                Console.WriteLine(checks.DnsDetail);
+                Console.WriteLine(checks.DirectDetail);
+                Console.WriteLine(checks.ProxiedDetail);
+                return checks.DnsBlocked && checks.DirectBlocked ? 0 : 1;
+
+            case "ban":
+                bool? banOn = rest.FirstOrDefault() switch
+                {
+                    "on" => true,
+                    "off" => false,
+                    _ => null,
+                };
+                if (banOn is null)
+                {
+                    Console.Error.WriteLine("unknown action: pnr guard ban on|off");
+                    return 1;
+                }
+
+                var ban = await runtime.Guard.BanAsync(banOn.Value, CancellationToken.None);
+                Console.WriteLine(ban.Detail);
+                Console.WriteLine(ban.Live.DnsDetail);
+                Console.WriteLine(ban.Live.DirectDetail);
+                Console.WriteLine(ban.Live.ProxiedDetail);
+                return 0;
+
+            case "policy":
+                bool? policyOn = rest.FirstOrDefault() switch
+                {
+                    "on" => true,
+                    "off" => false,
+                    _ => null,
+                };
+                if (policyOn is null)
+                {
+                    Console.Error.WriteLine("unknown action: pnr guard policy on|off");
+                    return 1;
+                }
+
+                Console.WriteLine(await runtime.Guard.PolicyAsync(policyOn.Value, CancellationToken.None));
+                return 0;
+
+            case "settings":
+                if (rest.FirstOrDefault() != "sync")
+                {
+                    Console.Error.WriteLine("unknown action: pnr guard settings sync");
+                    return 1;
+                }
+
+                var settings = await runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+                Console.WriteLine($"settings.json: env proxy {settings.ProxyUrl}, NO_PROXY written (backup: {settings.BackupPath ?? "none"})");
+                return 0;
+
+            case "wsl":
+                if (rest.FirstOrDefault() != "sync")
+                {
+                    Console.Error.WriteLine("unknown action: pnr guard wsl sync");
+                    return 1;
+                }
+
+                var wsl = await runtime.Guard.SyncWslAsync(CancellationToken.None);
+                if (wsl.LayerDisabled)
+                {
+                    Console.WriteLine($"wsl sync skipped: {wsl.Reason}");
+                    return 0;
+                }
+
+                foreach (var distro in wsl.Distros)
+                {
+                    Console.WriteLine(distro.Skipped
+                        ? $"{distro.Distro}: skipped ({distro.Reason})"
+                        : $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script written");
+                }
+
+                return 0;
+
+            case "sysproxy":
+                bool? sysOn = rest.FirstOrDefault() switch
+                {
+                    "on" => true,
+                    "off" => false,
+                    _ => null,
+                };
+                if (sysOn is null)
+                {
+                    Console.Error.WriteLine("unknown action: pnr guard sysproxy on|off");
+                    return 1;
+                }
+
+                await runtime.Guard.SetSystemProxyAsync(sysOn.Value, CancellationToken.None);
+                Console.WriteLine(sysOn.Value
+                    ? $"system proxy enabled: {config.ForwardProxy.Listen} (bypass: corp domains + local ranges)"
+                    : "system proxy disabled (direct access restored)");
+                return 0;
+
+            default:
+                Console.Error.WriteLine($"unknown action: {action} (status [--live] | ban on|off | policy on|off | settings sync | wsl sync | sysproxy on|off)");
+                return 1;
+        }
+
+        static string Name(GuardKind kind) => kind switch
+        {
+            GuardKind.LocalBan => "local ban",
+            GuardKind.EgressPolicy => "egress policy",
+            GuardKind.ClaudeSettings => "settings.json",
+            GuardKind.WslConfig => "wsl config",
+            GuardKind.SystemProxy => "sysproxy",
+            _ => kind.ToString().ToLowerInvariant(),
+        };
+
+        static string State(GuardState state) => state switch
+        {
+            GuardState.On => "on     ",
+            GuardState.Off => "off    ",
+            GuardState.Partial => "partial",
+            _ => "unknown",
+        };
+    }
+
     private static int ConfigCommand(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "path";
@@ -358,6 +510,19 @@ internal static class Program
             pnr watchdog         idle auto-stop supervisor: check Claude usage every
                                  watchdog.checkSeconds, on idle stop the WSL host and
                                  the chain (Ctrl+C to stop; starts nothing by itself)
+            pnr guard status [--live]
+                                 guard states, read-only: local ban (hosts/NRPT/firewall),
+                                 egress policy, Claude settings.json env, WSL config;
+                                 --live adds DNS/direct/proxied probes
+            pnr guard ban on|off local ban on direct access: hosts + NRPT + firewall (UAC)
+            pnr guard policy on|off
+                                 managed policy egressProxyUrl + disableWslSessions=0 (UAC)
+            pnr guard settings sync
+                                 write env (proxy + NO_PROXY) into Claude Code settings.json
+            pnr guard wsl sync   update the WSL startup script and settings.json env in
+                                 the distro (guard.wslDistro/guard.wslUser)
+            pnr guard sysproxy on|off
+                                 system WinINET proxy on the app's forward proxy (no UAC)
             pnr config path      user config path
             pnr config init      create the default config if missing
             """);

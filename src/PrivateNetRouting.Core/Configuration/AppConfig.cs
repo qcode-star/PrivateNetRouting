@@ -18,6 +18,8 @@ public sealed class AppConfig
     public WatchdogConfig Watchdog { get; set; } = new();
 
     public UpdaterConfig Updater { get; set; } = new();
+
+    public GuardConfig Guard { get; set; } = new();
 }
 
 /// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
@@ -148,6 +150,119 @@ public sealed class UpdaterConfig
 
     /// <summary>Пауза после гашения процессов Claude перед установкой, сек.</summary>
     public int KillSettleSeconds { get; set; } = 3;
+}
+
+/// <summary>
+/// Гарды прямого доступа (порт set-egress-proxy.ps1, ban-ai-hosts.ps1, proxy-on/off.ps1,
+/// sync-claude-noproxy.ps1 и стартового скрипта WSL): managed-политика egressProxyUrl,
+/// три слоя локального бана (hosts/NRPT/firewall), env в settings.json Claude Code
+/// (Windows и WSL), системный прокси WinINET. Идентификаторы правил бана по умолчанию
+/// совпадают с прежней схемой — приложение подхватывает и ведёт уже стоящий бан,
+/// а не создаёт параллельный (снять их можно и старыми скриптами).
+/// </summary>
+public sealed class GuardConfig
+{
+    // --- локальный бан: hosts + NRPT + firewall (порт ban-ai-hosts.ps1) ---
+
+    /// <summary>Файл hosts; переменные окружения раскрываются.</summary>
+    public string HostsFile { get; set; } = @"%SystemRoot%\System32\drivers\etc\hosts";
+
+    /// <summary>Маркер начала/конца управляемого блока в hosts (точное совпадение строки).</summary>
+    public string HostsBeginMarker { get; set; } = "# >>> ai-direct-ban (ban-ai-hosts.ps1, C:\\ovpn-script)";
+
+    public string HostsEndMarker { get; set; } = "# <<< ai-direct-ban";
+
+    /// <summary>Строка-комментарий внутри блока (человекочитаемая, ни на что не завязана).</summary>
+    public string HostsComment { get; set; } = "# AI services (Claude/OpenAI) blocked from direct access; Claude: local ts-fwd proxy 127.0.0.1:8082 only";
+
+    /// <summary>
+    /// Точные имена в hosts (apex'ы поддеревьев плюс хосты, которые реально зовут приложения,
+    /// и специфичные имена сервисов на общих CDN). Публичные домены Anthropic/OpenAI.
+    /// </summary>
+    public List<string> BanHosts { get; set; } =
+    [
+        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
+        "api.anthropic.com", "console.anthropic.com", "statsig.anthropic.com",
+        "downloads.claude.ai", "a.claude.ai", "assets.claude.ai", "assets-proxy.anthropic.com",
+        "anthropic.qualtrics.com", "servd-anthropic-website.b-cdn.net",
+        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
+        "chatgpt.site", "oaistatsig.com", "crixet.com",
+        "ab.chatgpt.com", "api.openai.com", "auth.openai.com", "platform.openai.com", "cdn.oaistatic.com",
+        "openai.qualtrics.com", "chatgpt.livekit.cloud", "openai.com.cdn.cloudflare.net",
+        "openaicom.imgix.net", "openaiassets.blob.core.windows.net",
+        "openaicomproductionae4b.blob.core.windows.net", "openaiapi-site.azureedge.net",
+        "production-openaicom-storage.azureedge.net", "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+    ];
+
+    /// <summary>Поддеревья для NRPT: на каждое две записи — apex и «.apex» (все поддомены).</summary>
+    public List<string> BanTrees { get; set; } =
+    [
+        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
+        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
+        "chatgpt.site", "oaistatsig.com", "crixet.com",
+    ];
+
+    /// <summary>DisplayName NRPT-правила — по нему правило опознаётся и снимается.</summary>
+    public string NrptRuleName { get; set; } = "ai-direct-ban";
+
+    /// <summary>Comment NRPT-правила (текст для человека, ни на что не завязан).</summary>
+    public string NrptComment { get; set; } = "Claude/OpenAI: прямой доступ закрыт; Claude — только через локальный forward-прокси (ban-ai-hosts.ps1)";
+
+    /// <summary>Подсети Anthropic для firewall outbound Block (публичные константы; общие облака по IP не банятся).</summary>
+    public List<string> FirewallSubnets { get; set; } = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
+
+    /// <summary>Group правил firewall — по ней правила опознаются и снимаются.</summary>
+    public string FirewallGroup { get; set; } = "ai-direct-ban (ban-ai-hosts.ps1)";
+
+    /// <summary>Пробное имя поддерева anthropic.com: в hosts его нет, до бана резолвится — чистая проверка NRPT.</summary>
+    public string BanProbeName { get; set; } = "www.anthropic.com";
+
+    // --- env в settings.json Claude Code (порт sync-claude-noproxy.ps1) ---
+
+    /// <summary>settings.json Claude Code в Windows; переменные окружения раскрываются.</summary>
+    public string ClaudeSettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
+
+    // --- WSL: стартовый скрипт + settings.json дистрибутивов (слой целиком опционален) ---
+
+    /// <summary>Весь WSL-слой гарда: режим и список дистрибутивов с индивидуальным выбором синхронизации.</summary>
+    public GuardWslConfig Wsl { get; set; } = new();
+
+    /// <summary>Стартовый скрипт WSL, обновляющий адрес прокси (шлюз NAT) при старте дистрибутива; путь одинаков во всех дистрибутивах.</summary>
+    public string WslStartupScript { get; set; } = "/etc/wsl.d/startup/10-claude-proxy.sh";
+
+    // --- системный прокси WinINET (порт proxy-on/off.ps1) ---
+
+    /// <summary>Дополнительные записи обхода системного прокси (локальные адреса и приватные диапазоны фиксированы в коде).</summary>
+    public List<string> SystemProxyExtraBypass { get; set; } = ["*.ru", "*.su", "*.by", "*.kz"];
+}
+
+/// <summary>
+/// WSL-слой гарда: полностью опционален. mode: "on" — вести всегда; "off" — не трогать вовсе;
+/// "auto" — вкл, если WSL есть и хотя бы один настроенный дистрибутив установлен на машине,
+/// иначе выкл. По каждому дистрибутиву из списка — свой выбор, синкать ли в него конфиг
+/// (sync=false — только показывать статус, ничего не писать).
+/// </summary>
+public sealed class GuardWslConfig
+{
+    /// <summary>"on" | "off" | "auto".</summary>
+    public string Mode { get; set; } = "auto";
+
+    /// <summary>Дистрибутивы: имя и пользователь (владелец ~/.claude) обязательны, остальное игнорируется.</summary>
+    public List<WslDistroConfig> Distros { get; set; } = [];
+}
+
+public sealed class WslDistroConfig
+{
+    /// <summary>Имя дистрибутива, как в `wsl --list`.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Пользователь дистрибутива (владелец ~/.claude/settings.json).</summary>
+    public string User { get; set; } = "";
+
+    /// <summary>Синхронизировать конфиг Claude в этот дистрибутив; false — только статус.</summary>
+    public bool Sync { get; set; } = true;
 }
 
 public sealed class LoggingConfig

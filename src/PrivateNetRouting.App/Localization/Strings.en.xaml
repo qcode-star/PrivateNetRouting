@@ -69,6 +69,48 @@
     <s:String x:Key="Main.Update.AvailableFmt">Claude update available: {0} → {1}</s:String>
     <s:String x:Key="Main.Update.Available">A Claude update is available</s:String>
 
+    <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
+    <s:String x:Key="Main.Guard">Guards: direct access control</s:String>
+    <s:String x:Key="Main.Guard.Button.Refresh">Refresh</s:String>
+    <s:String x:Key="Main.Guard.Button.On">Enable</s:String>
+    <s:String x:Key="Main.Guard.Button.Off">Disable</s:String>
+    <s:String x:Key="Main.Guard.Button.Sync">Sync</s:String>
+    <s:String x:Key="Main.Guard.Unknown">state unknown</s:String>
+    <s:String x:Key="Main.Guard.State.On">on</s:String>
+    <s:String x:Key="Main.Guard.State.Off">off</s:String>
+    <s:String x:Key="Main.Guard.State.Partial">partial</s:String>
+    <s:String x:Key="Main.Guard.Busy">guard operation in progress (confirm UAC if prompted)...</s:String>
+    <s:String x:Key="Main.Guard.Ban">Local ban</s:String>
+    <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} names · NRPT: {1} namespaces · firewall: {2} rules</s:String>
+    <s:String x:Key="Main.Guard.Ban.Off">no hosts/NRPT/firewall rules</s:String>
+    <s:String x:Key="Main.Guard.Ban.Stale">The hosts block differs from the configured domain list — enable the ban again to refresh it.</s:String>
+    <s:String x:Key="Main.Guard.Ban.LiveFmt">Local ban applied. DNS probe: {0}; direct connection: {1}.</s:String>
+    <s:String x:Key="Main.Guard.Live.Blocked">blocked</s:String>
+    <s:String x:Key="Main.Guard.Live.Open">OPEN</s:String>
+    <s:String x:Key="Main.Guard.Policy">Egress policy</s:String>
+    <s:String x:Key="Main.Guard.Policy.DetailFmt">egressProxyUrl = {0}</s:String>
+    <s:String x:Key="Main.Guard.Policy.Off">policy is not set (Claude may go direct)</s:String>
+    <s:String x:Key="Main.Guard.Policy.OtherFmt">{0} (expected {1})</s:String>
+    <s:String x:Key="Main.Guard.Policy.OnDone">Egress policy is set: Claude always goes through the proxy.</s:String>
+    <s:String x:Key="Main.Guard.Policy.OffDone">Egress policy is removed.</s:String>
+    <s:String x:Key="Main.Guard.Settings">settings.json (Windows)</s:String>
+    <s:String x:Key="Main.Guard.Settings.OkFmt">env is up to date: proxy {0}</s:String>
+    <s:String x:Key="Main.Guard.Settings.NoFile">settings.json was not found</s:String>
+    <s:String x:Key="Main.Guard.Settings.MismatchFmt">HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
+    <s:String x:Key="Main.Guard.Settings.DoneFmt">settings.json updated: proxy {0} (backup: {1})</s:String>
+    <s:String x:Key="Main.Guard.Backup.None">no backup (file was created)</s:String>
+    <s:String x:Key="Main.Guard.Wsl">WSL config</s:String>
+    <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (guard.wsl.mode=off)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.AutoNone">auto: none of the configured distros is installed</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NotConfigured">not configured (guard.wsl.distros)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NotInstalled">distro is not installed</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NotRunning">distro is not running — start it to check</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NoScript">WSL startup script not found</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroOnFmt">{0}: port {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: skipped — {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written</s:String>
+
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Open</s:String>
     <s:String x:Key="Tray.Exit">Exit</s:String>

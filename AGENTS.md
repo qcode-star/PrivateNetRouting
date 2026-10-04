@@ -125,9 +125,8 @@ Git-идентичность задана локально в репозитор
 | Launcher | запуск Claude Desktop с `--proxy-server`/`--proxy-bypass-list` (список обхода собирается из доменов конфига, обе формы записи каждой зоны; базовые записи — localhost/приватные диапазоны — фиксированы в коде), проверка и подъём цепочки (живой CONNECT, затем идемпотентный chain up), заставка с шагами подъёма (на живой цепочке окна нет), контрольные предупреждения в лог про managed-политику `egressProxyUrl` и уже запущенный без флагов Claude, флаги режимов (только-проверка/без-заставки); ярлыковый режим GUI `--launch`: Claude уже запущен (точное имя процесса) — только окно приложения, не запущен — полный запуск с заставкой | **готов** (`PrivateNetRouting.Core.Launcher` + `SplashWindow` в App; CLI `pnr launch [--check-only] [--no-splash]`; заставка — GUI-only; ярлык рабочего стола Claude → `PrivateNetRouting.App --launch`). Живой запуск Claude не проверялся. Ограничение: forward-прокси живёт в процессе команды — по выходе `pnr launch` слушатель гаснет (в прежней схеме ts-fwd был detached); нужен detached-режим прокси для полного паритета | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
 | Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности; первый опрос — через интервал, в лог пишется только смена причины), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown своим бинарником, эскалация SIGTERM→SIGKILL на осиротевших, дистрибутив ради проверки не поднимается), затем останов цепочки существующим оркестратором; запуск — только явный (`pnr watchdog` / галка в окне приложения), живёт, пока жив запустивший процесс, в автозапуск не пишется; ручной сторож WSL-хоста по mtime (`claude-wsl-watch.ps1`) не переносился | **готов** (`PrivateNetRouting.Core.Watchdog`; интервал и дистрибутив WSL — в конфиге `watchdog.*`). Живой автостоп проверен: простой → WSL-хост (no-op при отсутствии хоста) → down → UAC-останов демона → кипер → выход | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
 | Updater | ручное обновление MSIX: проверка версий ДО подъёма цепочки («нечего ставить» — без UAC), адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через собственный forward-прокси, сверка Publisher, закрытие Claude, `Add-AppxPackage`; GUI с шагами/прогрессом/стоп-кнопкой, паузой перед установкой и отложенной установкой (`--install-from`); во время скачивания держится свежим маркер активности (автостоп не гасит цепочку под загрузкой); на старте GUI — фоновая проверка обновления (только чтение версий и журнала AppX, без цепочки и UAC; `ui.checkUpdatesOnStart`): при наличии — строка возле кнопок запуска и балун трея | **реализован** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; окно `UpdateWindow` — часть GUI-приложения). Живьём проверен только `--check` (версия и журнал читаются, отсутствие URL отрабатывается); скачивание и установка живьём не выполнялись | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
-| Guard | managed-политика `egressProxyUrl` (+ `disableWslSessions=0`); запрет прямого доступа тремя слоями: hosts (точные имена), одно NRPT-правило на поддеревья, firewall outbound Block по подсетям; системный прокси on/off на время входа; кнопка «прописать порты в Claude» — согласовать адрес прокси в настройках Claude с конфигом приложения (решение владельца: порты 18081/18082/18083) | план | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1` |
+| Guard | контроль прямого доступа: managed-политика `egressProxyUrl` (+`disableWslSessions=0`); локальный бан тремя слоями — hosts-блок, одно NRPT-правило на все поддеревья, firewall outbound Block по подсетям (идентификаторы по умолчанию совпадают с прежней схемой — приложение ведёт уже стоящий бан, а не создаёт параллельный); env в settings.json Claude Code (Windows и WSL: прокси приложения + NO_PROXY из доменов конфига; в WSL — ещё стартовый скрипт с адресом шлюза NAT, слой целиком опционален: `guard.wsl.mode` = on/off/auto и выбор синхронизации по каждому дистрибутиву); системный прокси WinINET on/off. Статус всех гардов — только чтением (карточка GUI, `pnr guard status [--live]`); бан и политика — элевейтнутым helper'ом, после бана — живые пробы (DNS/прямое/проксируемое) | **реализован** (`PrivateNetRouting.Core.Guard`; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off`; карточка «Гарды» в главном окне). Живьём проверены статус и живые пробы (чтение: бан прежней схемы виден, WSL-конфиг читается); изменяющие операции (бан/политика/синк) живьём не выполнялись | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1`, `sync-claude-noproxy.ps1` + стартовый скрипт `/etc/wsl.d/startup/10-claude-proxy.sh` |
 | BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
-| EnvSync | пересборка `NO_PROXY` и адреса прокси для Claude Code в Windows и WSL из доменов конфига | план | `sync-claude-noproxy.ps1` |
 | Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
 | Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` | **готов** (en/ru; `PrivateNetRouting.App/Localization`, селектор в шапке окна) | — |
 
@@ -146,6 +145,10 @@ Git-идентичность задана локально в репозитор
 - Обновлятор: фаза проверки версий — до подъёма цепочки (лишний UAC не нужен); установка
   не прерывается; во время длительных фаз держать маркер активности, чтобы автостоп не погасил
   цепочку под загрузкой.
+- Гард: идентификаторы правил бана (маркеры hosts-блока, DisplayName NRPT-правила,
+  Group правил firewall) — в конфиге, дефолты совпадают с прежней схемой: приложение
+  и старые скрипты ведут один и тот же бан, а не два. Статус гарда — только чтение;
+  после применения/снятия бана — живые пробы, а не «должно работать».
 - Протоколы внешние, на которых держится семантика: CONNECT-roundtrip как health-check,
   `server.shutdown` RPC WSL-хоста, журнал AppX как источник URL пакета, AppX Publisher-сверка.
 
@@ -158,7 +161,8 @@ src/
                              # статус прокси и цепочки, выбор языка, запуск Claude с заставкой
                              # подъёма (SplashWindow), ярлыковый режим --launch (Claude
                              # запущен → только окно), стартовая проверка обновления Claude,
-                             # окно обновления (UpdateWindow); общая иконка приложения
+                             # окно обновления (UpdateWindow), карточка «Гарды» (статус и
+                             # управление баном/политикой/settings.json/WSL); общая иконка приложения
                              # (AppIcons + Assets/app.ico, трей — WinForms NotifyIcon);
                              # элевейтнутые helper-аргументы обрабатывает до UI
     Localization/            # словари строк Strings.<код>.xaml + Loc: подмена словаря на лету
@@ -183,21 +187,32 @@ src/
                              # PowerShellJournalUrlFinder + PackageUrl (адрес из журнала AppX),
                              # FragmentDownloader (фрагментная докачка с ретраями и возобновлением),
                              # MsixPackage (Identity/Publisher из AppxManifest.xml)
+    Guard/                   # контроль прямого доступа: EgressPolicyStore (HKLM Policies\Claude),
+                             # HostsFileBlock (идемпотентный hosts-блок), PowerShellBanSystemOps
+                             # (NRPT+firewall командлетами), ClaudeSettingsGuard (env в settings.json),
+                             # WslConfigGuard (стартовый скрипт + settings.json дистрибутивов; слой
+                             # опционален: mode on/off/auto, синк по каждому дистрибутиву),
+                             # WinInetSystemProxyStore + обход системного прокси, GuardService
+                             # (статус/операции/живые пробы), GuardElevatedCommands (UAC-helper)
     Watchdog/                # автостоп по простою: ClaudeUsageProbe (процессы/коннекты/маркер),
                              # WslClaudeHostStopper (остановка WSL-хоста Claude через wsl.exe:
                              # RPC + эскалация сигналов), WatchdogService (цикл, WSL → цепочка)
-    SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым редиректом
+    SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым
+                             # редиректом, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity)
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
     ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора из AppConfig
   PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check |
                              # launch [--check-only] [--no-splash] | update [--check] ... |
-                             # watchdog | config)
+                             # watchdog | guard status [--live] | ban/policy/settings/wsl/sysproxy |
+                             # config)
 tests/
   PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
                              # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
                              # оркестрация цепочки на фейках (порядок/идемпотентность/отказы),
                              # лончер на фейках (bypass-list/порядок/режимы), сторож на фейках
                              # (порядок WSL→цепочка, парсер вывода остановщика, проба занятости),
+                             # гард на фейках (hosts-блок, env settings.json, скрипты NRPT/firewall,
+                             # WSL-слой: режимы/статус/синк, оркестрация: слои/элевация/живые пробы),
                              # обновлятор на фейках (версии/URL из журнала, докачка фрагментами
                              # на фейковом HTTP: возобновление/ретраи/отмена, Publisher,
                              # закрытие Claude, полный цикл), форма аргументов cmd

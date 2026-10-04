@@ -4,6 +4,7 @@ using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
@@ -107,8 +108,9 @@ public partial class App : Application
     private static bool TryRunElevatedHelper(string[] args, out int exitCode)
     {
         exitCode = 0;
-        var command = args.FirstOrDefault();
-        if (command is not (ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain))
+        var command = args.FirstOrDefault() ?? "";
+        if (command is not (ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain)
+            && !GuardElevatedCommands.IsCommand(command))
         {
             return false;
         }
@@ -128,7 +130,9 @@ public partial class App : Application
             return false;
         }
 
-        exitCode = ElevatedChainCommands.Execute(command, resultFile);
+        exitCode = GuardElevatedCommands.IsCommand(command)
+            ? GuardElevatedCommands.Execute(command, resultFile)
+            : ElevatedChainCommands.Execute(command, resultFile);
         return true;
     }
 

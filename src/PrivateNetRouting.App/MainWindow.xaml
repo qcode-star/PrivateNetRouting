@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="PrivateNetRouting"
-        Width="600" Height="505" MinWidth="520" MinHeight="420"
+        Width="620" Height="700" MinWidth="540" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Window}"
         Foreground="{StaticResource Brush.Text}"
@@ -11,6 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -95,9 +96,75 @@
             </StackPanel>
         </Border>
 
+        <!-- Гарды прямого доступа: статус каждого слоя (только чтение) и управление.
+             Бан и политика просят UAC (элевейтнутый helper), settings.json и WSL — без него. -->
+        <Border Grid.Row="3" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
+                BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,12,0,0">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{DynamicResource Main.Guard}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="{DynamicResource Main.Guard.Button.Refresh}" MinWidth="100" Style="{StaticResource SecondaryButton}"
+                            Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
+                </Grid>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Локальный бан (hosts + NRPT + firewall) -->
+                    <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource Main.Guard.Ban}" VerticalAlignment="Center" Margin="0,4,12,4"/>
+                    <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BanDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
+                    <StackPanel Grid.Row="0" Grid.Column="3" Orientation="Horizontal">
+                        <Button x:Name="BanOnButton" Content="{DynamicResource Main.Guard.Button.On}" Width="80" Click="OnGuardBanOn" IsEnabled="{Binding CanGuard}"/>
+                        <Button x:Name="BanOffButton" Content="{DynamicResource Main.Guard.Button.Off}" Width="80" Margin="6,0,0,0" Style="{StaticResource SecondaryButton}"
+                                Click="OnGuardBanOff" IsEnabled="{Binding CanGuard}"/>
+                    </StackPanel>
+
+                    <!-- Managed-политика egressProxyUrl -->
+                    <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Main.Guard.Policy}" VerticalAlignment="Center" Margin="0,4,12,4"/>
+                    <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PolicyDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
+                    <StackPanel Grid.Row="1" Grid.Column="3" Orientation="Horizontal">
+                        <Button x:Name="PolicyOnButton" Content="{DynamicResource Main.Guard.Button.On}" Width="80" Click="OnGuardPolicyOn" IsEnabled="{Binding CanGuard}"/>
+                        <Button x:Name="PolicyOffButton" Content="{DynamicResource Main.Guard.Button.Off}" Width="80" Margin="6,0,0,0" Style="{StaticResource SecondaryButton}"
+                                Click="OnGuardPolicyOff" IsEnabled="{Binding CanGuard}"/>
+                    </StackPanel>
+
+                    <!-- env в settings.json Claude Code (Windows) -->
+                    <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}" VerticalAlignment="Center" Margin="0,4,12,4"/>
+                    <TextBlock Grid.Row="2" Grid.Column="2" x:Name="SettingsDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Row="2" Grid.Column="3" x:Name="SettingsSyncButton" Content="{DynamicResource Main.Guard.Button.Sync}" Width="166"
+                            Click="OnGuardSettingsSync" IsEnabled="{Binding CanGuard}"/>
+
+                    <!-- Конфиг WSL: стартовый скрипт + settings.json дистрибутива -->
+                    <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{DynamicResource Main.Guard.Wsl}" VerticalAlignment="Center" Margin="0,4,12,4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="2" x:Name="WslDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Row="3" Grid.Column="3" x:Name="WslSyncButton" Content="{DynamicResource Main.Guard.Button.Sync}" Width="166"
+                            Click="OnGuardWslSync" IsEnabled="{Binding CanGuard}"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
         <!-- Запуск Claude: проверка/подъём цепочки и старт с флагами прокси (заставка — при ожидании);
              рядом — сигнал о найденном на старте обновлении -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,16,0,0">
             <Button Content="{DynamicResource Main.Button.LaunchClaude}" Width="160" Click="OnLaunchClaude" IsEnabled="{Binding CanLaunch}"/>
             <Button Content="{DynamicResource Main.Button.UpdateClaude}" Width="150" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
                     Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
@@ -106,7 +173,7 @@
         </StackPanel>
 
         <!-- Кнопки -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,12,0,0">
+        <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,12,0,0">
             <Button Content="{DynamicResource Main.Button.Start}" Width="120" Click="OnStart" IsEnabled="{Binding CanStart}"/>
             <Button Content="{DynamicResource Main.Button.Stop}" Width="120" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
                     Click="OnStop" IsEnabled="{Binding CanStop}"/>
@@ -118,7 +185,7 @@
         </StackPanel>
 
         <!-- Строка результата проверки -->
-        <TextBlock Grid.Row="5" Text="{Binding CheckResult}" Foreground="{StaticResource Brush.TextSecondary}"
+        <TextBlock Grid.Row="6" Text="{Binding CheckResult}" Foreground="{StaticResource Brush.TextSecondary}"
                    Margin="0,12,0,0" TextWrapping="Wrap"/>
     </Grid>
 </Window>

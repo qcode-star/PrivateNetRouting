@@ -143,16 +143,33 @@ public static class ElevatedChainCommands
 public sealed record ElevatedResult(bool Ok, string Detail);
 
 /// <summary>
+/// Запуск элевейтнутой команды приложения (цепочка, гарды): сам через runas (UAC) с ожиданием
+/// файла-результата, либо — если процесс уже с правами — исполнение в текущем процессе.
+/// </summary>
+public interface IElevatedCommandRunner
+{
+    Task<ElevatedResult> RunAsync(string command, CancellationToken ct);
+}
+
+/// <summary>
 /// Запускает собственный exe приложения элевейтнуто (runas, UAC) и ждёт файл-результат
 /// с nonce. В элевейтнутом процессе (elevatedBypass) стартует без UAC — уже с правами.
+/// executor — что именно исполнить в обходном процессе (команды цепочки или гардов).
 /// </summary>
-public sealed class ElevatedRunner(ChainConfig config, FileLog log, bool elevatedBypass = false)
+public sealed class ElevatedRunner(
+    ChainConfig config,
+    FileLog log,
+    bool elevatedBypass = false,
+    Func<string, string, int>? executor = null) : IElevatedCommandRunner
 {
+    private readonly Func<string, string, int> _executor =
+        executor ?? ((command, resultFile) => ElevatedChainCommands.Execute(command, resultFile));
+
     public async Task<ElevatedResult> RunAsync(string command, CancellationToken ct)
     {
         if (elevatedBypass || WindowsPrivilege.IsElevated())
         {
-            var code = ElevatedChainCommands.Execute(command, MakeResultPath(command, out _), configPath: null);
+            var code = _executor(command, MakeResultPath(command, out _));
             var detail = code == 0 ? "executed in the current process" : "failed (see log)";
             if (code == 0)
             {

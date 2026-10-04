@@ -1,5 +1,6 @@
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
@@ -35,6 +36,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public ClaudeUpdater Updater { get; }
 
+    public GuardService Guard { get; }
+
     private readonly FileLog _chainLog;
 
     private readonly FileLog _launcherLog;
@@ -43,9 +46,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly FileLog _updaterLog;
 
+    private readonly FileLog _guardLog;
+
     private readonly HttpClient _updaterHttp;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog)
     {
         Config = config;
         Log = log;
@@ -60,6 +65,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         Updater = updater;
         _updaterLog = updaterLog;
         _updaterHttp = updaterHttp;
+        Guard = guard;
+        _guardLog = guardLog;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -172,7 +179,22 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new RunningClaudeProcessSource(),
             updaterLog);
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp);
+        var guardLog = new FileLog(
+            Path.Combine(config.Logging.Directory, "guard.log"),
+            config.Logging.MaxBytes,
+            config.Logging.Keep);
+        var guard = new GuardService(
+            config,
+            new RegistryEgressPolicyStore(),
+            new PowerShellBanSystemOps(config.Guard, powershell),
+            new ClaudeSettingsGuard(config),
+            new WslConfigGuard(config, new WslProcessRunner()),
+            new WinInetSystemProxyStore(),
+            new ElevatedRunner(config.Chain, guardLog, executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile)),
+            guardLog,
+            ct => ChainHealthAsync(config, ct));
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
@@ -212,6 +234,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _launcherLog.Dispose();
         _watchdogLog.Dispose();
         _updaterLog.Dispose();
+        _guardLog.Dispose();
         _updaterHttp.Dispose();
         Log.Dispose();
     }
