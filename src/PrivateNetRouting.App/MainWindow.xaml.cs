@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private bool _launchBusy;
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
+    private DiagnosticsWindow? _diagnosticsWindow;
     private CancellationTokenSource? _watchdogCts;
     private bool _watchdogSyncing;
 
@@ -636,6 +637,23 @@ public partial class MainWindow : Window
         _updateWindow = new UpdateWindow(_runtime) { Owner = this };
         _updateWindow.Closed += (_, _) => _updateWindow = null;
         _updateWindow.Show();
+    }
+
+    /// <summary>
+    /// Окно диагностики (порт proxy-status.ps1), только чтение: сводка состояния и просмотр
+    /// логов; одно на приложение, повторный клик активирует открытое.
+    /// </summary>
+    private void OnDiagnostics(object sender, RoutedEventArgs e)
+    {
+        if (_diagnosticsWindow is not null)
+        {
+            _diagnosticsWindow.Activate();
+            return;
+        }
+
+        _diagnosticsWindow = new DiagnosticsWindow(_runtime) { Owner = this };
+        _diagnosticsWindow.Closed += (_, _) => _diagnosticsWindow = null;
+        _diagnosticsWindow.Show();
     }
 
     /// <summary>Наполняет селектор языка: авто + поддержанные; выбор — по значению конфига.</summary>

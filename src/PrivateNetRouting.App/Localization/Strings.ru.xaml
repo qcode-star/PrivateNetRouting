@@ -44,6 +44,7 @@
     <s:String x:Key="Main.Button.Start">Запустить</s:String>
     <s:String x:Key="Main.Button.Stop">Остановить</s:String>
     <s:String x:Key="Main.Button.CheckChain">Проверить цепочку</s:String>
+    <s:String x:Key="Main.Button.Diagnostics">Диагностика…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Поднять цепочку</s:String>
     <s:String x:Key="Main.Button.ChainDown">Остановить цепочку</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
@@ -178,4 +179,19 @@
     <!-- Настройки -->
     <s:String x:Key="Main.Language">Язык</s:String>
     <s:String x:Key="Main.Language.Auto">Как в системе</s:String>
+
+    <!-- Окно диагностики (сводка состояния только чтением + просмотр логов, порт proxy-status.ps1) -->
+    <s:String x:Key="Diag.Title">Диагностика</s:String>
+    <s:String x:Key="Diag.Header">Сводка состояния (только чтение)</s:String>
+    <s:String x:Key="Diag.Button.Refresh">Обновить</s:String>
+    <s:String x:Key="Diag.Button.OpenFolder">Открыть папку</s:String>
+    <s:String x:Key="Diag.Button.Rotate">Ротация</s:String>
+    <s:String x:Key="Diag.Busy">собираю (входит живой CONNECT-roundtrip)...</s:String>
+    <s:String x:Key="Diag.ChainStopped">Цепочка остановлена — это норма, пока Claude не нужен. Подъём — ярлыком Claude или кнопкой запуска.</s:String>
+    <s:String x:Key="Diag.Section.chain">Цепочка</s:String>
+    <s:String x:Key="Diag.Section.proxy">Forward-прокси</s:String>
+    <s:String x:Key="Diag.Section.health">Здоровье</s:String>
+    <s:String x:Key="Diag.Section.guards">Гарды</s:String>
+    <s:String x:Key="Diag.Section.watchdog">Сторож автостопа</s:String>
+    <s:String x:Key="Diag.Section.logs">Логи</s:String>
 </ResourceDictionary>

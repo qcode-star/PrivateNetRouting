@@ -127,7 +127,7 @@ Git-идентичность задана локально в репозитор
 | Updater | ручное обновление MSIX: проверка версий ДО подъёма цепочки («нечего ставить» — без UAC), адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через собственный forward-прокси, сверка Publisher, закрытие Claude, `Add-AppxPackage`; GUI с шагами/прогрессом/стоп-кнопкой, паузой перед установкой и отложенной установкой (`--install-from`); во время скачивания держится свежим маркер активности (автостоп не гасит цепочку под загрузкой); на старте GUI — фоновая проверка обновления (только чтение версий и журнала AppX, без цепочки и UAC; `ui.checkUpdatesOnStart`): при наличии — строка возле кнопок запуска и балун трея | **реализован** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; окно `UpdateWindow` — часть GUI-приложения). Живьём проверен только `--check` (версия и журнал читаются, отсутствие URL отрабатывается); скачивание и установка живьём не выполнялись | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
 | Guard | контроль прямого доступа: managed-политика `egressProxyUrl` (+`disableWslSessions=0`); локальный бан тремя слоями — hosts-блок, одно NRPT-правило на все поддеревья, firewall outbound Block по подсетям (идентификаторы по умолчанию совпадают с прежней схемой — приложение ведёт уже стоящий бан, а не создаёт параллельный); env в settings.json Claude Code (Windows и WSL: прокси приложения + NO_PROXY из доменов конфига; в WSL — ещё стартовый скрипт с адресом шлюза NAT, слой целиком опционален: `guard.wsl.mode` = on/off/auto и выбор синхронизации по каждому дистрибутиву); системный прокси WinINET on/off. Статус всех гардов — только чтением (карточка GUI, `pnr guard status [--live]`); бан и политика — элевейтнутым helper'ом, после бана — живые пробы (DNS/прямое/проксируемое) | **реализован** (`PrivateNetRouting.Core.Guard`; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off`; карточка «Гарды» в главном окне). Живьём проверены статус и живые пробы (чтение: бан прежней схемы виден, WSL-конфиг читается); изменяющие операции (бан/политика/синк) живьём не выполнялись | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1`, `sync-claude-noproxy.ps1` + стартовый скрипт `/etc/wsl.d/startup/10-claude-proxy.sh` |
 | BrowserLauncher | запуск браузера с изолированным профилем и прокси приложения, без системных настроек: Firefox — отдельный профиль с user.js, перезаписываемым при каждом запуске (адрес прокси из `forwardProxy.listen`, `no_proxies_on` — домены `launcher.bypassDomains` в двух формах + `*.tld` из `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), старт с `--new-instance` (иначе URL уйдёт в повседневный экземпляр без прокси); хромоподобные — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (отдельный каталог обязателен: запущенный экземпляр игнорирует флаги); цепочка — как у лончера Claude (живой CONNECT, при отказе идемпотентный подъём, заставка при ожидании); браузер выбирает `browser.type` (firefox/chromium, незнакомое — firefox), приватное окно — `browser.private` или флаг; запущенный наш экземпляр (cmdline с нашим профилем) не дублируется — пометка в окне приложения | **готов** (`PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; кнопка «Браузер» в главном окне; ярлыковый режим GUI `--launch-browser`). Живьём проверено: `--check-only`/`--prepare-only` (user.js корректен), запуск `--launch-browser` с профилем прежней схемы — claude.ai открывается через прокси, cmdline живого экземпляра хранит профиль (детекция «уже запущен» работает); ярлыки «Claude (браузер)» переведены на приложение. Ограничение как у лончера: прокси живёт в процессе команды/GUI | `browser-proxy.ps1` |
-| Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
+| Diagnostics | сводка состояния только чтением (порт `proxy-status.ps1`): владельцы слушателей цепочки с PID (таблица TCP через iphlpapi, без PowerShell), кипер/узел, WSL-бинд прокси, счётчики и возраст маркера активности, детальный CONNECT-roundtrip (время + первая строка ответа), ядро гардов (политика + бан, без WSL), живость сторожа (`pnr watchdog` виден извне по cmdline, сторож внутри GUI — только из его окна); полностью остановленная цепочка — короткое сообщение-норма вместо полной картины; просмотр логов (список с размерами, хвост по имени `--tail N`) и ротация: живой лог процесса — на месте (`FileLog.RotateNow`), свободный файл — сдвигом age-цепочки, занятое другим процессом — честно «locked» | **готов** (`PrivateNetRouting.Core.Diagnostics`; CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]`; окно `DiagnosticsWindow` — кнопка «Диагностика…»: сводка с подсветкой, список логов с хвостом, ротация, открытие папки). Живьём проверены status и logs list/show/rotate (в т.ч. порт 18082 виден как занятый работающим GUI, WSL-бинд и частичная политика прежней схемы) | `proxy-status.ps1` |
 | Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` | **готов** (en/ru; `PrivateNetRouting.App/Localization`, селектор в шапке окна) | — |
 
 Замечания к архитектуре, которые нельзя потерять при портировании:
@@ -143,6 +143,9 @@ Git-идентичность задана локально в репозитор
 - Время жизни звеньев: демон/кипер/узел переживают выход приложения (detached, файловые
   ручки через cmd); forward-прокси живёт, пока жив его процесс (окно приложения или
   `pnr proxy`) — для полного паритета лончера прежней схемы нужен detached-режим прокси.
+- Логи: два писателя в один файл не допускаются (interleave ломает содержимое) — если
+  лог уже держит другой процесс (GUI в трее + `pnr` из терминала), второй пишет в
+  `<имя>.<pid>.log`; ротация — на старте по размеру, вручную — владельцем файла на месте.
 - Обновлятор: фаза проверки версий — до подъёма цепочки (лишний UAC не нужен); установка
   не прерывается; во время длительных фаз держать маркер активности, чтобы автостоп не погасил
   цепочку под загрузкой.
@@ -165,7 +168,10 @@ src/
                              # --launch-browser (изолированный профиль, пометка «уже запущен»),
                              # стартовая проверка обновления Claude,
                              # окно обновления (UpdateWindow), карточка «Гарды» (статус и
-                             # управление баном/политикой/settings.json/WSL); общая иконка приложения
+                             # управление баном/политикой/settings.json/WSL), окно диагностики
+                             # (DiagnosticsWindow: сводка состояния только чтением с подсветкой,
+                             # список логов с хвостом, ротация, открытие папки);
+                             # общая иконка приложения
                              # (AppIcons + Assets/app.ico, трей — WinForms NotifyIcon);
                              # элевейтнутые helper-аргументы обрабатывает до UI
     Localization/            # словари строк Strings.<код>.xaml + Loc: подмена словаря на лету
@@ -175,12 +181,14 @@ src/
                              # AppLanguage (auto → система → en),
                              # загрузка из %APPDATA% (шаблон — config/*.example.json)
     Logging/                 # FileLog: уровни DEBUG..ERROR (logging.level, дефолт info) +
-                             # ротация по размеру один раз на старте
+                             # ротация по размеру один раз на старте и ручная RotateNow;
+                             # файл, занятый другим процессом, → откат на <имя>.<pid>.log
     Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient, DohEndpointPool, кэш-резолвер,
                              # TailscaleNetmapDohSource (автодополнение пула из конфига tailnet)
     Net/Socks/               # Socks5Client (no-auth, дозвон по IPv4)
     Net/WslGateway.cs        # адрес шлюза WSL NAT (vEthernet (WSL...)) для одноразового бинда прокси
     Net/Proxy/               # ForwardProxyService (CONNECT-прокси), парсер, ProxyHealthCheck
+                             # (CheckAsync-bool + ProbeAsync с временем и статус-строкой)
     Chain/                   # ChainSupervisor (оркестрация), SidecarDaemon (UAC-старт, stale-добивание),
                              # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
     Launcher/                # ClaudeLauncher (bypass-list, подъём цепочки при отказе, запуск
@@ -204,10 +212,16 @@ src/
                              # WslClaudeHostStopper (остановка WSL-хоста Claude через wsl.exe:
                              # RPC + эскалация сигналов), WatchdogService (цикл, WSL → цепочка)
     SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым
-                             # редиректом, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity)
+                             # редиректом, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity),
+                             # TcpConnectionTable (слушатели порта с PID через GetExtendedTcpTable)
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
-    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора из AppConfig
-  PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check |
+    Diagnostics/             # DiagnosticsService (сводка состояния: владельцы портов, кипер/узел,
+                             # WSL-бинд, счётчики, маркер, детальный CONNECT, ядро гардов, сторож),
+                             # LogStore (список/хвост/внешняя ротация логов)
+    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора+диагностики
+                             # из AppConfig (+ RotateLog: живой лог — на месте, свободный — сдвигом)
+  PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check | status |
+                             # logs list|show <name> [--tail N]|rotate [<name>...] |
                              # launch [--check-only] [--no-splash] | browser [--check-only]
                              # [--prepare-only] [--private] [--url <url>] | update [--check] ... |
                              # watchdog | guard status [--live] | ban/policy/settings/wsl/sysproxy |
@@ -224,7 +238,11 @@ tests/
                              # WSL-слой: режимы/статус/синк, оркестрация: слои/элевация/живые пробы),
                              # обновлятор на фейках (версии/URL из журнала, докачка фрагментами
                              # на фейковом HTTP: возобновление/ретраи/отмена, Publisher,
-                             # закрытие Claude, полный цикл), форма аргументов cmd
+                             # закрытие Claude, полный цикл), диагностика на фейках (сводка:
+                             # остановленная цепочка/владельцы портов/WSL-бинд/health/гарды/
+                             # сторож, ядро гардов без WSL, ProbeAsync на живом TcpListener),
+                             # логи (список/хвост/ротация/занятый файл/откат на персональный
+                             # файл/RotateNow), форма аргументов cmd
 config/
   appsettings.example.json   # шаблон пользовательского конфига с плейсхолдерами
 ```
@@ -261,7 +279,8 @@ dotnet format --verify-no-changes   # форматирование перед к
   `info`, незнакомое значение = `info`); все записи — на английском. В Info — разовые события
   (старт/стоп/автостоп, важное — Warn/Error); периодическое и per-request (таймеры сторожа
   и DoH-пула, коннекты/резолвы прокси, шаги подъёма цепочки, фрагменты докачки) — только
-  в Debug. Ротация по размеру на старте — как в старом наборе.
+  в Debug. Ротация по размеру на старте — как в старом наборе; ручная — из диагностики
+  (владельцем файла, на месте).
 - Локализация UI: строки — в словарях `src/PrivateNetRouting.App/Localization/Strings.<код>.xaml`
   (XAML — `{DynamicResource Ключ}`, код — `Loc.S`/`Loc.F`); язык — `ui.language` конфига: `auto`
   (язык системы) или код, неподержанный — английский. Новый язык = словарь + код в

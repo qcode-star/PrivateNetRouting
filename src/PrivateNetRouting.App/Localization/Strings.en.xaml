@@ -44,6 +44,7 @@
     <s:String x:Key="Main.Button.Start">Start</s:String>
     <s:String x:Key="Main.Button.Stop">Stop</s:String>
     <s:String x:Key="Main.Button.CheckChain">Check chain</s:String>
+    <s:String x:Key="Main.Button.Diagnostics">Diagnostics…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>
     <s:String x:Key="Main.Button.ChainDown">Stop chain</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
@@ -178,4 +179,19 @@
     <!-- Settings -->
     <s:String x:Key="Main.Language">Language</s:String>
     <s:String x:Key="Main.Language.Auto">System default</s:String>
+
+    <!-- Diagnostics window (read-only state summary + log viewer, port of proxy-status.ps1) -->
+    <s:String x:Key="Diag.Title">Diagnostics</s:String>
+    <s:String x:Key="Diag.Header">State summary (read-only)</s:String>
+    <s:String x:Key="Diag.Button.Refresh">Refresh</s:String>
+    <s:String x:Key="Diag.Button.OpenFolder">Open folder</s:String>
+    <s:String x:Key="Diag.Button.Rotate">Rotate</s:String>
+    <s:String x:Key="Diag.Busy">collecting (a live CONNECT roundtrip is included)...</s:String>
+    <s:String x:Key="Diag.ChainStopped">The chain is stopped — this is normal while Claude is not needed. Raise it with the Claude shortcut or the Launch button.</s:String>
+    <s:String x:Key="Diag.Section.chain">Chain</s:String>
+    <s:String x:Key="Diag.Section.proxy">Forward proxy</s:String>
+    <s:String x:Key="Diag.Section.health">Health</s:String>
+    <s:String x:Key="Diag.Section.guards">Guards</s:String>
+    <s:String x:Key="Diag.Section.watchdog">Idle supervisor</s:String>
+    <s:String x:Key="Diag.Section.logs">Logs</s:String>
 </ResourceDictionary>

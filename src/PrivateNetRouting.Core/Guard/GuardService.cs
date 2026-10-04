@@ -49,6 +49,21 @@ public sealed class GuardService(
 {
     public async Task<GuardSnapshot> GetStatusAsync(CancellationToken ct)
     {
+        var (ban, policyStatus) = await GetCoreStatusAsync(ct);
+
+        var settingsStatus = settings.Read();
+        var wslStatus = await wsl.ReadAsync(ct);
+        var sysProxyStatus = systemProxy.Read();
+
+        return new GuardSnapshot(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus, BuildItems(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus));
+    }
+
+    /// <summary>
+    /// Только бан и политика (реестр, hosts, NRPT/firewall) — быстрое ядро для сводки
+    /// диагностики; settings.json и WSL не читаются (wsl.exe — секунды).
+    /// </summary>
+    public async Task<(LocalBanStatus Ban, EgressPolicyStatus Policy)> GetCoreStatusAsync(CancellationToken ct)
+    {
         var guard = config.Guard;
 
         LocalBanStatus ban;
@@ -90,11 +105,7 @@ public sealed class GuardService(
             policyStatus = UnknownPolicy(ex);
         }
 
-        var settingsStatus = settings.Read();
-        var wslStatus = await wsl.ReadAsync(ct);
-        var sysProxyStatus = systemProxy.Read();
-
-        return new GuardSnapshot(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus, BuildItems(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus));
+        return (ban, policyStatus);
     }
 
     private static LocalBanStatus UnknownBan(Exception ex) =>

@@ -181,6 +181,8 @@
                     Click="OnStop" IsEnabled="{Binding CanStop}"/>
             <Button Content="{DynamicResource Main.Button.CheckChain}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
                     Click="OnCheckChain"/>
+            <Button Content="{DynamicResource Main.Button.Diagnostics}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
+                    Click="OnDiagnostics"/>
             <Button Content="{DynamicResource Main.Button.ChainUp}" Margin="24,0,0,0" Click="OnChainUp" IsEnabled="{Binding CanChainUp}"/>
             <Button Content="{DynamicResource Main.Button.ChainDown}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
                     Click="OnChainDown" IsEnabled="{Binding CanChainDown}"/>

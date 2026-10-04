@@ -1,0 +1,95 @@
+using System.Net;
+using System.Runtime.InteropServices;
+
+namespace PrivateNetRouting.Core.SystemOps;
+
+/// <summary>
+/// Один слушатель TCP: адрес, порт и владелец. Имя процесса (если он ещё жив) resolves
+/// реализацией таблицы — потребителю не нужен отдельный lookup по PID.
+/// </summary>
+public sealed record TcpListenerEntry(IPAddress Address, int Port, int ProcessId, string? ProcessName);
+
+/// <summary>Слушатели локального TCP-порта с PID владельца (аналог Get-NetTCPConnection -State Listen).</summary>
+public interface ITcpConnectionTable
+{
+    IReadOnlyList<TcpListenerEntry> GetListeners(int port);
+}
+
+/// <summary>
+/// Таблица TCP-соединений через iphlpapi GetExtendedTcpTable (класс OWNER_PID_LISTENER):
+/// даёт PID владельца слушателя без PowerShell и без прав администратора. Только IPv4 —
+/// все слушатели схемы (демон, forward-прокси, шлюз WSL) биндятся на IPv4-адреса.
+/// </summary>
+public sealed class TcpConnectionTable : ITcpConnectionTable
+{
+    private const int AfInet = 2;
+    private const int TcpTableOwnerPidListener = 3;
+    private const int TcpStateListen = 2;
+
+    public IReadOnlyList<TcpListenerEntry> GetListeners(int port)
+    {
+        var size = 0;
+        _ = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AfInet, TcpTableOwnerPidListener, 0);
+        if (size <= 0)
+        {
+            return [];
+        }
+
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (GetExtendedTcpTable(buffer, ref size, true, AfInet, TcpTableOwnerPidListener, 0) != 0)
+            {
+                return [];
+            }
+
+            // MIB_TCPTABLE_OWNER_PID: dwNumEntries, затем строки по 6 DWORD:
+            // state, localAddr, localPort, remoteAddr, remotePort, owningPid (network byte order)
+            var entries = new List<TcpListenerEntry>();
+            var count = Marshal.ReadInt32(buffer, 0);
+            const int rowBytes = 24;
+            for (var i = 0; i < count; i++)
+            {
+                var row = buffer + 4 + i * rowBytes;
+                if (Marshal.ReadInt32(row, 0) != TcpStateListen)
+                {
+                    continue;
+                }
+
+                var localPort = ntohs((ushort)Marshal.ReadInt32(row, 8));
+                if (localPort != port)
+                {
+                    continue;
+                }
+
+                var address = (uint)Marshal.ReadInt32(row, 4);
+                var pid = Marshal.ReadInt32(row, 20);
+                entries.Add(new TcpListenerEntry(new IPAddress(address), localPort, pid, ProcessNameOf(pid)));
+            }
+
+            return entries;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static string? ProcessNameOf(int pid)
+    {
+        try
+        {
+            return System.Diagnostics.Process.GetProcessById(pid).ProcessName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    [DllImport("iphlpapi.dll")]
+    private static extern int GetExtendedTcpTable(IntPtr table, ref int size, bool order, int family, int tableClass, int reserved);
+
+    [DllImport("ws2_32.dll")]
+    private static extern ushort ntohs(ushort netShort);
+}

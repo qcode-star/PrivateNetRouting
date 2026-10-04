@@ -9,13 +9,27 @@ using PrivateNetRouting.Core.Runtime;
 
 namespace PrivateNetRouting.Core.Net.Proxy;
 
+/// <summary>Статистика прокси для сводки диагностики (реализация — ForwardProxyService).</summary>
+public interface IProxyStatistics
+{
+    bool IsRunning { get; }
+
+    IReadOnlyList<string> ListenerEndpoints { get; }
+
+    int ActiveConnections { get; }
+
+    long TotalConnections { get; }
+
+    long FailedConnections { get; }
+}
+
 /// <summary>
 /// Локальный CONNECT-прокси (порт ts-fwd). Имена резолвит DoH через SOCKS5-апстрим —
 /// системный резолв не используется (он перекрыт банами), дозвон идёт по IP тем же SOCKS5.
 /// Биндится на основной адрес из конфига и один раз на шлюзе WSL NAT, когда адаптер появится.
 /// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки; per-request трассировка — Debug.
 /// </summary>
-public sealed class ForwardProxyService : IProxyControl, IAsyncDisposable
+public sealed class ForwardProxyService : IProxyControl, IProxyStatistics, IAsyncDisposable
 {
     private static readonly byte[] EstablishResponse =
         "HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray();

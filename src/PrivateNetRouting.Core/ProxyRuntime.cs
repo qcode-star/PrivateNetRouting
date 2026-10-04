@@ -1,5 +1,6 @@
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Diagnostics;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Logging;
@@ -40,6 +41,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public GuardService Guard { get; }
 
+    public DiagnosticsService Diagnostics { get; }
+
+    public LogStore Logs { get; }
+
     private readonly FileLog _chainLog;
 
     private readonly FileLog _launcherLog;
@@ -54,7 +59,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly HttpClient _updaterHttp;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog)
+    private readonly List<FileLog> _allLogs;
+
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -73,6 +80,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _updaterHttp = updaterHttp;
         Guard = guard;
         _guardLog = guardLog;
+        Diagnostics = diagnostics;
+        Logs = logs;
+        _allLogs = allLogs;
     }
 
     public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
@@ -192,13 +202,28 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guardLog,
             ct => ChainHealthAsync(config, ct));
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog);
+        var logs = new LogStore(config.Logging.Directory);
+        var allLogs = new List<FileLog> { log, chainLog, launcherLog, browserLog, watchdogLog, updaterLog, guardLog };
+        var diagnostics = new DiagnosticsService(
+            config,
+            chain,
+            proxy,
+            new TcpConnectionTable(),
+            processes,
+            ct => ChainProbeAsync(config, ct),
+            guard.GetCoreStatusAsync,
+            logs);
+
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
     }
 
-    private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
+    private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
+        (await ChainProbeAsync(config, ct)).Ok;
+
+    private static Task<HealthProbeResult> ChainProbeAsync(AppConfig config, CancellationToken ct)
     {
         var endpoint = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen);
-        return await ProxyHealthCheck.CheckAsync(
+        return ProxyHealthCheck.ProbeAsync(
             endpoint.Address.ToString(),
             endpoint.Port,
             config.ForwardProxy.HealthCheckHost,
@@ -222,6 +247,24 @@ public sealed class ProxyRuntime : IAsyncDisposable
             fp.HealthCheckPort,
             timeout,
             ct);
+    }
+
+    /// <summary>
+    /// Ротация лога по имени файла: живой лог этого процесса ротируется на месте
+    /// (FileLog.RotateNow — работает всегда), файл, который никто не держит, — сдвигом;
+    /// занятое другим процессом отмечается как locked.
+    /// </summary>
+    public LogRotationResult RotateLog(string fileName)
+    {
+        var live = _allLogs.FirstOrDefault(l => Path.GetFileName(l.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        if (live is not null)
+        {
+            live.RotateNow();
+            live.Info("log: rotated manually");
+            return LogRotationResult.Done(fileName);
+        }
+
+        return Logs.Rotate(fileName, Config.Logging.Keep);
     }
 
     public async ValueTask DisposeAsync()

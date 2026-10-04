@@ -1,6 +1,7 @@
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Diagnostics;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Socks;
@@ -10,7 +11,8 @@ namespace PrivateNetRouting.Cli;
 
 /// <summary>
 /// Headless-режим (паритет со старыми скриптами): proxy — крутить forward-прокси в консоли,
-/// chain — управление цепочкой (status/up/down), check — CONNECT-roundtrip, config — путь/инициализация.
+/// chain — управление цепочкой (status/up/down), check — CONNECT-roundtrip, status — сводка
+/// диагностики (порт proxy-status.ps1), logs — просмотр/ротация логов, config — путь/инициализация.
 /// Элевейтнутые команды (--elevated-*) выполняет внутренний helper и выходит.
 /// </summary>
 internal static class Program
@@ -34,6 +36,8 @@ internal static class Program
                 "proxy" => await RunProxyAsync(),
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
+                "status" => await RunStatusAsync(),
+                "logs" => RunLogsCommand(args.Skip(1).ToList()),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
                 "browser" => await RunBrowserAsync(args.Skip(1).ToList()),
                 "update" => await RunUpdateAsync(args.Skip(1).ToList()),
@@ -120,6 +124,144 @@ internal static class Program
         var alive = await runtime.CheckHealthAsync(TimeSpan.FromSeconds(20));
         Console.WriteLine(alive ? "chain is alive" : "chain is not responding");
         return alive ? 0 : 2;
+    }
+
+    /// <summary>
+    /// Сводка состояния (порт proxy-status.ps1), только чтение: процессы цепочки и владельцы
+    /// слушателей (PID), WSL-бинд, счётчики прокси, возраст маркера активности, детальный
+    /// CONNECT-roundtrip, политика и бан, живость сторожа. Полностью остановленная цепочка —
+    /// короткое сообщение: это норма, пока Claude не нужен.
+    /// </summary>
+    private static async Task<int> RunStatusAsync()
+    {
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        var summary = await runtime.Diagnostics.GetSummaryAsync(CancellationToken.None);
+        if (summary.ChainStopped)
+        {
+            Console.WriteLine($"chain ({config.ForwardProxy.Listen}) is stopped — normal while Claude is not needed.");
+            Console.WriteLine("Raise it: the Claude shortcut, pnr launch, or pnr chain up.");
+            return 0;
+        }
+
+        foreach (var section in summary.Sections)
+        {
+            Console.WriteLine($"{section.Key}:");
+            foreach (var line in section.Lines)
+            {
+                Console.WriteLine($"  {line.Name,-34} {line.Value}");
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Просмотр и ротация логов каталога logging.directory (только чтение и сдвиг файлов;
+    /// ничего не запускается и конфиг не создаётся). Файл, открытый приложением, ротируется
+    /// из его окна диагностики — здесь он будет отмечен как locked.
+    /// </summary>
+    private static int RunLogsCommand(List<string> rest)
+    {
+        var action = rest.FirstOrDefault() ?? "list";
+        rest = rest.Skip(1).ToList();
+        var config = AppConfigStore.LoadOrCreate();
+        var store = new LogStore(config.Logging.Directory);
+
+        switch (action)
+        {
+            case "list":
+                var files = store.List();
+                if (files.Count == 0)
+                {
+                    Console.WriteLine($"no log files in {store.Directory}");
+                    return 0;
+                }
+
+                foreach (var file in files)
+                {
+                    Console.WriteLine($"{file.Name,-24} {ByteSize.Format(file.Bytes),10}  {file.LastWriteTime:yyyy-MM-dd HH:mm}");
+                }
+
+                return 0;
+
+            case "show":
+                return ShowLogTail(store, rest);
+
+            case "rotate":
+                return RotateLogs(store, config, rest);
+
+            default:
+                Console.Error.WriteLine($"unknown action: {action} (list | show <name> [--tail N] | rotate [<name>...])");
+                return 1;
+        }
+    }
+
+    private static int ShowLogTail(LogStore store, List<string> rest)
+    {
+        var name = rest.FirstOrDefault();
+        var tail = 50;
+        for (var i = 1; i < rest.Count; i++)
+        {
+            if (rest[i] == "--tail" && i + 1 < rest.Count && int.TryParse(rest[i + 1], out var lines))
+            {
+                tail = lines;
+                i++;
+            }
+            else
+            {
+                Console.Error.WriteLine($"unknown option: {rest[i]} (--tail N)");
+                return 1;
+            }
+        }
+
+        if (name is null)
+        {
+            Console.Error.WriteLine("usage: pnr logs show <name> [--tail N]");
+            return 1;
+        }
+
+        var log = store.ReadTail(name, tail);
+        if (log is null)
+        {
+            Console.Error.WriteLine($"no log file named {name} in {store.Directory} (see pnr logs list)");
+            return 1;
+        }
+
+        foreach (var line in log.Lines)
+        {
+            Console.WriteLine(line);
+        }
+
+        return 0;
+    }
+
+    private static int RotateLogs(LogStore store, AppConfig config, List<string> names)
+    {
+        // без имени — все текущие логи (*.log), ротированные копии (.N) не трогаем
+        var targets = names.Count > 0
+            ? names
+            : store.List().Where(f => f.Name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)).Select(f => f.Name).ToList();
+        if (targets.Count == 0)
+        {
+            Console.WriteLine($"no log files in {store.Directory}");
+            return 0;
+        }
+
+        var failed = false;
+        foreach (var name in targets)
+        {
+            var result = store.Rotate(name, config.Logging.Keep);
+            Console.WriteLine($"{name,-24} {result.Detail}");
+            failed |= !result.Ok;
+        }
+
+        if (failed)
+        {
+            Console.WriteLine("locked files are held by the running app — rotate them from its diagnostics window");
+        }
+
+        return failed ? 1 : 0;
     }
 
     private static async Task<int> RunLaunchAsync(List<string> rest)
@@ -557,6 +699,17 @@ internal static class Program
             pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)
             pnr check            check the chain with a CONNECT-roundtrip
+            pnr status           read-only state summary (port of proxy-status.ps1):
+                                 chain processes and port owners (pid), WSL bind, proxy
+                                 counters, activity age, CONNECT timing, policy and ban,
+                                 idle supervisor; a stopped chain is a short notice
+            pnr logs list        log files of logging.directory with sizes and dates
+            pnr logs show <name> [--tail N]
+                                 last N lines of a log (default 50; name with or
+                                 without .log, see pnr logs list)
+            pnr logs rotate [<name>...]
+                                 rotate log files (current -> .1 -> ...); a file held
+                                 by the running app is reported as locked
             pnr launch [--check-only] [--no-splash]
                                  start Claude with --proxy-server/--proxy-bypass-list,
                                  bringing the chain up if needed (splash is GUI-only)
