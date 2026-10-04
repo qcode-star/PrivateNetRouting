@@ -32,6 +32,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public ClaudeLauncher Launcher { get; }
 
+    public BrowserLauncher Browser { get; }
+
     public WatchdogService Watchdog { get; }
 
     public ClaudeUpdater Updater { get; }
@@ -42,6 +44,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly FileLog _launcherLog;
 
+    private readonly FileLog _browserLog;
+
     private readonly FileLog _watchdogLog;
 
     private readonly FileLog _updaterLog;
@@ -50,7 +54,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly HttpClient _updaterHttp;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog)
     {
         Config = config;
         Log = log;
@@ -60,6 +64,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _chainLog = chainLog;
         Launcher = launcher;
         _launcherLog = launcherLog;
+        Browser = browser;
+        _browserLog = browserLog;
         Watchdog = watchdog;
         _watchdogLog = watchdogLog;
         Updater = updater;
@@ -132,6 +138,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             launcherLog);
 
+        var browserLog = NewLog("browser.log");
+        var browser = new BrowserLauncher(
+            config,
+            chain,
+            ct => ChainHealthAsync(config, ct),
+            processes,
+            browserLog);
+
         var watchdogLog = NewLog("watchdog.log");
         IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
             ? null
@@ -178,7 +192,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guardLog,
             ct => ChainHealthAsync(config, ct));
 
-        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog);
+        return new ProxyRuntime(config, log, pool, proxy, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct)
@@ -216,6 +230,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         DohPool.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();
+        _browserLog.Dispose();
         _watchdogLog.Dispose();
         _updaterLog.Dispose();
         _guardLog.Dispose();

@@ -33,13 +33,14 @@ public partial class SplashWindow : Window
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _finished;
 
-    public SplashWindow(string logPath)
+    /// <summary>Заголовок переопределяется callers с другим контекстом (запуск браузера), null — ресурс по умолчанию.</summary>
+    public SplashWindow(string logPath, string? title = null)
     {
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
         _logPath = logPath;
 
-        TitleText.Text = Loc.S("Splash.Title");
+        TitleText.Text = title ?? Loc.S("Splash.Title");
         SubText.Text = Loc.S("Splash.Subtitle");
         DetailText.Text = "";
         BtnLog.Content = Loc.S("Splash.Button.OpenLog");

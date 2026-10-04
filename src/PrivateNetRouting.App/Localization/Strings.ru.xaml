@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Button.ChainUp">Поднять цепочку</s:String>
     <s:String x:Key="Main.Button.ChainDown">Остановить цепочку</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
+    <s:String x:Key="Main.Button.LaunchBrowser">Браузер</s:String>
     <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude…</s:String>
 
     <!-- Результаты операций -->
@@ -64,6 +65,10 @@
     <s:String x:Key="Main.Launch.Busy">запуск (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
+
+    <!-- Запуск браузера (изолированный профиль) -->
+    <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
+    <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
 
     <!-- Обновление Claude: сигнал проверки на старте -->
     <s:String x:Key="Main.Update.AvailableFmt">Доступно обновление Claude: {0} → {1}</s:String>
@@ -117,6 +122,7 @@
 
     <!-- Заставка (подъём цепочки при запуске Claude) -->
     <s:String x:Key="Splash.Title">Запуск Claude</s:String>
+    <s:String x:Key="Splash.Browser.Title">Запуск браузера</s:String>
     <s:String x:Key="Splash.Subtitle">поднимаю прокси-цепочку</s:String>
     <s:String x:Key="Splash.Subtitle.Fail">не удалось поднять цепочку</s:String>
     <s:String x:Key="Splash.Step.Daemon">Демон sidecar (нужен UAC)</s:String>

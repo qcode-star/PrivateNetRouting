@@ -41,6 +41,7 @@ public partial class App : Application
         }
 
         var launchOnStart = e.Args.Contains("--launch", StringComparer.OrdinalIgnoreCase);
+        var launchBrowserOnStart = e.Args.Contains("--launch-browser", StringComparer.OrdinalIgnoreCase);
 
         _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var firstInstance);
         if (!firstInstance)
@@ -100,6 +101,11 @@ public partial class App : Application
         if (launchOnStart)
         {
             window.LaunchFromShortcut();
+        }
+
+        if (launchBrowserOnStart)
+        {
+            window.LaunchBrowserFromShortcut();
         }
 
         _ = RunStartupUpdateCheckAsync(window);

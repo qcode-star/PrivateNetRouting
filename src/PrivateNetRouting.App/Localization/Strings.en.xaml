@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>
     <s:String x:Key="Main.Button.ChainDown">Stop chain</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
+    <s:String x:Key="Main.Button.LaunchBrowser">Browser</s:String>
     <s:String x:Key="Main.Button.UpdateClaude">Update Claude…</s:String>
 
     <!-- Operation results -->
@@ -64,6 +65,10 @@
     <s:String x:Key="Main.Launch.Busy">launching (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude launched (chain ready in {0} s)</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude is already running — the window is shown without launching again</s:String>
+
+    <!-- Browser launch (isolated profile) -->
+    <s:String x:Key="Main.Browser.DoneFmt">Browser launched (chain ready in {0} s)</s:String>
+    <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
 
     <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Claude update available: {0} → {1}</s:String>
@@ -117,6 +122,7 @@
 
     <!-- Splash (chain rise while launching Claude) -->
     <s:String x:Key="Splash.Title">Launching Claude</s:String>
+    <s:String x:Key="Splash.Browser.Title">Launching browser</s:String>
     <s:String x:Key="Splash.Subtitle">bringing up the proxy chain</s:String>
     <s:String x:Key="Splash.Subtitle.Fail">failed to bring up the chain</s:String>
     <s:String x:Key="Splash.Step.Daemon">Sidecar daemon (UAC)</s:String>

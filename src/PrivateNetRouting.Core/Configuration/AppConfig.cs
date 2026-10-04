@@ -16,6 +16,8 @@ public sealed class AppConfig
 
     public LauncherConfig Launcher { get; set; } = new();
 
+    public BrowserConfig Browser { get; set; } = new();
+
     public WatchdogConfig Watchdog { get; set; } = new();
 
     public UpdaterConfig Updater { get; set; } = new();
@@ -93,7 +95,72 @@ public sealed class ChainConfig
 }
 
 /// <summary>
-/// Автостоп по простою (порт ts-sidecar-watch-claude.ps1). Сам ничего не запускает:
+/// Лончер браузера с изолированным профилем и своим прокси (порт browser-proxy.ps1):
+/// Firefox — отдельный профиль с user.js (перезаписывается при каждом запуске, список
+/// обхода всегда свежий), хромоподобный — флагами командной строки. Системные настройки
+/// браузера не трогаются. Домены обхода общие с лончером Claude (launcher.bypassDomains).
+/// </summary>
+public sealed class BrowserConfig
+{
+    /// <summary>Какой браузер запускать: "firefox" | "chromium" (хромоподобный: Edge, Chrome, ...; незнакомое значение — firefox).</summary>
+    public string Type { get; set; } = "firefox";
+
+    [JsonIgnore]
+    public BrowserKind EffectiveType => BrowserKindParser.Parse(Type);
+
+    /// <summary>Адрес, открываемый в браузере (публичный домен Anthropic).</summary>
+    public string Url { get; set; } = "https://claude.ai";
+
+    /// <summary>Приватное окно: Firefox -private-window / Chromium --incognito.</summary>
+    public bool Private { get; set; }
+
+    /// <summary>
+    /// Домены верхнего уровня, ходящие мимо прокси (как *.ru, *.su в прежней схеме):
+    /// локальные сайты не должны уходить в зарубежный выход. Без точки, добавляется как *.tld.
+    /// </summary>
+    public List<string> DirectTlds { get; set; } = ["ru", "su", "by", "kz"];
+
+    public BrowserFirefoxConfig Firefox { get; set; } = new();
+
+    public BrowserChromiumConfig Chromium { get; set; } = new();
+}
+
+public sealed class BrowserFirefoxConfig
+{
+    /// <summary>firefox.exe; если не найден — откат на каталог Program Files (x86). Переменные окружения раскрываются.</summary>
+    public string Path { get; set; } = @"%ProgramFiles%\Mozilla Firefox\firefox.exe";
+
+    /// <summary>Каталог изолированного профиля (куки и входы живут только здесь).</summary>
+    public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\ff-profile";
+}
+
+public sealed class BrowserChromiumConfig
+{
+    /// <summary>Браузер хромоподобного семейства; дефолт — Edge, если не найден — откат на Program Files. Переменные окружения раскрываются.</summary>
+    public string Path { get; set; } = @"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe";
+
+    /// <summary>Каталог изолированного профиля (--user-data-dir; обязателен — запущенный экземпляр игнорирует флаги).</summary>
+    public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\chromium-profile";
+}
+
+/// <summary>Семейство запускаемого браузера; незнакомое значение конфига — Firefox (как logging.level → info).</summary>
+public enum BrowserKind
+{
+    Firefox,
+    Chromium,
+}
+
+public static class BrowserKindParser
+{
+    public static BrowserKind Parse(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "chromium" => BrowserKind.Chromium,
+            _ => BrowserKind.Firefox,
+        };
+}
+
+/// <summary>
 /// сторож стартует по явному действию пользователя (команда CLI, переключатель приложения)
 /// и живёт, пока жив запустивший его процесс — в автозапуск не прописывается (правило №4).
 /// </summary>

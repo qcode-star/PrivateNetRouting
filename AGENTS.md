@@ -126,7 +126,7 @@ Git-идентичность задана локально в репозитор
 | Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности; первый опрос — через интервал, каждое срабатывание таймера — Debug, в Info только смена причины и сам автостоп), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown своим бинарником, эскалация SIGTERM→SIGKILL на осиротевших, дистрибутив ради проверки не поднимается), затем останов цепочки существующим оркестратором; запуск — только явный (`pnr watchdog` / галка в окне приложения), живёт, пока жив запустивший процесс, в автозапуск не пишется; ручной сторож WSL-хоста по mtime (`claude-wsl-watch.ps1`) не переносился | **готов** (`PrivateNetRouting.Core.Watchdog`; интервал и дистрибутив WSL — в конфиге `watchdog.*`). Живой автостоп проверен: простой → WSL-хост (no-op при отсутствии хоста) → down → UAC-останов демона → кипер → выход | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
 | Updater | ручное обновление MSIX: проверка версий ДО подъёма цепочки («нечего ставить» — без UAC), адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через собственный forward-прокси, сверка Publisher, закрытие Claude, `Add-AppxPackage`; GUI с шагами/прогрессом/стоп-кнопкой, паузой перед установкой и отложенной установкой (`--install-from`); во время скачивания держится свежим маркер активности (автостоп не гасит цепочку под загрузкой); на старте GUI — фоновая проверка обновления (только чтение версий и журнала AppX, без цепочки и UAC; `ui.checkUpdatesOnStart`): при наличии — строка возле кнопок запуска и балун трея | **реализован** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; окно `UpdateWindow` — часть GUI-приложения). Живьём проверен только `--check` (версия и журнал читаются, отсутствие URL отрабатывается); скачивание и установка живьём не выполнялись | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
 | Guard | контроль прямого доступа: managed-политика `egressProxyUrl` (+`disableWslSessions=0`); локальный бан тремя слоями — hosts-блок, одно NRPT-правило на все поддеревья, firewall outbound Block по подсетям (идентификаторы по умолчанию совпадают с прежней схемой — приложение ведёт уже стоящий бан, а не создаёт параллельный); env в settings.json Claude Code (Windows и WSL: прокси приложения + NO_PROXY из доменов конфига; в WSL — ещё стартовый скрипт с адресом шлюза NAT, слой целиком опционален: `guard.wsl.mode` = on/off/auto и выбор синхронизации по каждому дистрибутиву); системный прокси WinINET on/off. Статус всех гардов — только чтением (карточка GUI, `pnr guard status [--live]`); бан и политика — элевейтнутым helper'ом, после бана — живые пробы (DNS/прямое/проксируемое) | **реализован** (`PrivateNetRouting.Core.Guard`; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off`; карточка «Гарды» в главном окне). Живьём проверены статус и живые пробы (чтение: бан прежней схемы виден, WSL-конфиг читается); изменяющие операции (бан/политика/синк) живьём не выполнялись | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1`, `sync-claude-noproxy.ps1` + стартовый скрипт `/etc/wsl.d/startup/10-claude-proxy.sh` |
-| BrowserLauncher | браузер с изолированным профилем и своим прокси (Firefox user.js / Edge флагами), без системных настроек | план | `browser-proxy.ps1` |
+| BrowserLauncher | запуск браузера с изолированным профилем и прокси приложения, без системных настроек: Firefox — отдельный профиль с user.js, перезаписываемым при каждом запуске (адрес прокси из `forwardProxy.listen`, `no_proxies_on` — домены `launcher.bypassDomains` в двух формах + `*.tld` из `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), старт с `--new-instance` (иначе URL уйдёт в повседневный экземпляр без прокси); хромоподобные — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (отдельный каталог обязателен: запущенный экземпляр игнорирует флаги); цепочка — как у лончера Claude (живой CONNECT, при отказе идемпотентный подъём, заставка при ожидании); браузер выбирает `browser.type` (firefox/chromium, незнакомое — firefox), приватное окно — `browser.private` или флаг; запущенный наш экземпляр (cmdline с нашим профилем) не дублируется — пометка в окне приложения | **готов** (`PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; кнопка «Браузер» в главном окне; ярлыковый режим GUI `--launch-browser`). Живьём проверено: `--check-only`/`--prepare-only` (user.js корректен), запуск `--launch-browser` с профилем прежней схемы — claude.ai открывается через прокси, cmdline живого экземпляра хранит профиль (детекция «уже запущен» работает); ярлыки «Claude (браузер)» переведены на приложение. Ограничение как у лончера: прокси живёт в процессе команды/GUI | `browser-proxy.ps1` |
 | Diagnostics | сводка состояния (процессы цепочки, слушатели портов, health-check, политика) только чтением; просмотр/ротация логов | частично: health-check и счётчики прокси есть | `proxy-status.ps1` |
 | Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` | **готов** (en/ru; `PrivateNetRouting.App/Localization`, селектор в шапке окна) | — |
 
@@ -137,7 +137,8 @@ Git-идентичность задана локально в репозитор
 - Трей и время жизни GUI: `ShutdownMode=OnExplicitShutdown`, закрытие/минимизация главного
   окна только прячут его (трей `TrayIcon` на WinForms NotifyIcon — WinForms подключён ради
   него одного, глобальные юзинги убраны во избежание конфликтов имён с WPF); сторож в трее
-  продолжает работать. Ярлык Claude на рабочем столе указывает на `--launch`.
+  продолжает работать. Ярлыки на рабочем столе: Claude → `--launch`, «Claude (браузер)» →
+  `--launch-browser`.
 - Элевация: отдельный helper-запуск (runas) с окном-0, не перезапуск всего приложения.
 - Время жизни звеньев: демон/кипер/узел переживают выход приложения (detached, файловые
   ручки через cmd); forward-прокси живёт, пока жив его процесс (окно приложения или
@@ -160,7 +161,9 @@ src/
                              # свёрнутого в трей), трей (TrayIcon: открыть/выход, балун),
                              # статус прокси и цепочки, выбор языка, запуск Claude с заставкой
                              # подъёма (SplashWindow), ярлыковый режим --launch (Claude
-                             # запущен → только окно), стартовая проверка обновления Claude,
+                             # запущен → только окно), кнопка «Браузер» и ярлыковый режим
+                             # --launch-browser (изолированный профиль, пометка «уже запущен»),
+                             # стартовая проверка обновления Claude,
                              # окно обновления (UpdateWindow), карточка «Гарды» (статус и
                              # управление баном/политикой/settings.json/WSL); общая иконка приложения
                              # (AppIcons + Assets/app.ico, трей — WinForms NotifyIcon);
@@ -181,7 +184,9 @@ src/
     Chain/                   # ChainSupervisor (оркестрация), SidecarDaemon (UAC-старт, stale-добивание),
                              # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
     Launcher/                # ClaudeLauncher (bypass-list, подъём цепочки при отказе, запуск
-                             # с флагами прокси, предупреждения о политике/запущенном Claude)
+                             # с флагами прокси, предупреждения о политике/запущенном Claude);
+                             # BrowserLauncher (браузер с изолированным профилем: Firefox user.js /
+                             # хромоподобные флагами, «уже запущен» по профилю в cmdline)
     Updater/                 # ClaudeUpdater (оркестрация MSIX-обновления: проверка → цепочка →
                              # докачка → Publisher-сверка → установка), PowerShellRunner,
                              # PowerShellAppxPackageSource (Get-AppxPackage/Add-AppxPackage),
@@ -203,14 +208,17 @@ src/
     Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
     ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора из AppConfig
   PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy | chain status|up|down | check |
-                             # launch [--check-only] [--no-splash] | update [--check] ... |
+                             # launch [--check-only] [--no-splash] | browser [--check-only]
+                             # [--prepare-only] [--private] [--url <url>] | update [--check] ... |
                              # watchdog | guard status [--live] | ban/policy/settings/wsl/sysproxy |
                              # config)
 tests/
   PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
                              # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
                              # оркестрация цепочки на фейках (порядок/идемпотентность/отказы),
-                             # лончер на фейках (bypass-list/порядок/режимы), сторож на фейках
+                             # лончер Claude на фейках (bypass-list/порядок/режимы), лончер
+                             # браузера на фейках (списки обхода/user.js/командные строки/
+                             # режимы/откат пути/«уже запущен»), сторож на фейках
                              # (порядок WSL→цепочка, парсер вывода остановщика, проба занятости),
                              # гард на фейках (hosts-блок, env settings.json, скрипты NRPT/firewall,
                              # WSL-слой: режимы/статус/синк, оркестрация: слои/элевация/живые пробы),

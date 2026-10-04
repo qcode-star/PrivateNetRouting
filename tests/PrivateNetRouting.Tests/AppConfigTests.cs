@@ -89,6 +89,43 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void BrowserSectionDefaultsRoundTripAndExpand()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(BrowserKind.Firefox, config.Browser.EffectiveType);
+        Assert.Equal("https://claude.ai", config.Browser.Url);
+        Assert.False(config.Browser.Private);
+        Assert.Equal(["ru", "su", "by", "kz"], config.Browser.DirectTlds);
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrivateNetRouting", "browser", "ff-profile"),
+            config.Browser.Firefox.ProfileDir);
+
+        config.Browser.Type = "chromium";
+        config.Browser.Firefox.ProfileDir = @"%TEMP%\ff-profile";
+        config.Browser.Chromium.Path = @"C:\fake\chrome.exe";
+        AppConfigStore.Save(config, _path);
+
+        var loaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(BrowserKind.Chromium, loaded.Browser.EffectiveType);
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "ff-profile"), loaded.Browser.Firefox.ProfileDir);
+        Assert.Equal(@"C:\fake\chrome.exe", loaded.Browser.Chromium.Path);
+    }
+
+    [Fact]
+    public void BrowserTypeUnknownValueFallsBackToFirefox()
+    {
+        File.WriteAllText(_path, """
+            {
+              "browser": { "type": "netscape" }
+            }
+            """);
+
+        var config = AppConfigStore.LoadOrCreate(_path);
+
+        Assert.Equal(BrowserKind.Firefox, config.Browser.EffectiveType);
+    }
+
+    [Fact]
     public void UpdateChangesUiLanguageWithoutExpandingVariables()
     {
         File.WriteAllText(_path, """

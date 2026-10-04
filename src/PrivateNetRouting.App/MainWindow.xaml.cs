@@ -531,6 +531,85 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Запуск браузера с изолированным профилем и прокси приложения (порт browser-proxy.ps1):
+    /// та же схема, что у запуска Claude — живой CONNECT-roundtrip, заставка только при
+    /// реальном ожидании подъёма цепочки. Уже запущенный наш экземпляр не дублируется
+    /// (Firefox на том же профиле упирается в блокировку) — пометка в строке результата.
+    /// </summary>
+    private async void OnLaunchBrowser(object sender, RoutedEventArgs e) => await RunBrowserLaunchAsync();
+
+    /// <summary>
+    /// Ярлыковый режим (App --launch-browser вместо ярлыка «Claude (браузер)»): браузер
+    /// с нашим профилем уже запущен — просто окно приложения; не запущен — обычный запуск.
+    /// </summary>
+    public async void LaunchBrowserFromShortcut() => await RunBrowserLaunchAsync();
+
+    private async Task RunBrowserLaunchAsync()
+    {
+        if (_launchBusy)
+        {
+            return;
+        }
+
+        bool browserRunning;
+        try
+        {
+            browserRunning = _runtime.Browser.IsOurBrowserRunning();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+            return;
+        }
+
+        if (browserRunning)
+        {
+            _viewModel.SetCheckResult("Main.Browser.AlreadyRunning");
+            return;
+        }
+
+        _launchBusy = true;
+        _viewModel.SetLaunchBusy(true);
+        SplashWindow? splash = null;
+        try
+        {
+            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            if (!healthy)
+            {
+                splash = new SplashWindow(_runtime.Browser.Log.FilePath, Loc.S("Splash.Browser.Title")) { Owner = this };
+                splash.Show();
+            }
+
+            var progress = splash is null ? null : new Progress<ChainStep>(splash.Update);
+            var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, CancellationToken.None);
+            if (splash is not null)
+            {
+                splash.Complete(Loc.F("Splash.CompleteFmt", Math.Round(result.Elapsed.TotalSeconds, 1)));
+                await Task.Delay(1000);
+                splash.CloseSplash();
+            }
+
+            _viewModel.SetCheckResult("Main.Browser.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+        }
+        catch (Exception ex)
+        {
+            if (splash is not null)
+            {
+                splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Browser.Log.FilePath));
+                await splash.ClosedAsync;
+            }
+
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _launchBusy = false;
+            _viewModel.SetLaunchBusy(false);
+            await RefreshChainAsync();
+        }
+    }
+
+    /// <summary>
     /// Сигнал о найденном на старте обновлении Claude: строка возле кнопок запуска.
     /// Возвращает локализованный текст — им же App показывает балун трея.
     /// </summary>

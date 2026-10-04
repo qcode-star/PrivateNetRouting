@@ -35,6 +35,7 @@ internal static class Program
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
                 "check" => await RunCheckAsync(),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
+                "browser" => await RunBrowserAsync(args.Skip(1).ToList()),
                 "update" => await RunUpdateAsync(args.Skip(1).ToList()),
                 "watchdog" => await RunWatchdogAsync(),
                 "guard" => await RunGuardAsync(args.Skip(1).ToList()),
@@ -152,6 +153,64 @@ internal static class Program
         }
 
         Console.WriteLine($"claude launched (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})");
+        return 0;
+    }
+
+    private static async Task<int> RunBrowserAsync(List<string> rest)
+    {
+        var options = BrowserLauncherOptions.Default;
+        string? url = null;
+        for (var i = 0; i < rest.Count; i++)
+        {
+            switch (rest[i])
+            {
+                case "--check-only":
+                    options = options with { CheckOnly = true };
+                    break;
+                case "--prepare-only":
+                    options = options with { PrepareOnly = true };
+                    break;
+                case "--private":
+                    options = options with { Private = true };
+                    break;
+                case "--url":
+                    if (i + 1 >= rest.Count)
+                    {
+                        Console.Error.WriteLine("--url requires a value");
+                        return 1;
+                    }
+
+                    url = rest[++i];
+                    break;
+                default:
+                    Console.Error.WriteLine($"unknown option: {rest[i]} (--check-only | --prepare-only | --private | --url <url>)");
+                    return 1;
+            }
+        }
+
+        if (url is not null)
+        {
+            options = options with { Url = url };
+        }
+
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        if (!options.CheckOnly && runtime.Browser.IsOurBrowserRunning())
+        {
+            Console.WriteLine("browser is already running with our profile — bringing it up is up to the taskbar");
+            return 0;
+        }
+
+        var progress = new Progress<ChainStep>(step =>
+            Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
+        var result = await runtime.Browser.LaunchAsync(options, progress, CancellationToken.None);
+        if (result.Outcome != BrowserLaunchOutcome.Launched)
+        {
+            Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
+            return 0;
+        }
+
+        Console.WriteLine($"browser launched (proxy {runtime.Browser.ProxyUrl}, chain raised: {result.ChainRaised})");
         return 0;
     }
 
@@ -501,6 +560,10 @@ internal static class Program
             pnr launch [--check-only] [--no-splash]
                                  start Claude with --proxy-server/--proxy-bypass-list,
                                  bringing the chain up if needed (splash is GUI-only)
+            pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]
+                                 start the browser with an isolated profile and the app's
+                                 proxy (firefox user.js / chromium flags, browser.* config);
+                                 --prepare-only writes the profile without opening it
             pnr update [--check] [--download-only] [--force] [--keep-file]
                        [--keep-running] [--url <url>] [--install-from <path>]
                                  update Claude Desktop (MSIX) through the proxy chain:
