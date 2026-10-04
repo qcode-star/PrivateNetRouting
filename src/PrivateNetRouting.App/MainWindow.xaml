@@ -95,11 +95,14 @@
             </StackPanel>
         </Border>
 
-        <!-- Запуск Claude: проверка/подъём цепочки и старт с флагами прокси (заставка — при ожидании) -->
+        <!-- Запуск Claude: проверка/подъём цепочки и старт с флагами прокси (заставка — при ожидании);
+             рядом — сигнал о найденном на старте обновлении -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
             <Button Content="{DynamicResource Main.Button.LaunchClaude}" Width="160" Click="OnLaunchClaude" IsEnabled="{Binding CanLaunch}"/>
             <Button Content="{DynamicResource Main.Button.UpdateClaude}" Width="150" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
                     Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
+            <TextBlock Text="{Binding UpdateNotice}" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold"
+                       VerticalAlignment="Center" Margin="20,0,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
         <!-- Кнопки -->

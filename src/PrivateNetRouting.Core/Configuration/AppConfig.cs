@@ -25,6 +25,12 @@ public sealed class UiConfig
 {
     /// <summary>Язык UI: "auto" — язык системы (фолбэк английский), иначе код ("en", "ru").</summary>
     public string Language { get; set; } = AppLanguage.Auto;
+
+    /// <summary>
+    /// Проверять на старте GUI, нет ли обновления Claude: только чтение версий и журнала
+    /// AppX, без подъёма цепочки и без UAC; при наличии — строка в окне и балун трея.
+    /// </summary>
+    public bool CheckUpdatesOnStart { get; set; } = true;
 }
 
 /// <summary>

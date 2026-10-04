@@ -4,14 +4,18 @@ using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Точка входа: одиночный экземпляр (mutex + событие активации), сборка ProxyRuntime из
-/// пользовательского конфига и запуск главного окна. Прокси стартует автоматически,
-/// если включён в конфиге. Элевейтнутые helper-команды (--elevated-*) выполняются
-/// до всего прочего и сразу завершают процесс (их запускает ElevatedRunner через runas).
+/// Точка входа GUI-режимов: обычный (окно + трей), ярлыковый (--launch: если Claude уже
+/// запущен — только окно, иначе окно с процессом запуска цепочки/Claude) и элевейтнутые
+/// helper-команды (--elevated-*, выполняются до всего прочего и сразу завершают процесс —
+/// их запускает ElevatedRunner через runas). Одиночный экземпляр — mutex + событие
+/// активации: повторный запуск показывает уже открытое (или свёрнутое в трей) окно.
+/// Закрытие окна и минимизация прячут приложение в трей; настоящий выход — «Выход»
+/// в меню трея (или завершение сеанса Windows).
 /// </summary>
 public partial class App : Application
 {
@@ -22,6 +26,8 @@ public partial class App : Application
     private EventWaitHandle? _activate;
     private RegisteredWaitHandle? _activationSubscription;
     private ProxyRuntime? _runtime;
+    private TrayIcon? _tray;
+    private bool _exiting;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -32,6 +38,8 @@ public partial class App : Application
             Shutdown(helperCode);
             return;
         }
+
+        var launchOnStart = e.Args.Contains("--launch", StringComparer.OrdinalIgnoreCase);
 
         _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var firstInstance);
         if (!firstInstance)
@@ -49,6 +57,11 @@ public partial class App : Application
             state: null,
             millisecondsTimeOutInterval: -1,
             executeOnlyOnce: false);
+        SessionEnding += (_, _) =>
+        {
+            _exiting = true;
+            Shutdown();
+        };
 
         var config = AppConfigStore.LoadOrCreate();
         Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
@@ -67,7 +80,28 @@ public partial class App : Application
 
         var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath(), config.Ui.Language);
         MainWindow = window;
+        window.Closing += (_, e2) =>
+        {
+            if (_exiting)
+            {
+                return; // настоящий выход: окно закрывается, OnExit остановит всё
+            }
+
+            e2.Cancel = true;
+            window.Hide();
+        };
         window.Show();
+
+        _tray = new TrayIcon();
+        _tray.OpenRequested += ActivateMainWindow;
+        _tray.ExitRequested += ExitFromTray;
+
+        if (launchOnStart)
+        {
+            window.LaunchFromShortcut();
+        }
+
+        _ = RunStartupUpdateCheckAsync(window);
     }
 
     private static bool TryRunElevatedHelper(string[] args, out int exitCode)
@@ -105,14 +139,53 @@ public partial class App : Application
             return;
         }
 
+        MainWindow.Show();
         MainWindow.WindowState = WindowState.Normal;
         MainWindow.Activate();
+    }
+
+    private void ExitFromTray()
+    {
+        _exiting = true;
+        _tray?.Dispose();
+        Shutdown();
+    }
+
+    /// <summary>
+    /// Фоновая проверка обновления Claude на старте (ui.checkUpdatesOnStart): только чтение
+    /// версий и журнала AppX — без подъёма цепочки и без UAC. Есть что ставить — строка
+    /// в главном окне и балун трея; сбой тихо пишется в лог обновлятора.
+    /// </summary>
+    private async Task RunStartupUpdateCheckAsync(MainWindow window)
+    {
+        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            var check = await _runtime.Updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+            if (check.Installed is null || check.UpToDate)
+            {
+                return;
+            }
+
+            var text = window.SetUpdateNotice(check.Installed.Version, check.OfferedVersion);
+            _tray?.ShowNotice(text);
+        }
+        catch (Exception ex)
+        {
+            _runtime.Updater.Log.Warn($"стартовая проверка обновления не удалась: {ex.Message}");
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         _activationSubscription?.Unregister(null);
         _activate?.Dispose();
+        _tray?.Dispose();
         _runtime?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _singleInstance?.Dispose();
         base.OnExit(e);

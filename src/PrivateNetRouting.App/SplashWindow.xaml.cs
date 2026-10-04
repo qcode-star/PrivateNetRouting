@@ -36,6 +36,7 @@ public partial class SplashWindow : Window
     public SplashWindow(string logPath)
     {
         InitializeComponent();
+        Icon = AppIcons.WindowIcon;
         _logPath = logPath;
 
         TitleText.Text = Loc.S("Splash.Title");

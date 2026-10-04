@@ -56,6 +56,7 @@ public partial class UpdateWindow : Window
     public UpdateWindow(ProxyRuntime runtime)
     {
         InitializeComponent();
+        Icon = AppIcons.WindowIcon;
         _runtime = runtime;
         _logPath = runtime.Updater.Log.FilePath;
 

@@ -63,6 +63,15 @@
     <!-- Запуск Claude -->
     <s:String x:Key="Main.Launch.Busy">запуск (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
+    <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
+
+    <!-- Обновление Claude: сигнал проверки на старте -->
+    <s:String x:Key="Main.Update.AvailableFmt">Доступно обновление Claude: {0} → {1}</s:String>
+    <s:String x:Key="Main.Update.Available">Доступно обновление Claude</s:String>
+
+    <!-- Трей -->
+    <s:String x:Key="Tray.Open">Открыть</s:String>
+    <s:String x:Key="Tray.Exit">Выход</s:String>
 
     <!-- Заставка (подъём цепочки при запуске Claude) -->
     <s:String x:Key="Splash.Title">Запуск Claude</s:String>

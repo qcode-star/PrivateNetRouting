@@ -63,6 +63,15 @@
     <!-- Claude launch -->
     <s:String x:Key="Main.Launch.Busy">launching (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude launched (chain ready in {0} s)</s:String>
+    <s:String x:Key="Main.Launch.AlreadyRunning">Claude is already running — the window is shown without launching again</s:String>
+
+    <!-- Claude update: startup check notice -->
+    <s:String x:Key="Main.Update.AvailableFmt">Claude update available: {0} → {1}</s:String>
+    <s:String x:Key="Main.Update.Available">A Claude update is available</s:String>
+
+    <!-- Tray -->
+    <s:String x:Key="Tray.Open">Open</s:String>
+    <s:String x:Key="Tray.Exit">Exit</s:String>
 
     <!-- Splash (chain rise while launching Claude) -->
     <s:String x:Key="Splash.Title">Launching Claude</s:String>

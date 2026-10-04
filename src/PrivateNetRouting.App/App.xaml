@@ -1,7 +1,7 @@
 <Application x:Class="PrivateNetRouting.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             ShutdownMode="OnMainWindowClose">
+             ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <SolidColorBrush x:Key="Brush.Window" Color="#1F1E1D"/>
         <SolidColorBrush x:Key="Brush.Card" Color="#2A2826"/>

@@ -18,6 +18,7 @@ public class AppConfigTests : IDisposable
         Assert.Equal("127.0.0.1:18081", config.Chain.DaemonHttpListen);
         Assert.Equal(@"\\.\pipe\pnr-sidecar", config.Chain.Socket);
         Assert.True(config.ForwardProxy.BindWslGateway);
+        Assert.True(config.Ui.CheckUpdatesOnStart);
     }
 
     [Fact]

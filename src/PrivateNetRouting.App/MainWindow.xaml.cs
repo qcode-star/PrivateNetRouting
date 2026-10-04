@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
         InitializeComponent();
+        Icon = AppIcons.WindowIcon;
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
@@ -50,6 +51,16 @@ public partial class MainWindow : Window
         _chainTimer.Tick += async (_, _) => await RefreshChainAsync();
         _chainTimer.Start();
         _ = RefreshChainAsync();
+    }
+
+    /// <summary>Минимизация прячется в трей (приложение продолжает работать) — как и закрытие окна.</summary>
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        if (WindowState == WindowState.Minimized)
+        {
+            Hide();
+        }
     }
 
     protected override void OnClosed(EventArgs e)
@@ -205,7 +216,41 @@ public partial class MainWindow : Window
     /// лончер идемпотентно поднимает цепочку; сбой рисуется заставкой (лог/закрыть,
     /// автозакрытие минутой), успех — «Готово» и короткое затухание.
     /// </summary>
-    private async void OnLaunchClaude(object sender, RoutedEventArgs e)
+    private async void OnLaunchClaude(object sender, RoutedEventArgs e) => await RunLaunchAsync();
+
+    /// <summary>
+    /// Ярлыковый режим (App --launch вместо ярлыка Claude): Claude уже запущен — просто
+    /// показать окно, без второго экземпляра; не запущен — обычный запуск с заставкой
+    /// подъёма цепочки (старт туннеля, проверки, затем Claude с флагами прокси).
+    /// </summary>
+    public async void LaunchFromShortcut()
+    {
+        if (_launchBusy)
+        {
+            return;
+        }
+
+        bool claudeRunning;
+        try
+        {
+            claudeRunning = _runtime.Updater.IsClaudeRunning();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+            return;
+        }
+
+        if (claudeRunning)
+        {
+            _viewModel.SetCheckResult("Main.Launch.AlreadyRunning");
+            return;
+        }
+
+        await RunLaunchAsync();
+    }
+
+    private async Task RunLaunchAsync()
     {
         if (_launchBusy)
         {
@@ -251,6 +296,18 @@ public partial class MainWindow : Window
             _viewModel.SetLaunchBusy(false);
             await RefreshChainAsync();
         }
+    }
+
+    /// <summary>
+    /// Сигнал о найденном на старте обновлении Claude: строка возле кнопок запуска.
+    /// Возвращает локализованный текст — им же App показывает балун трея.
+    /// </summary>
+    public string SetUpdateNotice(string installedVersion, string? offeredVersion)
+    {
+        _viewModel.SetUpdateNotice(installedVersion, offeredVersion);
+        return offeredVersion is null
+            ? Loc.S("Main.Update.Available")
+            : Loc.F("Main.Update.AvailableFmt", installedVersion, offeredVersion);
     }
 
     /// <summary>
@@ -341,6 +398,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _chainDetails = "";
     private bool _chainOperationRunning;
     private bool _launchRunning;
+    private string? _updateNoticeKey;
+    private object?[] _updateNoticeArgs = [];
 
     public MainViewModel(ProxyRuntime runtime)
     {
@@ -406,6 +465,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     /// <summary>Форматируется из ключа+аргументов при каждом чтении — переживает смену языка.</summary>
     public string CheckResult => _checkResultKey is null ? "" : Loc.F(_checkResultKey, _checkResultArgs);
+
+    /// <summary>Сигнал о найденном на старте обновлении Claude; пуст, когда обновления нет.</summary>
+    public string UpdateNotice => _updateNoticeKey is null ? "" : Loc.F(_updateNoticeKey, _updateNoticeArgs);
+
+    public void SetUpdateNotice(string installedVersion, string? offeredVersion)
+    {
+        if (offeredVersion is null)
+        {
+            _updateNoticeKey = "Main.Update.Available";
+            _updateNoticeArgs = [];
+        }
+        else
+        {
+            _updateNoticeKey = "Main.Update.AvailableFmt";
+            _updateNoticeArgs = [installedVersion, offeredVersion];
+        }
+
+        OnPropertyChanged(nameof(UpdateNotice));
+    }
 
     public bool CanStart
     {
@@ -516,6 +594,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Refresh();
         OnPropertyChanged(nameof(CheckResult));
+        OnPropertyChanged(nameof(UpdateNotice));
         if (_chainOperationRunning)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");
