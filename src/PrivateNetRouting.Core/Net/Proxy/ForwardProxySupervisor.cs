@@ -72,11 +72,11 @@ public sealed class ForwardProxySupervisor(
 
         if (config.Detached)
         {
-            await StartWorkerAsync(ct);
+            await StartWorkerAsync(ct).ConfigureAwait(false);
             return;
         }
 
-        await inner.StartAsync(ct);
+        await inner.StartAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Подъём detached-воркера (тот же исполняемый файл с маркером, через cmd с файловым редиректом) и ожидание его слушателя.</summary>
@@ -100,7 +100,7 @@ public sealed class ForwardProxySupervisor(
                 return;
             }
 
-            await Task.Delay(250, ct);
+            await Task.Delay(250, ct).ConfigureAwait(false);
         }
 
         throw new IOException($"proxy worker did not start listening within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
@@ -110,7 +110,7 @@ public sealed class ForwardProxySupervisor(
     {
         if (inner.IsRunning)
         {
-            await inner.StopAsync();
+            await inner.StopAsync().ConfigureAwait(false);
             return;
         }
 
@@ -149,7 +149,7 @@ public sealed class ForwardProxySupervisor(
                 return;
             }
 
-            await Task.Delay(250);
+            await Task.Delay(250).ConfigureAwait(false);
         }
 
         log.Warn($"forward-proxy: port {Port} is still listening {config.WorkerStopWaitSeconds}s after the worker was killed");

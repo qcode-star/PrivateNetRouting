@@ -23,7 +23,7 @@ public static class ProxyWorker
         runtime.Log.Info($"proxy worker: starting (pid {Environment.ProcessId})");
         try
         {
-            await runtime.ProxyService.StartAsync(stop);
+            await runtime.ProxyService.StartAsync(stop).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -33,13 +33,15 @@ public static class ProxyWorker
 
         try
         {
-            await Task.Delay(Timeout.Infinite, stop);
+            await Task.Delay(Timeout.Infinite, stop).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
         }
 
-        await runtime.ProxyService.StopAsync();
+        // в App-хосте воркер запускается под Dispatcher-контекстом: без ConfigureAwait
+        // выше эти строки не выполнялись бы никогда (продолжения — в очередь диспетчера)
+        await runtime.ProxyService.StopAsync().ConfigureAwait(false);
         runtime.Log.Info("proxy worker: stopped");
         return 0;
     }

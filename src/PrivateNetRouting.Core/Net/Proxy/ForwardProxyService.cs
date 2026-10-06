@@ -128,7 +128,9 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
 
         _running = false;
-        await _cts.CancelAsync();
+        // ConfigureAwait обязателен: остановку ждут блокирующе (OnExit GUI) под
+        // Dispatcher-контекстом — захваченный контекст дедлочит ожидание
+        await _cts.CancelAsync().ConfigureAwait(false);
         lock (_gate)
         {
             foreach (var listener in _listeners)
@@ -167,7 +169,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token);
+                await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -195,7 +197,9 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             TcpClient client;
             try
             {
-                client = await listener.AcceptTcpClientAsync(_cts.Token);
+                // без захвата контекста вызывающего: цикл приёма не должен зависеть
+                // от живости UI-потока (продолжения — в пул)
+                client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
             {
@@ -345,7 +349,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync();
+        await StopAsync().ConfigureAwait(false);
         _cts.Dispose();
     }
 }

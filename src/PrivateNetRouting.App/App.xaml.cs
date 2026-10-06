@@ -82,7 +82,9 @@ public partial class App : Application
         {
             try
             {
-                _runtime.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+                // в пуле, без Dispatcher-контекста: задержанный старт (ждём слушателя
+                // detached-воркера) иначе дедлочит блокирующее ожидание на UI-потоке
+                Task.Run(() => _runtime.StartAsync(CancellationToken.None)).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
@@ -206,7 +208,13 @@ public partial class App : Application
         _activationSubscription?.Unregister(null);
         _activate?.Dispose();
         _tray?.Dispose();
-        _runtime?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        // останов рантайма — в пуле: продолжения await'ов внутри DisposeAsync не должны
+        // попадать в очередь диспетчера, чей поток здесь же блокирующе ждёт
+        if (_runtime is not null)
+        {
+            Task.Run(() => _runtime.DisposeAsync().AsTask()).GetAwaiter().GetResult();
+        }
+
         _singleInstance?.Dispose();
         base.OnExit(e);
     }

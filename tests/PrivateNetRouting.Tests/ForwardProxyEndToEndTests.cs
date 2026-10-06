@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -101,6 +102,71 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             "127.0.0.1", proxyEndpoint.Port, "health.example", originPort, TimeSpan.FromSeconds(5));
 
         Assert.True(alive);
+    }
+
+    /// <summary>
+    /// Регрессия GUI-дедлока на выходе: OnExit синхронно ждёт DisposeAsync под
+    /// SynchronizationContext, чей поток заблокирован этим же ожиданием (Dispatcher).
+    /// Продолжения await'ов останова обязаны уходить в пул, а не в захваченный контекст.
+    /// </summary>
+    [Fact]
+#pragma warning disable xUnit1031 // блокирующее ожидание здесь и есть проверяемый сценарий
+    public void StopCompletesUnderBlockedSynchronizationContext()
+    {
+        var previous = SynchronizationContext.Current;
+        var trapped = new TrappedPostContext();
+        SynchronizationContext.SetSynchronizationContext(trapped);
+        try
+        {
+            var log = new FileLog(Path.Combine(_tempDir, "proxy-stop-context.log"));
+            var config = new ForwardProxyConfig
+            {
+                Listen = "127.0.0.1:0",
+                BindWslGateway = false,
+                Socks5Upstream = "127.0.0.1:1",
+                HeaderTimeoutSeconds = 5,
+                SocksTimeoutSeconds = 5,
+            };
+            var proxy = new ForwardProxyService(
+                config,
+                new FakeResolver(host => new ResolveResult(IPAddress.Loopback, "fake", 300)),
+                new Socks5Client("127.0.0.1:1"),
+                new ActivityMarker(Path.Combine(_tempDir, "marker-context"), TimeSpan.FromSeconds(60)),
+                log);
+            proxy.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+            var stop = proxy.DisposeAsync().AsTask();
+            Assert.True(
+                stop.Wait(TimeSpan.FromSeconds(5)),
+                "DisposeAsync did not complete: stop continuation was posted to the blocked SynchronizationContext");
+
+            trapped.Drain();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+#pragma warning restore xUnit1031
+
+    /// <summary>Контекст «заблокированного диспетчера»: Post кладёт в очередь и не выполняет.</summary>
+    private sealed class TrappedPostContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _posts = new();
+
+        public override void Post(SendOrPostCallback d, object? state) =>
+            _posts.Enqueue((d, state));
+
+        public override void Send(SendOrPostCallback d, object? state) =>
+            throw new InvalidOperationException("unexpected Send on trapped context");
+
+        public void Drain()
+        {
+            while (_posts.TryDequeue(out var item))
+            {
+                item.Callback(item.State);
+            }
+        }
     }
 
     private async Task<(ForwardProxyService Proxy, IPEndPoint Endpoint)> StartProxyAsync(

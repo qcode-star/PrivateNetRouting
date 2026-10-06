@@ -276,7 +276,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await ProxyService.DisposeAsync();
+        // ConfigureAwait: Dispose блокирующе ждут из GUI (OnExit) — без него цепочка
+        // останова упирается в захваченный Dispatcher-контекст и дедлочит процесс
+        await ProxyService.DisposeAsync().ConfigureAwait(false);
         DohPool.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();
