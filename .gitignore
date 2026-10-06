@@ -18,6 +18,9 @@ x86/
 *.sln.docstates
 *.rsuser
 
+# Agent tooling: workspace-scoped agent state (skills, plans). Not shared through git.
+.zcode/
+
 # Tests and coverage
 TestResults/
 coverage*
