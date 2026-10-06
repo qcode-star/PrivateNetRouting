@@ -1,9 +1,9 @@
 namespace PrivateNetRouting.Core.Logging;
 
 /// <summary>
-/// Сдвиг age-файлов ротации: current → .1, .1 → .2, ..., за keep — удаляется.
-/// Общая логика стартовой (по размеру) и ручной ротации; вызывающий решает,
-/// критичны ли ошибки (стартовая — проглатывает, ручная — сообщает).
+/// Shifting the rotation age files: current → .1, .1 → .2, ..., beyond keep — deleted.
+/// Shared logic of the startup (by size) and manual rotation; the caller decides
+/// whether errors are critical (startup — swallows them, manual — reports).
 /// </summary>
 internal static class LogRotation
 {
@@ -25,7 +25,7 @@ internal static class LogRotation
         }
     }
 
-    /// <summary>Ротация на старте: сдвигаем только переросший порог файл; ошибки не критичны.</summary>
+    /// <summary>Rotation at start: shift only a file that outgrew the threshold; errors are not critical.</summary>
     public static void RotateAtStartup(string path, int maxBytes, int keep)
     {
         try
@@ -40,19 +40,19 @@ internal static class LogRotation
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // ротация не критична: пишем в старый файл дальше
+            // rotation is not critical: keep writing to the old file
         }
     }
 }
 
 /// <summary>
-/// Простой потокобезопасный файловый лог с уровнями (logging.level конфига, по умолчанию
-/// Info). Политика прежнего набора: в Info — разовые события (старт/стоп/варнинги/ошибки),
-/// периодические и per-request подробности (таймеры, коннекты, резолвы) — Debug и в штатном
-/// режиме молчат; ротация по размеру выполняется один раз на старте процесса, ручная —
-/// по запросу diagnostics (файл в этот момент принадлежит только этому процессу).
-/// Если файл уже держит другой процесс (GUI в трее + pnr из терминала), лог уходит
-/// в персональный файл &lt;имя&gt;.&lt;pid&gt;.log — два писателя в один файл не допускаются.
+/// Simple thread-safe file log with levels (logging.level of the config, default
+/// Info). Policy of the legacy set: Info — one-off events (start/stop/warnings/errors),
+/// periodic and per-request details (timers, connects, resolves) — Debug and silent in normal
+/// operation; size-based rotation is performed once at process start, manual —
+/// on a diagnostics request (at that moment the file belongs only to this process).
+/// If the file is already held by another process (GUI in the tray + pnr from a terminal), the log goes
+/// to a personal file &lt;name&gt;.&lt;pid&gt;.log — two writers to one file are not allowed.
 /// </summary>
 public sealed class FileLog : IDisposable
 {
@@ -84,9 +84,9 @@ public sealed class FileLog : IDisposable
     public void Error(string message) => Write(LogLevel.Error, message);
 
     /// <summary>
-    /// Ручная ротация живого лога: текущий файл уходит в .1, запись продолжается в новый.
-    /// Работает только у владельца файла: файл, открытый другим процессом, сдвинуть нельзя
-    /// (внешняя ротация — LogStore, она честно сообщает о занятых файлах).
+    /// Manual rotation of the live log: the current file goes to .1, writing continues in a new one.
+    /// It works only for the file owner: a file opened by another process cannot be shifted
+    /// (external rotation — LogStore, it honestly reports locked files).
     /// </summary>
     public void RotateNow()
     {
@@ -99,7 +99,7 @@ public sealed class FileLog : IDisposable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // сдвиг не удался (например, .1 держит кто-то ещё) — пишем в тот же файл дальше
+                // the shift failed (e.g. .1 is held by someone else) — keep writing to the same file
             }
 
             _writer = OpenWriter(FilePath).Writer;
@@ -108,8 +108,8 @@ public sealed class FileLog : IDisposable
     }
 
     /// <summary>
-    /// Открывает лог на запись; если файл занят другим процессом — откат на персональный
-    /// файл &lt;имя&gt;.&lt;pid&gt;.log (второй писатель в тот же файл ломал бы содержимое).
+    /// Opens the log for writing; if the file is held by another process — fallback to a personal
+    /// file &lt;name&gt;.&lt;pid&gt;.log (a second writer to the same file would corrupt the content).
     /// </summary>
     private static (StreamWriter Writer, string Path) OpenWriter(string path)
     {

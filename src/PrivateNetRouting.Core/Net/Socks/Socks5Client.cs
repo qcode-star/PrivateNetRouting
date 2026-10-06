@@ -5,9 +5,9 @@ using System.Net.Sockets;
 namespace PrivateNetRouting.Core.Net.Socks;
 
 /// <summary>
-/// SOCKS5-клиент (RFC 1928) для userspace-апстрима: без аутентификации, дозвон только по IP
-/// (IPv4, ATYP=1). Важно: имя в апстрим не передаём — его собственный резолв отравлен
-/// hosts/NRPT-баном, резолв всегда делает вызывающая сторона.
+/// SOCKS5 client (RFC 1928) for the userspace upstream: no authentication, dialing by IP only
+/// (IPv4, ATYP=1). Important: we do not pass the name to the upstream — its own resolution is
+/// poisoned by the hosts/NRPT ban, resolution is always done by the caller.
 /// </summary>
 public sealed class Socks5Client
 {
@@ -23,7 +23,7 @@ public sealed class Socks5Client
         _upstream = upstream;
     }
 
-    /// <summary>Устанавливает туннель до IP:port через апстрим и возвращает готовый сокет.</summary>
+    /// <summary>Establishes a tunnel to IP:port through the upstream and returns a ready socket.</summary>
     public async Task<Socket> ConnectAsync(IPAddress destination, int port, TimeSpan timeout, CancellationToken ct)
     {
         if (destination.AddressFamily != AddressFamily.InterNetwork)
@@ -40,7 +40,7 @@ public sealed class Socks5Client
             await socket.ConnectAsync(_upstream, cts.Token);
             var stream = new NetworkStream(socket, ownsSocket: false);
 
-            // greeting: VER=5, один метод, no-auth
+            // greeting: VER=5, one method, no-auth
             await stream.WriteAsync(new byte[] { 0x05, 0x01, 0x00 }, cts.Token);
             var method = new byte[2];
             await ReadExactAsync(stream, method, cts.Token);
@@ -49,7 +49,7 @@ public sealed class Socks5Client
                 throw new IOException("socks5: upstream rejected the no-auth method");
             }
 
-            // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 порт
+            // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
             var request = new byte[10];
             request[0] = 0x05;
             request[1] = 0x01;
@@ -65,11 +65,11 @@ public sealed class Socks5Client
                 throw new IOException($"socks5: connect rejected (rep={header[1]})");
             }
 
-            // связанный адрес пропускаем, важно только то, что запрос принят
+            // skip the bound address, only the fact that the request was accepted matters
             var boundLength = header[3] switch
             {
                 0x01 => 4,
-                0x03 => 1, // длина имени читается отдельно
+                0x03 => 1, // the name length is read separately
                 0x04 => 16,
                 _ => throw new IOException($"socks5: unknown ATYP {header[3]}"),
             };
@@ -118,7 +118,7 @@ public sealed class Socks5Client
         var port = int.Parse(hostPort[(separator + 1)..]);
         if (!IPAddress.TryParse(host, out var ip))
         {
-            // системный резолв не используется: апстрим — всегда IP из конфига
+            // system resolution is not used: the upstream is always an IP from the config
             throw new FormatException($"socks5: upstream must be an IP address, got '{host}'");
         }
 

@@ -11,11 +11,11 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.Cli;
 
 /// <summary>
-/// Headless-режим (паритет со старыми скриптами): proxy — крутить forward-прокси в консоли
-/// (или поднять detached-воркер), chain — управление цепочкой (status/up/down), check —
-/// CONNECT-roundtrip, status — сводка диагностики (порт proxy-status.ps1), logs —
-/// просмотр/ротация логов, config — путь/инициализация. Элевейтнутые команды (--elevated-*)
-/// выполняет внутренний helper и выходит; --proxy-worker — тело detached-воркера прокси.
+/// Headless mode (parity with the old scripts): proxy — runs the forward proxy in the console
+/// (or brings up a detached worker), chain — chain control (status/up/down), check —
+/// CONNECT roundtrip, status — diagnostics summary (port of proxy-status.ps1), logs —
+/// viewing/rotation of logs, config — path/initialization. Elevated commands (--elevated-*)
+/// are executed by the internal helper and it exits; --proxy-worker — the body of the detached proxy worker.
 /// </summary>
 internal static class Program
 {
@@ -68,9 +68,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Без флагов — экспертный режим: прокси крутится в этом процессе (Ctrl+C — стоп),
-    /// независимо от forwardProxy.detached. С --detached — поднять detached-воркер
-    /// (переживёт выход команды, паритет ts-fwd) и вернуться.
+    /// Without flags — expert mode: the proxy runs in this process (Ctrl+C to stop),
+    /// regardless of forwardProxy.detached. With --detached — bring up a detached worker
+    /// (it survives the command exit, parity with ts-fwd) and return.
     /// </summary>
     private static async Task<int> RunProxyAsync(List<string> rest)
     {
@@ -97,7 +97,7 @@ internal static class Program
 
         if (detached)
         {
-            config.ForwardProxy.Detached = true; // флаг сильнее конфига — только на этот запуск
+            config.ForwardProxy.Detached = true; // the flag overrides the config — for this run only
             await using var runtime = ProxyRuntime.FromConfig(config);
             await runtime.ProxyControl.StartAsync(CancellationToken.None);
             Console.WriteLine($"forward proxy: listening on {string.Join(", ", runtime.ProxyControl.ListenerEndpoints)} (detached worker)");
@@ -174,10 +174,10 @@ internal static class Program
     }
 
     /// <summary>
-    /// Сводка состояния (порт proxy-status.ps1), только чтение: процессы цепочки и владельцы
-    /// слушателей (PID), WSL-бинд, счётчики прокси, возраст маркера активности, детальный
-    /// CONNECT-roundtrip, политика и бан, живость сторожа. Полностью остановленная цепочка —
-    /// короткое сообщение: это норма, пока Claude не нужен.
+    /// State summary (port of proxy-status.ps1), read-only: chain processes and listener
+    /// owners (PID), WSL bind, proxy counters, activity marker age, detailed
+    /// CONNECT roundtrip, policy and ban, watchdog liveness. A fully stopped chain —
+    /// a short message: this is normal while Claude is not needed.
     /// </summary>
     private static async Task<int> RunStatusAsync()
     {
@@ -204,9 +204,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Просмотр и ротация логов каталога logging.directory (только чтение и сдвиг файлов;
-    /// ничего не запускается и конфиг не создаётся). Файл, открытый приложением, ротируется
-    /// из его окна диагностики — здесь он будет отмечен как locked.
+    /// Viewing and rotation of logs in the logging.directory directory (read-only plus file
+    /// shifting; nothing is started and no config is created). A file opened by the application is rotated
+    /// from its diagnostics window — here it will be marked as locked.
     /// </summary>
     private static int RunLogsCommand(List<string> rest)
     {
@@ -285,7 +285,7 @@ internal static class Program
 
     private static int RotateLogs(LogStore store, AppConfig config, List<string> names)
     {
-        // без имени — все текущие логи (*.log), ротированные копии (.N) не трогаем
+        // without a name — all current logs (*.log); rotated copies (.N) are left alone
         var targets = names.Count > 0
             ? names
             : store.List().Where(f => f.Name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)).Select(f => f.Name).ToList();
@@ -322,7 +322,7 @@ internal static class Program
                     checkOnly = true;
                     break;
                 case "--no-splash":
-                    break; // заставка существует только в GUI-режиме; флаг принят для совместимости ярлыков
+                    break; // the splash screen exists only in GUI mode; the flag is accepted for shortcut compatibility
                 default:
                     Console.Error.WriteLine($"unknown option: {argument} (--check-only | --no-splash)");
                     return 1;
@@ -437,9 +437,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Ручное обновление Claude Desktop (MSIX) через прокси-цепочку: порт ключей прежнего
-    /// движка обновления. Проверка версий идёт до подъёма цепочки — «нечего ставить»
-    /// не поднимает ничего и не просит UAC.
+    /// Manual update of Claude Desktop (MSIX) through the proxy chain: port of the keys of the legacy
+    /// update engine. Versions are checked before bringing up the chain — "nothing to install"
+    /// brings up nothing and asks for no UAC.
     /// </summary>
     private static async Task<int> RunUpdateAsync(List<string> rest)
     {
@@ -541,9 +541,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Гарды прямого доступа: статус (только чтение), локальный бан hosts/NRPT/firewall
-    /// и managed-политика (обе — UAC), env в settings.json Claude Code (Windows и WSL),
-    /// системный прокси WinINET. После ban on/off — живые проверки (DNS/прямое/проксируемое).
+    /// Direct-access guards: status (read-only), local ban of hosts/NRPT/firewall
+    /// and the managed policy (both — UAC), env in Claude Code settings.json (Windows and WSL),
+    /// WinINET system proxy. After ban on/off — live checks (DNS/direct/proxied).
     /// </summary>
     private static async Task<int> RunGuardAsync(List<string> rest)
     {
@@ -722,7 +722,7 @@ internal static class Program
         return null;
     }
 
-    /// <summary>Синхронный IProgress: без контекста синхронизации Progress&lt;T&gt; печатал бы из пула потоков не по порядку.</summary>
+    /// <summary>Synchronous IProgress: without a synchronization context Progress&lt;T&gt; would print out of order from the thread pool.</summary>
     private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
     {
         private readonly object _gate = new();

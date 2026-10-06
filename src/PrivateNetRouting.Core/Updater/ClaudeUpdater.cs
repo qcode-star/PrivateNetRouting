@@ -21,23 +21,23 @@ public sealed record UpdateOptions
 {
     public static UpdateOptions Default { get; } = new();
 
-    /// <summary>Взять адрес пакета не из журнала AppX, а явно.</summary>
+    /// <summary>Take the package URL explicitly instead of from the AppX journal.</summary>
     public string? ManualUrl { get; init; }
 
-    /// <summary>Игнорировать «версия уже актуальна» (самопроверка скачивания/установки).</summary>
+    /// <summary>Ignore "version is already up to date" (self-check of download/install).</summary>
     public bool Force { get; init; }
 
-    /// <summary>Только скачать и проверить пакет, не ставить.</summary>
+    /// <summary>Only download and verify the package, do not install.</summary>
     public bool DownloadOnly { get; init; }
 
-    /// <summary>Не удалять пакет из кэша после установки.</summary>
+    /// <summary>Do not delete the package from the cache after install.</summary>
     public bool KeepFile { get; init; }
 
-    /// <summary>Не закрывать Claude перед установкой (установка, скорее всего, не пройдёт).</summary>
+    /// <summary>Do not close Claude before install (the install will most likely fail).</summary>
     public bool KeepRunning { get; init; }
 }
 
-/// <summary>Проверка версий: установленная и предлагаемая, без цепочки и без UAC.</summary>
+/// <summary>Version check: installed and offered, without the chain and without UAC.</summary>
 public sealed record UpdateCheckResult(
     InstalledPackage? Installed,
     string? PackageUrl,
@@ -59,13 +59,13 @@ public sealed record UpdateRunResult(
     string? PackageUrl);
 
 /// <summary>
-/// Ручное обновление Claude Desktop (порт схемы claude-desktop-update): проверка версий
-/// ДО подъёма цепочки («нечего ставить» не поднимает ничего и не просит UAC), затем цепочка
-/// по необходимости, многопоточная докачка через собственный прокси, сверка Publisher,
-/// закрытие Claude и Add-AppxPackage. Пауза перед установкой — решение UI; ядро даёт
-/// отдельные фазы и двухфазный запуск (скачали → InstallAsync по подтверждению).
-/// Во время докачки держит маркер активности свежим, чтобы автостоп не погасил цепочку
-/// под загрузкой при закрытом Claude.
+/// Manual update of Claude Desktop (port of the claude-desktop-update scheme): version check
+/// BEFORE bringing up the chain ("nothing to install" brings up nothing and asks for no UAC), then the chain
+/// if needed, chunked download via its own proxy, Publisher verification,
+/// closing Claude and Add-AppxPackage. The pause before install is a UI decision; the core exposes
+/// separate phases and a two-phase run (downloaded -> InstallAsync on confirmation).
+/// During the download it keeps the activity marker fresh so the autostop does not bring the chain down
+/// under the download while Claude is closed.
 /// </summary>
 public sealed class ClaudeUpdater(
     AppConfig config,
@@ -79,7 +79,7 @@ public sealed class ClaudeUpdater(
     FileLog log,
     Func<string, long>? freeSpaceProvider = null)
 {
-    /// <summary>Запас свободного места сверх размера пакета (ТЗ прежней схемы).</summary>
+    /// <summary>Headroom of free space above the package size (spec of the legacy scheme).</summary>
     private const long InstallHeadroomBytes = 300L * 1024 * 1024;
 
     private readonly Func<string, long> _freeSpace = freeSpaceProvider ?? GetFreeSpace;
@@ -88,7 +88,7 @@ public sealed class ClaudeUpdater(
 
     public bool IsClaudeRunning() => claudeProcesses.Find(config.Updater.ClaudeProcessName).Count > 0;
 
-    /// <summary>Шаг «Проверка версий»: установленный пакет, адрес из журнала (или ручной), сравнение.</summary>
+    /// <summary>Step "Version check": installed package, URL from the journal (or manual), comparison.</summary>
     public async Task<UpdateCheckResult> CheckAsync(UpdateOptions options, CancellationToken ct)
     {
         var installed = await appx.GetInstalledAsync(config.Updater.PackageName, ct);
@@ -100,12 +100,12 @@ public sealed class ClaudeUpdater(
         var url = options.ManualUrl ?? await urlFinder.FindLatestPackageUrlAsync(ct);
         var offered = url is null ? null : PackageUrl.ParseOfferedVersion(url);
 
-        // формат версий отличается: в адресе 2.26454.2, у пакета 2.26454.2.0 — сравнение по префиксу
+        // version formats differ: the URL has 2.26454.2, the package has 2.26454.2.0 — compare by prefix
         var upToDate = offered is not null && installed.Version.StartsWith(offered, StringComparison.Ordinal);
         return new UpdateCheckResult(installed, url, offered, upToDate);
     }
 
-    /// <summary>Шаг «Цепочка»: живой CONNECT-roundtrip; при отказе идемпотентный подъём (возможен UAC).</summary>
+    /// <summary>Step "Chain": live CONNECT roundtrip; on failure an idempotent bring-up (UAC possible).</summary>
     public async Task EnsureChainAsync(IProgress<ChainStep>? chainProgress, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         if (await healthCheck(ct))
@@ -125,7 +125,7 @@ public sealed class ClaudeUpdater(
         progress?.Report(new UpdateProgress(UpdatePhase.Chain, 0, 0, "chain is alive"));
     }
 
-    /// <summary>Шаг «Скачивание»: размер, место на диске, докачка фрагментами; возвращает путь к пакету.</summary>
+    /// <summary>Step "Download": size, disk space, chunked download; returns the path to the package.</summary>
     public async Task<string> DownloadAsync(string url, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         var fileName = PackageUrl.ParseFileName(url);
@@ -157,7 +157,7 @@ public sealed class ClaudeUpdater(
         return file;
     }
 
-    /// <summary>Шаг «Проверка пакета»: манифест на месте, Publisher совпадает с установленным.</summary>
+    /// <summary>Step "Package verification": the manifest is present, the Publisher matches the installed one.</summary>
     public async Task<MsixIdentity> VerifyAsync(string file, CancellationToken ct)
     {
         var identity = MsixPackage.TryReadIdentity(file)
@@ -177,9 +177,9 @@ public sealed class ClaudeUpdater(
     }
 
     /// <summary>
-    /// Шаг «Установка» (в т.ч. двухфазный запуск по уже скачанному файлу): повторная сверка
-    /// Publisher, закрытие Claude (кроме KeepRunning), Add-AppxPackage, сверка версии,
-    /// удаление пакета из кэша (кроме KeepFile). Возвращает пакет после установки.
+    /// Step "Install" (including the two-phase run on an already downloaded file): repeated Publisher
+    /// verification, closing Claude (unless KeepRunning), Add-AppxPackage, version verification,
+    /// deleting the package from the cache (unless KeepFile). Returns the package after install.
     /// </summary>
     public async Task<InstalledPackage> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
@@ -217,7 +217,7 @@ public sealed class ClaudeUpdater(
         return after;
     }
 
-    /// <summary>Полный цикл без паузы (CLI): проверка → цепочка → скачивание → установка.</summary>
+    /// <summary>Full cycle without a pause (CLI): check -> chain -> download -> install.</summary>
     public async Task<UpdateRunResult> RunAsync(UpdateOptions options, IProgress<UpdateProgress>? progress, IProgress<ChainStep>? chainProgress, CancellationToken ct)
     {
         progress?.Report(new UpdateProgress(UpdatePhase.Check, 0, 0, "checking versions"));
@@ -254,7 +254,7 @@ public sealed class ClaudeUpdater(
         return new UpdateRunResult(UpdateOutcome.Installed, check.Installed, after, file, check.PackageUrl);
     }
 
-    /// <summary>Закрытие Claude как в прежней схеме: вежливый CloseMainWindow окнам, ожидание, гашение остатков.</summary>
+    /// <summary>Closing Claude as in the legacy scheme: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>
     private async Task CloseClaudeAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         var processes = claudeProcesses.Find(config.Updater.ClaudeProcessName);

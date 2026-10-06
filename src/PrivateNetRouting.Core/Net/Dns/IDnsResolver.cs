@@ -2,7 +2,7 @@ using System.Net;
 
 namespace PrivateNetRouting.Core.Net.Dns;
 
-/// <summary>Результат резолва: адрес, источник (для логов) и TTL ответа (сек).</summary>
+/// <summary>Resolution result: address, source (for logs) and response TTL (sec).</summary>
 public sealed record ResolveResult(IPAddress Ip, string Source, uint? TtlSeconds);
 
 public interface IDnsResolver

@@ -5,14 +5,14 @@ using System.Text;
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// Минимальный кодек DNS-wire формата (RFC 1035): запрос A-записи и разбор ответа.
-/// Только то, что нужно DoH-резолверу: A-записи и минимальный TTL ответа.
+/// Minimal DNS wire format codec (RFC 1035): A-record query and response parsing.
+/// Only what the DoH resolver needs: A records and the minimum response TTL.
 /// </summary>
 public static class DnsWire
 {
     public const ushort QtypeA = 1;
 
-    /// <summary>Строит запрос одной записи (RD=1, QDCOUNT=1).</summary>
+    /// <summary>Builds a single-record query (RD=1, QDCOUNT=1).</summary>
     public static byte[] BuildQuery(string name, ushort qtype = QtypeA, ushort id = 0xABCD)
     {
         var writer = new MemoryStream();
@@ -42,7 +42,7 @@ public static class DnsWire
         return writer.ToArray();
     }
 
-    /// <summary>Разбор ответа: A-адреса и минимальный TTL среди них.</summary>
+    /// <summary>Parses the response: A addresses and the minimum TTL among them.</summary>
     public static DnsAnswer ParseResponse(ReadOnlySpan<byte> data)
     {
         if (data.Length < 12)
@@ -98,7 +98,7 @@ public static class DnsWire
         return new DnsAnswer(ips ?? [], minTtl);
     }
 
-    /// <summary>Пропускает имя (включая сжатие указателем 0xC0).</summary>
+    /// <summary>Skips a name (including 0xC0 pointer compression).</summary>
     private static int SkipName(ReadOnlySpan<byte> data, int offset)
     {
         while (true)
@@ -124,5 +124,5 @@ public static class DnsWire
     }
 }
 
-/// <summary>Разобранный ответ: A-адреса и минимальный TTL (сек), если адреса есть.</summary>
+/// <summary>Parsed response: A addresses and the minimum TTL (sec), if addresses are present.</summary>
 public sealed record DnsAnswer(IReadOnlyList<IPAddress> Ips, uint? MinTtl);

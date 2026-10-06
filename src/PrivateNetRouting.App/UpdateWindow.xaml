@@ -15,7 +15,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Заголовок и монотонный счётчик времени (замирает в терминальном состоянии) -->
+        <!-- Header and a monotonic elapsed counter (freezes in the terminal state) -->
         <Grid Grid.Row="0" Margin="0,0,0,14">
             <StackPanel>
                 <TextBlock x:Name="HeaderText" FontSize="18" FontWeight="SemiBold"/>
@@ -25,7 +25,7 @@
                        FontFamily="Consolas" FontSize="12" Foreground="{StaticResource Brush.TextSecondary}"/>
         </Grid>
 
-        <!-- Шаги, строка деталей, подсказка -->
+        <!-- Steps, detail line, hint -->
         <Border Grid.Row="1" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
                 BorderThickness="1" CornerRadius="8" Padding="20">
             <Grid>
@@ -46,7 +46,7 @@
                      Margin="0,14,0,0" Foreground="{StaticResource Brush.Accent}"
                      Background="{StaticResource Brush.Card}" BorderThickness="0"/>
 
-        <!-- Поле ручного адреса: раскрывается, когда в журнале нет свежего URL -->
+        <!-- Manual address field: expands when the journal has no fresh URL -->
         <StackPanel x:Name="UrlPanel" Grid.Row="3" Margin="0,12,0,0" Visibility="Collapsed">
             <TextBlock x:Name="UrlLabel" FontSize="12" Foreground="{StaticResource Brush.TextSecondary}"/>
             <DockPanel Margin="0,6,0,0">
@@ -56,7 +56,7 @@
             </DockPanel>
         </StackPanel>
 
-        <!-- Кнопки; доступность — по фазе (установка не прерывается) -->
+        <!-- Buttons; availability — by phase (installation is not interrupted) -->
         <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,14,0,0" HorizontalAlignment="Right">
             <Button x:Name="BtnStop" MinWidth="110" Style="{StaticResource SecondaryButton}" Click="OnStop"/>
             <Button x:Name="BtnLog" MinWidth="110" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}" Click="OnOpenLog"/>

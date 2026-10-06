@@ -7,24 +7,24 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Updater;
 
-/// <summary>Скачивание пакета через прокси-цепочку.</summary>
+/// <summary>Downloading the package via the proxy chain.</summary>
 public interface IMsixDownloader
 {
-    /// <summary>HEAD-запрос: размер пакета (Content-Length).</summary>
+    /// <summary>HEAD request: package size (Content-Length).</summary>
     Task<long> GetLengthAsync(string url, CancellationToken ct);
 
     /// <summary>
-    /// Фрагментная докачка: части по updater.chunkBytes в updater.parallelChunks потоков,
-    /// готовая часть = файл нужного размера (докачка продолжается с места после любого
-    /// сбоя). По отмене бросает OperationCanceledException, недобранные части остаются на диске.
+    /// Chunked download: parts of updater.chunkBytes across updater.parallelChunks threads,
+    /// a finished part is a file of the expected size (the download resumes from where it stopped after any
+    /// failure). On cancellation throws OperationCanceledException; incomplete parts remain on disk.
     /// </summary>
     Task DownloadAsync(string url, string targetFile, long expectedLength, IProgress<(long DoneBytes, long TotalBytes)>? progress, CancellationToken ct);
 }
 
 /// <summary>
-/// Многопоточная докачка фрагментами (порт Get-PackageFile прежней схемы): один поток через
-/// цепочку упирается в задержку DoH+sidecar, несколько — дают единицы МБ/с. Фрагмент с
-/// ретраями, после всех — контроль размеров и склейка.
+/// Multithreaded chunked download (port of Get-PackageFile from the legacy scheme): a single thread via the
+/// chain hits the DoH+sidecar latency, several threads yield a few MB/s. A fragment with
+/// retries, then a size check and concatenation.
 /// </summary>
 public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, FileLog log) : IMsixDownloader
 {
@@ -110,7 +110,7 @@ public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, Fi
                     }
                     catch (Exception ex)
                     {
-                        // фрагмент не добрался после всех ретраев: остальные продолжают, итог проверится ниже
+                        // fragment did not arrive after all retries: the rest continue, the result is checked below
                         log.Warn($"updater: fragment {Path.GetFileName(chunk.File)} failed permanently: {ex.Message}");
                     }
                 }
@@ -132,7 +132,7 @@ public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, Fi
         }
         catch (IOException)
         {
-            // пустой каталог фрагментов в кэше не мешает
+            // an empty fragments directory in the cache does not hurt
         }
 
         log.Info($"updater: package assembled: {targetFile} ({ByteSize.Format(expectedLength)})");
@@ -156,7 +156,7 @@ public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, Fi
 
                 using var output = File.Create(chunk.File);
                 await response.Content.CopyToAsync(output, timeout.Token);
-                await output.FlushAsync(timeout.Token); // длина проверяется на диске — буфер FileStream нужно сбросить
+                await output.FlushAsync(timeout.Token); // the length is checked on disk — the FileStream buffer must be flushed
                 var written = output.Length;
                 if (written != chunk.Size)
                 {
@@ -201,7 +201,7 @@ public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, Fi
     }
 }
 
-/// <summary>Размеры для логов и UI (инвариантная культура).</summary>
+/// <summary>Sizes for logs and UI (invariant culture).</summary>
 public static class ByteSize
 {
     public static string Format(long bytes) => bytes switch

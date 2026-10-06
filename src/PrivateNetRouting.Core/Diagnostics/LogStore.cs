@@ -14,17 +14,17 @@ public sealed record LogRotationResult(string Name, bool Ok, string Detail)
 }
 
 /// <summary>
-/// Просмотр логов каталога logging.directory и внешняя ротация (сдвиг файлов). Чтение —
-/// всегда: писатели держат файлы с FileShare.Read. Ротация извне работает только для
-/// файлов, не открытых другим процессом: файл, который держит GUI или живая команда,
-/// ротируется самим владельцем (FileLog.RotateNow), занятые здесь честно отмечаются
-/// как locked.
+/// Viewing the logs of the logging.directory and external rotation (shifting files). Reading is
+/// always allowed: writers hold files with FileShare.Read. External rotation works only for
+/// files not opened by another process: a file held by the GUI or a live command is
+/// rotated by its owner (FileLog.RotateNow), busy ones are honestly reported here
+/// as locked.
 /// </summary>
 public sealed class LogStore(string directory)
 {
     public string Directory { get; } = directory;
 
-    /// <summary>Все лог-файлы каталога (текущие и ротированные .1/.2/...), по имени.</summary>
+    /// <summary>All log files of the directory (current and rotated .1/.2/...), by name.</summary>
     public IReadOnlyList<LogFileInfo> List()
     {
         if (!System.IO.Directory.Exists(Directory))
@@ -41,8 +41,9 @@ public sealed class LogStore(string directory)
     }
 
     /// <summary>
-    /// Последние строки лога; null — файла нет. Имя — точное имя файла или без «.log»
-    /// (chain → chain.log). Читает с конца файла: лог может быть больше хвоста на порядки.
+    /// Last lines of the log; null — the file does not exist. The name is the exact file name or
+    /// without ".log" (chain -> chain.log). Reads from the end of the file: the log can be orders
+    /// of magnitude larger than the tail.
     /// </summary>
     public LogTail? ReadTail(string name, int lines)
     {
@@ -59,7 +60,7 @@ public sealed class LogStore(string directory)
         var all = reader.ReadToEnd().Replace("\r\n", "\n").Split('\n');
         if (all.Length > 0 && all[^1].Length == 0)
         {
-            all = all[..^1]; // файл кончается переводом строки
+            all = all[..^1]; // the file ends with a newline
         }
 
         var take = Math.Clamp(lines, 0, all.Length);
@@ -67,8 +68,8 @@ public sealed class LogStore(string directory)
     }
 
     /// <summary>
-    /// Внешняя ротация одного лога: сдвиг age-цепочки (текущий → .1 → ... → drop за keep).
-    /// Файл, открытый другим процессом, сдвинуть нельзя — результат это сообщает.
+    /// External rotation of one log: shifting the age chain (current -> .1 -> ... -> drop past keep).
+    /// A file opened by another process cannot be shifted — the result says so.
     /// </summary>
     public LogRotationResult Rotate(string name, int keep)
     {
@@ -99,7 +100,7 @@ public sealed class LogStore(string directory)
         if (name.Contains("..") || Path.IsPathRooted(name)
             || name.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0)
         {
-            return null; // только имена файлов внутри каталога логов
+            return null; // only file names inside the log directory
         }
 
         var direct = Path.Combine(Directory, name);
@@ -112,7 +113,7 @@ public sealed class LogStore(string directory)
         return File.Exists(withLog) ? withLog : direct;
     }
 
-    /// <summary>Текущие логи (*.log) и их ротированные копии (*.log.1, *.log.12, ...).</summary>
+    /// <summary>Current logs (*.log) and their rotated copies (*.log.1, *.log.12, ...).</summary>
     internal static bool IsLogFile(string name)
     {
         if (name.EndsWith(".log", StringComparison.OrdinalIgnoreCase))

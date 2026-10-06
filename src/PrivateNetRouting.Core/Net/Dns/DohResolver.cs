@@ -4,8 +4,8 @@ using PrivateNetRouting.Core.Net.Socks;
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// Резолв через пул DoH-эндпоинтов поверх SOCKS5-апстрима. Перебирает кандидатов,
-/// отказавший помечает мёртвым (кулдаун в пуле); берётся первый успешный ответ.
+/// Resolution via a pool of DoH endpoints over a SOCKS5 upstream. Iterates over candidates,
+/// marks a failing one dead (cooldown in the pool); the first successful answer is taken.
 /// </summary>
 public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSpan timeout) : IDnsResolver
 {
@@ -32,8 +32,9 @@ public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSp
 }
 
 /// <summary>
-/// Кэш поверх резолвера: TTL ответа клампится в [min, max] — короткие ответы корпоративных
-/// резолверов не вынуждают дёргать DoH на каждый запрос, длинные не прячут смену адреса.
+/// Cache on top of the resolver: the response TTL is clamped to [min, max] — short answers from
+/// corporate resolvers do not force hitting DoH on every request, long ones do not hide an address
+/// change.
 /// </summary>
 public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, TimeSpan ttlMax, TimeProvider? time = null)
     : IDnsResolver

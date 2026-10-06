@@ -4,7 +4,7 @@ using System.Text;
 
 namespace PrivateNetRouting.Core.Net.Proxy;
 
-/// <summary>Результат детальной пробы: успех, время roundtrip'а и первая строка ответа (или причина отказа).</summary>
+/// <summary>Result of a detailed probe: success, roundtrip time and the first response line (or the failure reason).</summary>
 public sealed record HealthProbeResult(bool Ok, long Milliseconds, string Detail)
 {
     public static HealthProbeResult OkIn(long milliseconds, string statusLine) => new(true, milliseconds, statusLine);
@@ -13,8 +13,9 @@ public sealed record HealthProbeResult(bool Ok, long Milliseconds, string Detail
 }
 
 /// <summary>
-/// Живость всей цепочки одним CONNECT-roundtrip'ом через проверяемый прокси: ловит смерть
-/// любого звена (демон, кипер, DoH, коннектор). Успех — ответ 2xx на CONNECT.
+/// Liveness of the whole chain with a single CONNECT roundtrip through the proxy under test:
+/// catches the death of any link (daemon, keeper, DoH, connector). Success — a 2xx response to
+/// CONNECT.
 /// </summary>
 public static class ProxyHealthCheck
 {
@@ -28,8 +29,8 @@ public static class ProxyHealthCheck
         (await ProbeAsync(proxyHost, proxyPort, targetHost, targetPort, timeout, ct)).Ok;
 
     /// <summary>
-    /// Та же проба с деталями для диагностики: время roundtrip'а и первая строка ответа
-    /// прокси (как «CONNECT-туннель за N мс» / «прокси ответил: …» в прежней схеме).
+    /// The same probe with details for diagnostics: the roundtrip time and the first response line
+    /// from the proxy (like "CONNECT tunnel in N ms" / "proxy responded: …" in the legacy scheme).
     /// </summary>
     public static async Task<HealthProbeResult> ProbeAsync(
         string proxyHost,

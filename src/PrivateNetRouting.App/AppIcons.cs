@@ -5,8 +5,8 @@ using System.Windows.Media.Imaging;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Общая иконка приложения (Assets/app.ico, multi-size): один ImageSource для окон WPF
-/// и один System.Drawing.Icon для трея. Загружается один раз и переиспользуется.
+/// Shared application icon (Assets/app.ico, multi-size): one ImageSource for WPF windows
+/// and one System.Drawing.Icon for the tray. Loaded once and reused.
 /// </summary>
 internal static class AppIcons
 {

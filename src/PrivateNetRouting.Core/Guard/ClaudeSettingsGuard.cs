@@ -4,20 +4,20 @@ using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.Core.Guard;
 
-/// <summary>Ожидаемые значения env для settings.json (Windows и WSL строятся одинаково, кроме адреса прокси).</summary>
+/// <summary>Expected env values for settings.json (Windows and WSL are built the same way, except the proxy address).</summary>
 public static class ClaudeEnvValues
 {
     public static string WindowsProxyUrl(ForwardProxyConfig fp) => "http://" + fp.Listen;
 
-    /// <summary>Адрес прокси для WSL: IP виндовой стороны WSL NAT (vEthernet (WSL...)) — не 127.0.0.1.</summary>
+    /// <summary>Proxy address for WSL: IP of the Windows side of WSL NAT (vEthernet (WSL...)) — not 127.0.0.1.</summary>
     public static string? WslProxyUrl(System.Net.IPAddress? gateway, ForwardProxyConfig fp) =>
         gateway is null ? null : $"http://{gateway}:{Port(fp)}";
 
     public static int Port(ForwardProxyConfig fp) => Net.Socks.Socks5Client.ParseEndPoint(fp.Listen).Port;
 
     /// <summary>
-    /// NO_PROXY (стиль curl): базовые записи + каждая зона в двух формах — «zone» и «.zone»
-    /// (поддомены). Зоны — из launcher.bypassDomains, как в прежней схеме из NRPT-списка.
+    /// NO_PROXY (curl style): base entries + each zone in two forms — "zone" and ".zone"
+    /// (subdomains). Zones come from launcher.bypassDomains, as in the legacy scheme from the NRPT list.
     /// </summary>
     public static string BuildNoProxy(IEnumerable<string> bypassDomains) =>
         string.Join(",", NoProxyParts(bypassDomains));
@@ -41,10 +41,10 @@ public static class ClaudeEnvValues
 }
 
 /// <summary>
-/// env в settings.json Claude Code, Windows (порт sync-claude-noproxy.ps1): движок Claude Code
-/// (CLI и встроенный в Desktop) применяет env и к сессиям, и к командам в них. Существующие
-/// ключи (env и корень) сохраняются, перед записью делается бэкап с меткой времени.
-/// Прав не требует.
+/// env in settings.json of Claude Code, Windows (port of sync-claude-noproxy.ps1): the Claude Code
+/// engine (CLI and the one built into Desktop) applies env both to sessions and to commands inside
+/// them. Existing keys (env and root) are preserved; a timestamped backup is made before writing.
+/// Requires no special rights.
 /// </summary>
 public sealed class ClaudeSettingsGuard(AppConfig config)
 {
@@ -76,7 +76,7 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         }
     }
 
-    /// <summary>Записывает env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); возвращает путь бэкапа (null — файла не было).</summary>
+    /// <summary>Writes env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); returns the backup path (null — the file did not exist).</summary>
     public string? Sync()
     {
         var path = config.Guard.ClaudeSettingsPath;

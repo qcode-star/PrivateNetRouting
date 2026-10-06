@@ -3,11 +3,11 @@ using PrivateNetRouting.Core.Configuration;
 namespace PrivateNetRouting.Core.Net.Proxy;
 
 /// <summary>
-/// Тело detached-воркера forward-прокси — единая точка входа для обоих хостов
-/// (pnr --proxy-worker и PrivateNetRouting.App --proxy-worker; аргумент обрабатывается
-/// до всего прочего — в App до mutex одиночного экземпляра и до UI). Живёт, пока его
-/// не убьёт останов цепочки; лог — forward-proxy.log (или персональный
-/// &lt;имя&gt;.&lt;pid&gt;.log, если файл уже держит другой процесс).
+/// The body of the forward-proxy detached worker — a single entry point for both hosts
+/// (pnr --proxy-worker and PrivateNetRouting.App --proxy-worker; the argument is handled before
+/// everything else — in App before the single-instance mutex and before the UI). It lives until the
+/// chain shutdown kills it; the log is forward-proxy.log (or a personal
+/// &lt;name&gt;.&lt;pid&gt;.log if the file is already held by another process).
 /// </summary>
 public static class ProxyWorker
 {
@@ -16,7 +16,7 @@ public static class ProxyWorker
         var config = AppConfigStore.LoadOrCreate();
         if (!config.ForwardProxy.Enabled)
         {
-            return 0; // прокси выключен конфигом — воркеру нечего делать
+            return 0; // the proxy is disabled by config — the worker has nothing to do
         }
 
         await using var runtime = ProxyRuntime.FromConfig(config);
@@ -39,8 +39,8 @@ public static class ProxyWorker
         {
         }
 
-        // в App-хосте воркер запускается под Dispatcher-контекстом: без ConfigureAwait
-        // выше эти строки не выполнялись бы никогда (продолжения — в очередь диспетчера)
+        // in the App host the worker starts under the Dispatcher context: without ConfigureAwait
+        // above, these lines would never execute (continuations — to the dispatcher queue)
         await runtime.ProxyService.StopAsync().ConfigureAwait(false);
         runtime.Log.Info("proxy worker: stopped");
         return 0;

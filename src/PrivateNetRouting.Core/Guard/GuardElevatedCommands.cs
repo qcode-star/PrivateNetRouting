@@ -7,8 +7,8 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
-/// Элевейтнутые команды гардов: hosts/NRPT/firewall и политика HKLM требуют администратора.
-/// Выполняются в runas-копии приложения (как команды цепочки), результат — файл с nonce.
+/// Elevated guard commands: hosts/NRPT/firewall and the HKLM policy require administrator.
+/// They run in a runas copy of the application (like the chain commands), the result is a nonce file.
 /// </summary>
 public static class GuardElevatedCommands
 {
@@ -20,7 +20,7 @@ public static class GuardElevatedCommands
     public static bool IsCommand(string argument) =>
         argument is BanOn or BanOff or PolicyOn or PolicyOff;
 
-    /// <summary>Выполняется в уже элевейтнутом процессе (App или pnr); возвращает код выхода.</summary>
+    /// <summary>Runs in an already elevated process (App or pnr); returns the exit code.</summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
     {
         try
@@ -57,9 +57,9 @@ public static class GuardElevatedCommands
     }
 
     /// <summary>
-    /// Три слоя бана (порт ban-ai-hosts.ps1): hosts-блок пересобирается из списка, NRPT-правило
-    /// и firewall-группа снимаются и ставятся заново (идемпотентно), кэш DNS сбрасывается;
-    /// после установки пробное имя поддерева не должно резолвиться.
+    /// Three layers of the ban (port of ban-ai-hosts.ps1): the hosts block is rebuilt from the list,
+    /// the NRPT rule and the firewall group are removed and re-created (idempotent), the DNS cache is
+    /// flushed; after applying, a probe subtree name must not resolve.
     /// </summary>
     internal static string ApplyBanLayers(AppConfig config, FileLog log, IBanSystemOps ops, bool enable)
     {
@@ -104,7 +104,7 @@ public static class GuardElevatedCommands
         return "egressProxyUrl and disableWslSessions removed";
     }
 
-    /// <summary>Резолвится ли пробное имя сейчас (системный резолвер: hosts + NRPT); таймаут — 5 с.</summary>
+    /// <summary>Whether the probe name resolves right now (system resolver: hosts + NRPT); timeout is 5 s.</summary>
     internal static bool ProbeBlocked(string probeName)
     {
         try

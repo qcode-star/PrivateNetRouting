@@ -12,10 +12,10 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Окно диагностики (порт proxy-status.ps1), только чтение: сводка состояния (процессы
-/// цепочки и владельцы портов, счётчики, маркер активности, детальный CONNECT-roundtrip,
-/// политика и бан, сторож) и просмотр логов — список файлов с хвостом выбранного, ротация
-/// живого лога владельцем (FileLog.RotateNow). Хвост обновляется таймером, сводка — кнопкой.
+/// Diagnostics window (a port of proxy-status.ps1), read-only: state summary (chain processes
+/// and port owners, counters, activity marker, detailed CONNECT roundtrip, policy and ban,
+/// watchdog) and log viewing — a list of files with the selected one's tail, rotation of the
+/// live log by its owner (FileLog.RotateNow). The tail is refreshed by a timer, the summary by a button.
 /// </summary>
 public partial class DiagnosticsWindow : Window
 {
@@ -65,7 +65,7 @@ public partial class DiagnosticsWindow : Window
         LogsHeaderText.Text = Loc.S("Diag.Section.logs");
     }
 
-    /// <summary>Сводка собирается заново по кнопке и при смене языка: каждая проба — живой трафик.</summary>
+    /// <summary>The summary is rebuilt on demand and on language change: every probe is live traffic.</summary>
     private async Task RefreshAsync()
     {
         if (_busy)
@@ -117,7 +117,7 @@ public partial class DiagnosticsWindow : Window
         }
     }
 
-    /// <summary>Строка сводки: серое техническое имя и подсвеченное по метке значение.</summary>
+    /// <summary>Summary line: a gray technical name and a value highlighted by mark.</summary>
     private static TextBlock MakeLine(string? name, string value, DiagMark mark, bool wrap = false)
     {
         var block = new TextBlock
@@ -146,7 +146,7 @@ public partial class DiagnosticsWindow : Window
         _ => (Brush)Application.Current.FindResource("Brush.Text"),
     };
 
-    /// <summary>Список файлов логов с сохранением выбора; хвост — по выбору и таймером.</summary>
+    /// <summary>List of log files preserving the selection; the tail — on selection and by timer.</summary>
     private void RefreshLogs()
     {
         var selected = (LogsList.SelectedItem as ListBoxItem)?.Tag as LogFileInfo;
@@ -190,7 +190,7 @@ public partial class DiagnosticsWindow : Window
         TailBox.ScrollToEnd();
     }
 
-    /// <summary>Ротация выбранного лога: живой лог процесса — на месте, прочий файл — сдвигом.</summary>
+    /// <summary>Rotation of the selected log: a process's live log — in place, another file — by shifting.</summary>
     private void OnRotateLog(object sender, RoutedEventArgs e)
     {
         if (LogsList.SelectedItem is not ListBoxItem { Tag: LogFileInfo info })

@@ -4,10 +4,10 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Updater;
 
-/// <summary>Установленный MSIX-пакет Claude Desktop (сведения Get-AppxPackage).</summary>
+/// <summary>Installed Claude Desktop MSIX package (information from Get-AppxPackage).</summary>
 public sealed record InstalledPackage(string Name, string Version, string Publisher, string InstallLocation);
 
-/// <summary>Сведения об установленном пакете и установка (прав администратора не требует).</summary>
+/// <summary>Information about the installed package and installation (requires no admin rights).</summary>
 public interface IAppxPackageSource
 {
     Task<InstalledPackage?> GetInstalledAsync(string packageName, CancellationToken ct);
@@ -16,8 +16,8 @@ public interface IAppxPackageSource
 }
 
 /// <summary>
-/// Get-AppxPackage (версия/Publisher установленного пакета; при нескольких берётся старшая)
-/// и Add-AppxPackage -ForceApplicationShutdown — как в прежней схеме обновления.
+/// Get-AppxPackage (version/Publisher of the installed package; with several, the highest is taken)
+/// and Add-AppxPackage -ForceApplicationShutdown — as in the legacy update scheme.
 /// </summary>
 public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, FileLog log) : IAppxPackageSource
 {
@@ -52,7 +52,7 @@ public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, 
         log.Info($"updater: Add-AppxPackage ok: {packageFile}");
     }
 
-    /// <summary>JSON одиночного пакета от ConvertTo-Json; пустой вывод — пакета нет.</summary>
+    /// <summary>JSON of a single package from ConvertTo-Json; empty output — no package.</summary>
     internal static InstalledPackage? ParsePackageJson(string json)
     {
         var trimmed = json.Trim();

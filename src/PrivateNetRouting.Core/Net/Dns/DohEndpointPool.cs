@@ -4,12 +4,12 @@ using PrivateNetRouting.Core.Net.Socks;
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// Пул DoH-резолверов. Стартовый набор — из конфига; при наличии источника обнаружения
-/// (конфиг tailnet) список пополняется и перепроверяется по таймеру. Пробы гонятся параллельно,
-/// живые эндпоинты ставятся вперёд (мёртвый узел вверху админского списка не тормозит резолв);
-/// отказавший эндпоинт уходит в кулдаун. Каждое обновление пула пишется в Debug, изменение
-/// живого набора — одной строкой в Info, повторы молчат. Если обнаружение ничего не вернуло —
-/// остаётся стартовый набор.
+/// Pool of DoH resolvers. The initial set comes from the config; when a discovery source
+/// (tailnet config) is present, the list is replenished and rechecked on a timer. Probes run
+/// in parallel, live endpoints are moved to the front (a dead node at the top of the admin
+/// list does not slow resolution down); a failing endpoint goes into cooldown. Every pool
+/// refresh is written to Debug, a change of the live set — as a single line in Info, repeats
+/// stay silent. If discovery returned nothing — the initial set remains.
 /// </summary>
 public sealed partial class DohEndpointPool : IDisposable
 {
@@ -57,7 +57,7 @@ public sealed partial class DohEndpointPool : IDisposable
         _ = Task.Run(RefreshForeverAsync);
     }
 
-    /// <summary>Кандидаты для резолва: без остывающих; если остывают все — все.</summary>
+    /// <summary>Resolution candidates: excluding cooling-down ones; if all are cooling down — all of them.</summary>
     public IReadOnlyList<DohEndpoint> SnapshotAlive()
     {
         lock (_gate)

@@ -4,9 +4,9 @@ using System.Net.NetworkInformation;
 namespace PrivateNetRouting.Core.Net;
 
 /// <summary>
-/// Шлюз WSL NAT: IPv4 адаптера "vEthernet (WSL...)" на стороне Windows. Адрес стабилен
-/// на жизнь инстанса WSL, поэтому читается один раз на старте (с повторами до появления
-/// адаптера) и дальше не отслеживается — как в прежней схеме.
+/// WSL NAT gateway: the IPv4 of the "vEthernet (WSL...)" adapter on the Windows side. The address
+/// is stable for the lifetime of the WSL instance, so it is read once at startup (with retries
+/// until the adapter appears) and is not tracked further — as in the legacy scheme.
 /// </summary>
 public static class WslGateway
 {

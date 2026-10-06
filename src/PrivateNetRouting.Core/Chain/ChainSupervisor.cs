@@ -13,10 +13,10 @@ public enum ChainStepStatus
     Failed,
 }
 
-/// <summary>Шаг подъёма/останова для UI и CLI: компонент, состояние, деталь.</summary>
+/// <summary>Bring-up/shutdown step for UI and CLI: component, status, detail.</summary>
 public sealed record ChainStep(string Component, ChainStepStatus Status, string Detail);
 
-/// <summary>Снимок состояния всех звеньев цепочки (только чтение).</summary>
+/// <summary>Snapshot of all chain links (read-only).</summary>
 public sealed record ChainState(
     bool DaemonHttpListening,
     bool DaemonProcessAlive,
@@ -34,7 +34,7 @@ public sealed record ChainState(
         && ProxyHealthy;
 }
 
-/// <summary>Управление прокси со стороны оркестратора (реализация — ForwardProxyService).</summary>
+/// <summary>Proxy control on the orchestrator side (implementation — ForwardProxyService).</summary>
 public interface IProxyControl
 {
     bool IsRunning { get; }
@@ -44,7 +44,7 @@ public interface IProxyControl
     Task StopAsync();
 }
 
-/// <summary>Управление цепочкой (реализация — ChainSupervisor; интерфейс для лончера и тестов).</summary>
+/// <summary>Chain control (implementation — ChainSupervisor; interface for the launcher and tests).</summary>
 public interface IChainSupervisor
 {
     Task<ChainState> GetStateAsync(CancellationToken ct);
@@ -55,10 +55,10 @@ public interface IChainSupervisor
 }
 
 /// <summary>
-/// Оркестратор цепочки: идемпотентный подъём (демон → кипер → узел → прокси → здоровье)
-/// и полный останов (down → демон → кипер → прокси). Порядок и признаки живости — как в
-/// прежней схеме: слушатель HTTP демона, процесс watch-ipn, BackendState=Running,
-/// слушатель прокси, живой CONNECT-roundtrip.
+/// Chain orchestrator: idempotent bring-up (daemon → keeper → node → proxy → health)
+/// and full shutdown (down → daemon → keeper → proxy). Order and liveness signals — as in
+/// the legacy scheme: daemon HTTP listener, watch-ipn process, BackendState=Running,
+/// proxy listener, live CONNECT-roundtrip.
 /// </summary>
 public sealed class ChainSupervisor(
     ChainConfig config,
@@ -85,7 +85,7 @@ public sealed class ChainSupervisor(
 
     public async Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
-        // 1. демон (единственное возможное окно UAC на холодном старте)
+        // 1. daemon (the only possible UAC prompt on a cold start)
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
             Report(progress, "Daemon", ChainStepStatus.Skipped, "already listening");
@@ -106,7 +106,7 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 2. кипер watch-ipn
+        // 2. watch-ipn keeper
         if (keeper.IsRunning)
         {
             Report(progress, "Keeper", ChainStepStatus.Skipped, "already running");
@@ -126,7 +126,7 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 3. узел (вход ключом из statedir, молчаливый)
+        // 3. node (silent login by key from statedir)
         var state = await cli.GetBackendStateAsync(ct);
         if (state == "Running")
         {
@@ -153,7 +153,7 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 4. forward-прокси (наш порт ts-fwd)
+        // 4. forward proxy (our ts-fwd port)
         if (proxy.IsRunning)
         {
             Report(progress, "Proxy", ChainStepStatus.Skipped, "already running");
@@ -173,7 +173,7 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 5. здоровье: CONNECT-roundtrip через весь путь
+        // 5. health: CONNECT-roundtrip through the whole path
         Report(progress, "Health", ChainStepStatus.Active, "CONNECT-roundtrip");
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.HealthWaitSeconds);
         while (DateTime.UtcNow < deadline)
@@ -229,7 +229,7 @@ public sealed class ChainSupervisor(
         log.Info("chain: stopped");
     }
 
-    /// <summary>Шаг в UI/CLI-прогресс; он же — Debug-строка в лог (полная картина подъёма).</summary>
+    /// <summary>A step into the UI/CLI progress; also a Debug line to the log (the full bring-up picture).</summary>
     private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail)
     {
         log.Debug($"chain: {component}: {status.ToString().ToLowerInvariant()}: {detail}");
@@ -237,5 +237,5 @@ public sealed class ChainSupervisor(
     }
 }
 
-/// <summary>Ошибка конкретного звена цепочки (для понятных сообщений UI/CLI).</summary>
+/// <summary>Error of a specific chain link (for clear UI/CLI messages).</summary>
 public sealed class ChainException(string component, Exception inner) : Exception($"chain: {component}: {inner.Message}", inner);

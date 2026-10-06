@@ -10,12 +10,12 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Core.Net.Proxy;
 
 /// <summary>
-/// Надстройка над ForwardProxyService, решающая, где живёт слушатель: в этом процессе
-/// или в отдельном detached-воркере (forwardProxy.detached — паритет ts-fwd прежней схемы,
-/// прокси переживает выход запустившей его команды/GUI). Порт — единый ресурс: занятый
-/// порт никогда не биндится вторым экземпляром (чей бы он ни был), останов добивает только
-/// опознанного по командной строке воркера, чужой владелец не трогается (предупреждение
-/// в лог). Живость для цепочки — порт: кто бы её ни спрашивал (GUI, pnr), ответ одинаков.
+/// A wrapper over ForwardProxyService that decides where the listener lives: in this process or
+/// in a separate detached worker (forwardProxy.detached — parity with ts-fwd of the legacy scheme,
+/// the proxy outlives the exit of the command/GUI that started it). The port is a single resource:
+/// a busy port is never bound by a second instance (whosever it is), the shutdown kills only a
+/// worker identified by its command line, a foreign owner is not touched (warning in the log).
+/// Liveness for the chain is the port: whoever asks (GUI, pnr), the answer is the same.
 /// </summary>
 public sealed class ForwardProxySupervisor(
     ForwardProxyConfig config,
@@ -28,7 +28,7 @@ public sealed class ForwardProxySupervisor(
     Action<int>? killProcess = null,
     Func<string?>? currentExePath = null) : IProxyControl, IProxyStatistics
 {
-    /// <summary>Маркер detached-воркера в командной строке; им же воркер опознаётся при останове.</summary>
+    /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
 
     private readonly Func<string, string?, string, int?> _spawnWorker =
@@ -79,7 +79,7 @@ public sealed class ForwardProxySupervisor(
         await inner.StartAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>Подъём detached-воркера (тот же исполняемый файл с маркером, через cmd с файловым редиректом) и ожидание его слушателя.</summary>
+    /// <summary>Bring-up of the detached worker (the same executable with the marker, via cmd with file redirection) and waiting for its listener.</summary>
     private async Task StartWorkerAsync(CancellationToken ct)
     {
         var exe = _currentExePath()
@@ -87,7 +87,7 @@ public sealed class ForwardProxySupervisor(
         var workerErrorLog = Path.Combine(
             Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
             "forward-proxy.err.log");
-        // (командная строка, stdout -> NUL, stderr)
+        // (command line, stdout -> NUL, stderr)
         var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker}", null, workerErrorLog);
         log.Info($"forward-proxy: worker spawned via cmd, pid={pid}");
 
@@ -156,9 +156,9 @@ public sealed class ForwardProxySupervisor(
     }
 
     /// <summary>
-    /// Свой воркер: в командной строке владельца порта есть маркер. CommandLine элевейтнутого
-    /// процесса не виден неэлевейтнутому читателю (WMI, Win11 24H2+) — тогда воркер не
-    /// опознаётся и не убивается, останов цепочки честно предупреждает об этом в лог.
+    /// Our worker: the port owner's command line contains the marker. The CommandLine of an elevated
+    /// process is not visible to a non-elevated reader (WMI, Win11 24H2+) — then the worker is not
+    /// identified and not killed, and the chain shutdown honestly warns about it in the log.
     /// </summary>
     private bool IsOurWorker(int pid)
     {

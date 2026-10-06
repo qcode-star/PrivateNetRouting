@@ -14,7 +14,7 @@
             <RowDefinition Height="220"/>
         </Grid.RowDefinitions>
 
-        <!-- Заголовок и кнопки -->
+        <!-- Header and buttons -->
         <Grid Grid.Row="0" Margin="0,0,0,14">
             <TextBlock x:Name="HeaderText" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -23,7 +23,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- Сводка: секции со строками «имя: значение», значение подсвечено по метке -->
+        <!-- Summary: sections with "name: value" lines, the value highlighted by mark -->
         <Border Grid.Row="1" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
                 BorderThickness="1" CornerRadius="8" Padding="20">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -31,7 +31,7 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Логи: заголовок, статус операции ротации, кнопка ротации выбранного -->
+        <!-- Logs: header, rotation operation status, button to rotate the selected one -->
         <Grid Grid.Row="2" Margin="0,14,0,6">
             <TextBlock x:Name="LogsHeaderText" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -41,7 +41,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- Список файлов (размер/дата) и хвост выбранного лога -->
+        <!-- File list (size/date) and the tail of the selected log -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260"/>

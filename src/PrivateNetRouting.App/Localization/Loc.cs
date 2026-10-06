@@ -5,23 +5,23 @@ using PrivateNetRouting.Core.Configuration;
 namespace PrivateNetRouting.App.Localization;
 
 /// <summary>
-/// Язык интерфейса приложения: подменяет словарь Strings.&lt;lang&gt;.xaml в ресурсах
-/// (DynamicResource в XAML подхватывает подмену на лету) и раздаёт строки коду
-/// (<see cref="S"/> — по ключу, <see cref="F"/> — формат-шаблон с подстановками).
-/// Новый язык: словарь Strings.&lt;код&gt;.xaml плюс код в <see cref="AppLanguage.Supported"/>.
-/// CLI (pnr) всегда английский и этим сервисом не пользуется.
+/// Application UI language: swaps the Strings.&lt;lang&gt;.xaml dictionary in the resources
+/// (DynamicResource in XAML picks up the swap on the fly) and hands strings to code
+/// (<see cref="S"/> — by key, <see cref="F"/> — format template with substitutions).
+/// New language: a Strings.&lt;code&gt;.xaml dictionary plus a code in <see cref="AppLanguage.Supported"/>.
+/// The CLI (pnr) is always English and does not use this service.
 /// </summary>
 public static class Loc
 {
     private static readonly Dictionary<string, ResourceDictionary> Cache = [];
 
-    /// <summary>Срабатывает после смены словаря: ViewModel-и перерисовывают свои строки.</summary>
+    /// <summary>Fires after the dictionary swap: view models redraw their strings.</summary>
     public static event Action? LanguageChanged;
 
-    /// <summary>Код текущего языка ("en", "ru").</summary>
+    /// <summary>Code of the current language ("en", "ru").</summary>
     public static string CurrentLanguage { get; private set; } = AppLanguage.Fallback;
 
-    /// <summary>Подменяет словарь строк; неподдержанный код молча даёт фолбэк.</summary>
+    /// <summary>Swaps the string dictionary; an unsupported code quietly falls back.</summary>
     public static void Apply(string language)
     {
         language = AppLanguage.Supported.Contains(language) ? language : AppLanguage.Fallback;
@@ -45,11 +45,11 @@ public static class Loc
         LanguageChanged?.Invoke();
     }
 
-    /// <summary>Строка по ключу; отсутствующий ключ виден в UI как [ключ].</summary>
+    /// <summary>String by key; a missing key shows in the UI as [key].</summary>
     public static string S(string key) =>
         Application.Current.TryFindResource(key) as string ?? $"[{key}]";
 
-    /// <summary>Формат-шаблон по ключу + подстановки (плейсхолдеры {0}, {1}, ...).</summary>
+    /// <summary>Format template by key + substitutions (placeholders {0}, {1}, ...).</summary>
     public static string F(string key, params object?[] args) =>
         string.Format(CultureInfo.InvariantCulture, S(key), args);
 

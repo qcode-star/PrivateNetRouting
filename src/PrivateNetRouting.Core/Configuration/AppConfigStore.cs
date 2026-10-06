@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace PrivateNetRouting.Core.Configuration;
 
 /// <summary>
-/// Загрузка/сохранение пользовательского конфига. Файл живёт в %APPDATA%, в git не попадает;
-/// в репозитории — только шаблон config/appsettings.example.json с плейсхолдерами (правило №1-2 AGENTS.md).
+/// Loading/saving the user config. The file lives in %APPDATA% and does not go into git;
+/// the repository contains only the template config/appsettings.example.json with placeholders (rules #1-2 of AGENTS.md).
 /// </summary>
 public static class AppConfigStore
 {
@@ -19,14 +19,14 @@ public static class AppConfigStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>Путь по умолчанию: %APPDATA%\PrivateNetRouting\appsettings.json.</summary>
+    /// <summary>Default path: %APPDATA%\PrivateNetRouting\appsettings.json.</summary>
     public static string GetDefaultConfigPath() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "PrivateNetRouting",
             "appsettings.json");
 
-    /// <summary>Загружает конфиг; при отсутствии файла создаёт его из значений по умолчанию.</summary>
+    /// <summary>Loads the config; if the file is absent, creates it from the default values.</summary>
     public static AppConfig LoadOrCreate(string? path = null)
     {
         path ??= GetDefaultConfigPath();
@@ -45,9 +45,9 @@ public static class AppConfigStore
     }
 
     /// <summary>
-    /// Точечное изменение конфига на диске (используется настройками UI, например сменой
-    /// языка). Файл перечитывается без раскрытия переменных окружения — чтобы %APPDATA%
-    /// в путях не сохранялся раскрытым — мутируется и пишется назад.
+    /// Point change of the config on disk (used by UI settings, e.g. language
+    /// switching). The file is re-read without expanding environment variables — so that %APPDATA%
+    /// in paths is not saved expanded — then mutated and written back.
     /// </summary>
     public static void Update(Action<AppConfig> mutate, string? path = null)
     {
@@ -82,7 +82,7 @@ public static class AppConfigStore
 
 file static class AppConfigExtensions
 {
-    /// <summary>Раскрывает переменные окружения в путевых свойствах (%APPDATA% и т.п.).</summary>
+    /// <summary>Expands environment variables in path properties (%APPDATA% etc.).</summary>
     public static void ExpandEnvironmentVariables(this AppConfig config)
     {
         config.Logging.Directory = Environment.ExpandEnvironmentVariables(config.Logging.Directory);

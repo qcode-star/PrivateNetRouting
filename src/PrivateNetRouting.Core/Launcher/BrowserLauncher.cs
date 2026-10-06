@@ -8,9 +8,9 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Core.Launcher;
 
 /// <summary>
-/// Режимы запуска: обычный, «только проверить/поднять цепочку» и «подготовить профиль,
-/// браузер не открывать» (порт -PrepareOnly browser-proxy.ps1). Url и приватное окно
-/// перекрывают значения конфига (флаг CLI — поверх browser.url/browser.private).
+/// Launch modes: normal, "check/bring up the chain only", and "prepare the profile
+/// without opening the browser" (port of -PrepareOnly from browser-proxy.ps1). Url and the private window
+/// override the config values (the CLI flag wins over browser.url/browser.private).
 /// </summary>
 public sealed record BrowserLauncherOptions(bool CheckOnly = false, bool PrepareOnly = false, bool Private = false, string? Url = null)
 {
@@ -19,29 +19,29 @@ public sealed record BrowserLauncherOptions(bool CheckOnly = false, bool Prepare
 
 public enum BrowserLaunchOutcome
 {
-    /// <summary>Браузер запущен с изолированным профилем и прокси приложения.</summary>
+    /// <summary>The browser is started with the isolated profile and the application proxy.</summary>
     Launched,
 
-    /// <summary>Режим --check-only: цепочка жива, браузер не запускался.</summary>
+    /// <summary>--check-only mode: the chain is alive, the browser was not started.</summary>
     CheckOnly,
 
-    /// <summary>Режим --prepare-only: профиль подготовлен (Firefox — user.js), браузер не запускался.</summary>
+    /// <summary>--prepare-only mode: the profile is prepared (Firefox — user.js), the browser was not started.</summary>
     Prepared,
 }
 
 public sealed record BrowserLaunchResult(BrowserLaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed);
 
 /// <summary>
-/// Списки обхода прокси для браузера. Домены зон — общие с лончером Claude
-/// (launcher.bypassDomains), отдельно — домены верхнего уровня, которые ходят мимо
-/// прокси (*.ru и соседи: локальные сайты не должны уходить в зарубежный выход).
+/// Proxy bypass lists for the browser. Zone domains are shared with the Claude launcher
+/// (launcher.bypassDomains); separately, top-level domains that go around the
+/// proxy (*.ru and neighbors: local sites must not go out through the foreign egress).
 /// </summary>
 public static class BrowserBypassList
 {
     /// <summary>
-    /// Chromium-совместимый список (--proxy-bypass-list, разделитель «;», CIDR поддерживаются):
-    /// базовый список Claude (localhost/приватные диапазоны/подсеть tailnet) + домены обеими
-    /// формами + *.tld.
+    /// Chromium-compatible list (--proxy-bypass-list, separator ";", CIDR supported):
+    /// the base Claude list (localhost/private ranges/tailnet subnet) + domains in both
+    /// forms + *.tld.
     /// </summary>
     public static string BuildChromium(IEnumerable<string> domains, IEnumerable<string> tlds)
     {
@@ -51,8 +51,8 @@ public static class BrowserBypassList
     }
 
     /// <summary>
-    /// Firefox network.proxy.no_proxies_on (разделитель «,», CIDR НЕ поддерживаются — только
-    /// имена): каждый домен зон в двух формах — bare и с ведущей точкой (поддомены) + *.tld.
+    /// Firefox network.proxy.no_proxies_on (separator ",", CIDR NOT supported — names
+    /// only): each zone domain in two forms — bare and with a leading dot (subdomains) + *.tld.
     /// </summary>
     public static string BuildFirefoxNoProxies(IEnumerable<string> domains, IEnumerable<string> tlds)
     {
@@ -79,7 +79,7 @@ public static class BrowserBypassList
             .Where(tld => tld.Length > 0);
 }
 
-/// <summary>user.js изолированного профиля Firefox (порт browser-proxy.ps1): перезаписывается при каждом запуске.</summary>
+/// <summary>user.js of the Firefox isolated profile (port of browser-proxy.ps1): rewritten on every launch.</summary>
 public static class FirefoxUserJs
 {
     public static string Render(string proxyHost, int proxyPort, string noProxies) => $"""
@@ -99,12 +99,12 @@ public static class FirefoxUserJs
 }
 
 /// <summary>
-/// Лончер браузера с изолированным профилем (порт browser-proxy.ps1): проверяет цепочку живым
-/// CONNECT-roundtrip, при отказе идемпотентно поднимает её (сплэш/прогресс — как у лончера
-/// Claude), затем запускает браузер с прокси приложения и без системных настроек: Firefox —
-/// отдельный профиль с user.js и --new-instance (иначе URL уйдёт в повседневный экземпляр без
-/// прокси), хромоподобный — --proxy-server/--user-data-dir (отдельный каталог обязателен:
-/// уже запущенный экземпляр игнорирует флаги командной строки).
+/// Browser launcher with an isolated profile (port of browser-proxy.ps1): checks the chain with a live
+/// CONNECT roundtrip, on failure brings it up idempotently (splash/progress — like the Claude
+/// launcher), then starts the browser with the application proxy and without system settings: Firefox —
+/// a separate profile with user.js and --new-instance (otherwise the URL goes to the everyday instance without
+/// a proxy), chromium-like — --proxy-server/--user-data-dir (a separate directory is mandatory:
+/// an already running instance ignores the command-line flags).
 /// </summary>
 public sealed class BrowserLauncher(
     AppConfig config,
@@ -115,7 +115,7 @@ public sealed class BrowserLauncher(
     Func<string, bool>? fileExists = null,
     Func<ProcessStartInfo, Process?>? startProcess = null)
 {
-    /// <summary>Откат, если путь конфига не найден: второй стандартный каталог семейства (как в browser-proxy.ps1).</summary>
+    /// <summary>Fallback if the configured path is not found: the second standard directory of the family (as in browser-proxy.ps1).</summary>
     private static readonly string FirefoxFallbackPath = @"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe";
 
     private static readonly string ChromiumFallbackPath = @"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe";
@@ -123,10 +123,10 @@ public sealed class BrowserLauncher(
     private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
     private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
 
-    /// <summary>Лог лончера браузера (заставка предлагает его открыть при сбое).</summary>
+    /// <summary>Browser launcher log (the splash screen offers to open it on failure).</summary>
     public FileLog Log => log;
 
-    /// <summary>Адрес прокси для --proxy-server (Chromium) и user.js (Firefox).</summary>
+    /// <summary>Proxy URL for --proxy-server (Chromium) and user.js (Firefox).</summary>
     public string ProxyUrl => "http://" + config.ForwardProxy.Listen;
 
     public string BuildChromiumBypassList() =>
@@ -163,7 +163,7 @@ public sealed class BrowserLauncher(
 
         if (kind == BrowserKind.Firefox)
         {
-            // user.js перезаписывается при каждом запуске — адрес прокси и список обхода всегда свежие
+            // user.js is rewritten on every launch — the proxy URL and bypass list stay fresh
             WriteUserJs();
             if (options.PrepareOnly)
             {
@@ -218,9 +218,9 @@ public sealed class BrowserLauncher(
     }
 
     /// <summary>
-    /// Запущен ли уже наш экземпляр браузера (процесс с нашим профилем в командной строке).
-    /// Повторный запуск Firefox на том же профиле с --new-instance упирается в блокировку
-    /// профиля — вместо этого показывается окно приложения (как ярлыковый режим Claude).
+    /// Whether our browser instance is already running (a process with our profile in the command line).
+    /// Launching Firefox again on the same profile with --new-instance hits the profile lock —
+    /// instead, the application window is shown (like the Claude shortcut mode).
     /// </summary>
     public bool IsOurBrowserRunning()
     {

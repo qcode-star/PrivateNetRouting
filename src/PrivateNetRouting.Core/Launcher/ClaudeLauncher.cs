@@ -7,7 +7,7 @@ using Microsoft.Win32;
 
 namespace PrivateNetRouting.Core.Launcher;
 
-/// <summary>Режим запуска: обычный или «только проверить/поднять цепочку» (Claude не стартует).</summary>
+/// <summary>Launch mode: normal or "check/bring up the chain only" (Claude does not start).</summary>
 public sealed record LauncherOptions(bool CheckOnly)
 {
     public static LauncherOptions Default { get; } = new(CheckOnly: false);
@@ -15,19 +15,19 @@ public sealed record LauncherOptions(bool CheckOnly)
 
 public enum LaunchOutcome
 {
-    /// <summary>Claude Desktop запущен с флагами прокси.</summary>
+    /// <summary>Claude Desktop is started with the proxy flags.</summary>
     Launched,
 
-    /// <summary>Режим --check-only: цепочка жива, Claude не запускался.</summary>
+    /// <summary>--check-only mode: the chain is alive, Claude was not started.</summary>
     CheckOnly,
 }
 
 public sealed record LaunchResult(LaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed);
 
 /// <summary>
-/// Сборка --proxy-bypass-list: фиксированный базовый список (localhost и приватные
-/// диапазоны — как в claude-launcher.ps1) плюс домены конфига, каждый в двух формах —
-/// в Chromium 'dom.com' матчит только сам домен, а '*.dom.com' — только поддомены.
+/// Building --proxy-bypass-list: a fixed base list (localhost and private
+/// ranges — as in claude-launcher.ps1) plus config domains, each in two forms —
+/// in Chromium 'dom.com' matches only the domain itself, while '*.dom.com' matches only subdomains.
 /// </summary>
 public static class ClaudeBypassList
 {
@@ -57,11 +57,11 @@ public static class ClaudeBypassList
 }
 
 /// <summary>
-/// Лончер Claude Desktop (порт claude-launcher.ps1): проверяет цепочку живым
-/// CONNECT-roundtrip, при отказе идемпотентно поднимает её (единственное окно UAC —
-/// старт демона), затем запускает Claude с --proxy-server/--proxy-bypass-list.
-/// Managed-политика egressProxyUrl и уже запущенные копии Claude — только контроль
-/// с предупреждением в лог (остановить запуск они не могут, как и в прежней схеме).
+/// Claude Desktop launcher (port of claude-launcher.ps1): checks the chain with a live
+/// CONNECT roundtrip, on failure brings it up idempotently (the only UAC window is
+/// starting the daemon), then starts Claude with --proxy-server/--proxy-bypass-list.
+/// The managed egressProxyUrl policy and already running Claude copies are only monitored,
+/// with a warning in the log (they cannot stop the launch, as in the legacy scheme either).
 /// </summary>
 public sealed class ClaudeLauncher(
     AppConfig config,
@@ -78,10 +78,10 @@ public sealed class ClaudeLauncher(
     private readonly Func<string?> _readEgressPolicy = readEgressPolicy ?? ReadEgressPolicyFromRegistry;
     private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
 
-    /// <summary>Лог лончера (заставка предлагает его открыть при сбое).</summary>
+    /// <summary>Launcher log (the splash screen offers to open it on failure).</summary>
     public FileLog Log => log;
 
-    /// <summary>Адрес прокси для --proxy-server и сверки с managed-политикой.</summary>
+    /// <summary>Proxy URL for --proxy-server and for comparison with the managed policy.</summary>
     public string ProxyUrl => "http://" + config.ForwardProxy.Listen;
 
     public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
@@ -130,9 +130,9 @@ public sealed class ClaudeLauncher(
     }
 
     /// <summary>
-    /// Страховка от запуска не через лончер: managed-политика действует при любом способе
-    /// запуска, флаги — только при нашем. Отсутствие/расхождение политики — предупреждение
-    /// в лог (ставит её отдельный модуль Guard, требует прав администратора).
+    /// Safeguard against a launch not via the launcher: the managed policy takes effect for any launch
+    /// method, the flags only for ours. A missing/mismatched policy is a warning
+    /// in the log (it is set by a separate Guard module and requires admin rights).
     /// </summary>
     private void WarnIfPolicyMissing()
     {
@@ -157,7 +157,7 @@ public sealed class ClaudeLauncher(
         }
     }
 
-    /// <summary>Уже запущенный Claude без --proxy-server работал бы мимо прокси: предупредить.</summary>
+    /// <summary>An already running Claude without --proxy-server would work around the proxy: warn.</summary>
     private void WarnIfClaudeRunningWithoutProxy()
     {
         IReadOnlyList<FoundProcess> processes;

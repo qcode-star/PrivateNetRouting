@@ -6,7 +6,7 @@ using System.Security.Principal;
 
 namespace PrivateNetRouting.Core.SystemOps;
 
-/// <summary>Проверка занятости локального TCP-порта (без прав администратора).</summary>
+/// <summary>Check whether a local TCP port is busy (without administrator rights).</summary>
 public interface IPortProbe
 {
     bool IsListening(int port);
@@ -23,17 +23,17 @@ public sealed class TcpPortProbe : IPortProbe
 public sealed record FoundProcess(int Id, string CommandLine);
 
 /// <summary>
-/// Поиск процессов по имени и подстроке командной строки (WMI). Так прежняя схема
-/// опознаёт «свои» процессы цепочки — паттерном statedir/пайпа в командной строке.
+/// Process search by name and command-line substring (WMI). This is how the legacy scheme
+/// identifies "our" chain processes — by a statedir/pipe pattern in the command line.
 /// </summary>
 public interface IProcessFinder
 {
     IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains);
 
-    /// <summary>Поиск по подстроке в имени процесса (WQL LIKE), командная строка не фильтруется.</summary>
+    /// <summary>Search by a substring in the process name (WQL LIKE); the command line is not filtered.</summary>
     IReadOnlyList<FoundProcess> FindByNameContains(string namePart);
 
-    /// <summary>Процесс по PID с его командной строкой; null — процесса уже нет.</summary>
+    /// <summary>Process by PID with its command line; null — the process is gone.</summary>
     FoundProcess? FindById(int processId);
 }
 
@@ -77,7 +77,7 @@ public sealed class WmiProcessFinder : IProcessFinder
     }
 }
 
-/// <summary>Права текущего процесса (нужно ли элевировать старт демона и останов цепочки).</summary>
+/// <summary>Current process rights (whether to elevate the daemon start and the chain shutdown).</summary>
 public static class WindowsPrivilege
 {
     public static bool IsElevated()
@@ -87,13 +87,13 @@ public static class WindowsPrivilege
     }
 }
 
-/// <summary>Утилиты запуска консольных процессов без окна.</summary>
+/// <summary>Utilities for launching console processes without a window.</summary>
 public static class ProcessOps
 {
     /// <summary>
-    /// Запускает команду через cmd с файловым перенаправлением: файловые ручки принадлежат cmd
-    /// и переживают выход нашего процесса — логи пишутся, пока жив потомок, а цепочка не зависит
-    /// от жизни приложения. Так же устроены перенаправления в прежней схеме.
+    /// Launches a command via cmd with file redirection: the file handles belong to cmd
+    /// and survive the exit of our process — logs are written while the child is alive, and the chain does not depend
+    /// on the application's lifetime. The redirections in the legacy scheme are arranged the same way.
     /// </summary>
     public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath) =>
         Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))
@@ -103,9 +103,9 @@ public static class ProcessOps
         });
 
     /// <summary>
-    /// Форма /c "…1&gt;out 2&gt;err": внешняя кавычка в паре с собственной кавычкой команды даёт
-    /// каноническое ""cmd" args" — cmd срывает первую и последнюю кавычки, внутренние сохраняются.
-    /// Двойная оборачивка ломала пути с пробелами ("""C:\Program …" не является командой).
+    /// The form /c "…1&gt;out 2&gt;err": the outer quote paired with the command's own quote gives
+    /// the canonical ""cmd" args" — cmd strips the first and last quotes, the inner ones are preserved.
+    /// Double wrapping broke paths with spaces ("""C:\Program …" is not a command).
     /// </summary>
     internal static string BuildCmdArguments(string commandLine, string? stdoutPath, string stderrPath)
     {

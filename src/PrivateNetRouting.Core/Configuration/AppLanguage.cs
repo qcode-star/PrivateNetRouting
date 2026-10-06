@@ -3,24 +3,24 @@ using System.Globalization;
 namespace PrivateNetRouting.Core.Configuration;
 
 /// <summary>
-/// Выбор языка интерфейса приложения. Поддержанные языки перечислены здесь явно:
-/// новый язык — это словарь Strings.&lt;код&gt;.xaml в приложении плюс код в
-/// <see cref="Supported"/>. Схема: "auto" (или пусто) — язык системы; всё
-/// нераспознанное и неподдержанное — английский фолбэком.
+/// Application UI language selection. Supported languages are listed here explicitly:
+/// a new language is a Strings.&lt;code&gt;.xaml dictionary in the application plus a code in
+/// <see cref="Supported"/>. Scheme: "auto" (or empty) — the system language; anything
+/// unrecognized or unsupported — English as a fallback.
 /// </summary>
 public static class AppLanguage
 {
     public const string Auto = "auto";
 
-    /// <summary>Фолбэк, если предпочитаемый и системный языки не поддержаны.</summary>
+    /// <summary>Fallback if both the preferred and the system languages are unsupported.</summary>
     public const string Fallback = "en";
 
-    /// <summary>Двухбуквенные коды языков, для которых в приложении есть словари строк.</summary>
+    /// <summary>Two-letter language codes for which the application has string dictionaries.</summary>
     public static readonly IReadOnlyList<string> Supported = ["en", "ru"];
 
     /// <summary>
-    /// Возвращает код поддержанного языка: точное совпадение с предпочтением или его
-    /// первичная подсказка (ru-RU → ru), для auto — язык системы, иначе фолбэк.
+    /// Returns the code of a supported language: an exact match with the preference or its
+    /// primary subtag (ru-RU → ru), for auto — the system language, otherwise the fallback.
     /// </summary>
     public static string Resolve(string? preference, CultureInfo systemUiCulture)
     {

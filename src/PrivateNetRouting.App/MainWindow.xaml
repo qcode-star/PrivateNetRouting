@@ -18,7 +18,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Заголовок, индикатор и выбор языка -->
+        <!-- Header, indicator and language selection -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -37,7 +37,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- Карточка статуса прокси -->
+        <!-- Proxy status card -->
         <Border Grid.Row="1" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
                 BorderThickness="1" CornerRadius="8" Padding="20">
             <Grid>
@@ -79,7 +79,7 @@
             </Grid>
         </Border>
 
-        <!-- Цепочка: состояние звеньев и управление -->
+        <!-- Chain: state of the links and control -->
         <Border Grid.Row="2" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
                 BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,12,0,0">
             <StackPanel>
@@ -90,14 +90,14 @@
                 </StackPanel>
                 <TextBlock Text="{Binding ChainDetails}" FontSize="12" LineHeight="20"
                            Foreground="{StaticResource Brush.Text}"/>
-                <!-- Сторож автостопа: явное включение (правило №4), живёт, пока открыто приложение -->
+                <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
                 <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,12,0,0"
                           Checked="OnWatchdogToggled" Unchecked="OnWatchdogToggled"/>
             </StackPanel>
         </Border>
 
-        <!-- Гарды прямого доступа: статус каждого слоя (только чтение) и управление.
-             Бан и политика просят UAC (элевейтнутый helper), settings.json и WSL — без него. -->
+        <!-- Direct-access guards: status of each layer (read-only) and control.
+             Ban and policy request UAC (elevated helper), settings.json and WSL — without it. -->
         <Border Grid.Row="3" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
                 BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,12,0,0">
             <StackPanel>
@@ -125,7 +125,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Локальный бан (hosts + NRPT + firewall) -->
+                    <!-- Local ban (hosts + NRPT + firewall) -->
                     <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource Main.Guard.Ban}" VerticalAlignment="Center" Margin="0,4,12,4"/>
                     <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BanDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
@@ -135,7 +135,7 @@
                                 Click="OnGuardBanOff" IsEnabled="{Binding CanGuard}"/>
                     </StackPanel>
 
-                    <!-- Managed-политика egressProxyUrl -->
+                    <!-- Managed policy egressProxyUrl -->
                     <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Main.Guard.Policy}" VerticalAlignment="Center" Margin="0,4,12,4"/>
                     <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PolicyDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
@@ -145,14 +145,14 @@
                                 Click="OnGuardPolicyOff" IsEnabled="{Binding CanGuard}"/>
                     </StackPanel>
 
-                    <!-- env в settings.json Claude Code (Windows) -->
+                    <!-- env in Claude Code settings.json (Windows) -->
                     <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}" VerticalAlignment="Center" Margin="0,4,12,4"/>
                     <TextBlock Grid.Row="2" Grid.Column="2" x:Name="SettingsDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
                     <Button Grid.Row="2" Grid.Column="3" x:Name="SettingsSyncButton" Content="{DynamicResource Main.Guard.Button.Sync}" Width="166"
                             Click="OnGuardSettingsSync" IsEnabled="{Binding CanGuard}"/>
 
-                    <!-- Конфиг WSL: стартовый скрипт + settings.json дистрибутива -->
+                    <!-- WSL config: startup script + distro settings.json -->
                     <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
                     <TextBlock Grid.Row="3" Grid.Column="1" Text="{DynamicResource Main.Guard.Wsl}" VerticalAlignment="Center" Margin="0,4,12,4"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" x:Name="WslDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
@@ -162,8 +162,8 @@
             </StackPanel>
         </Border>
 
-        <!-- Запуск Claude и браузера с изолированным профилем: проверка/подъём цепочки и старт
-             с флагами прокси (заставка — при ожидании); рядом — сигнал о найденном на старте обновлении -->
+        <!-- Launch Claude and a browser with an isolated profile: chain check/bring-up and start
+             with proxy flags (splash screen when waiting); next to it — a signal about an update found at startup -->
         <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,16,0,0">
             <Button Content="{DynamicResource Main.Button.LaunchClaude}" Width="160" Click="OnLaunchClaude" IsEnabled="{Binding CanLaunch}"/>
             <Button Content="{DynamicResource Main.Button.LaunchBrowser}" Width="140" Margin="8,0,0,0" Click="OnLaunchBrowser"
@@ -174,7 +174,7 @@
                        VerticalAlignment="Center" Margin="20,0,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
-        <!-- Кнопки -->
+        <!-- Buttons -->
         <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,12,0,0">
             <Button Content="{DynamicResource Main.Button.Start}" Width="120" Click="OnStart" IsEnabled="{Binding CanStart}"/>
             <Button Content="{DynamicResource Main.Button.Stop}" Width="120" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
@@ -188,7 +188,7 @@
                     Click="OnChainDown" IsEnabled="{Binding CanChainDown}"/>
         </StackPanel>
 
-        <!-- Строка результата проверки -->
+        <!-- Check result line -->
         <TextBlock Grid.Row="6" Text="{Binding CheckResult}" Foreground="{StaticResource Brush.TextSecondary}"
                    Margin="0,12,0,0" TextWrapping="Wrap"/>
     </Grid>

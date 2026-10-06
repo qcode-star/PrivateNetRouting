@@ -5,16 +5,16 @@ namespace PrivateNetRouting.Core.Guard;
 public sealed record HostsBlockState(bool Present, int EntryCount, bool Current);
 
 /// <summary>
-/// Управляемый блок в hosts (порт ban-ai-hosts.ps1): блок пересобирается из списка,
-/// поэтому повторное применение обновляет его; чужие строки не трогаются. Запись в
-/// системный hosts требует прав администратора (выполняется в элевейтнутом helper).
+/// Managed block in hosts (port of ban-ai-hosts.ps1): the block is rebuilt from the list,
+/// so re-applying updates it; foreign lines are left alone. Writing to the system hosts
+/// file requires administrator rights (performed in the elevated helper).
 /// </summary>
 public static class HostsFileBlock
 {
     /// <summary>
-    /// Читает состояние блока: есть ли маркеры, сколько записей «0.0.0.0 имя» внутри
-    /// (счёт — как в прежней схеме: только строки, начинающиеся с «0.0.0.0 »), и совпадает
-    /// ли содержимое с желаемым списком. Прав на чтение хватает любому пользователю.
+    /// Reads the state of the block: whether the markers are present, how many "0.0.0.0 name"
+    /// entries are inside (counting as in the legacy scheme: only lines starting with "0.0.0.0 "),
+    /// and whether the content matches the desired list. Read rights suffice for any user.
     /// </summary>
     public static HostsBlockState Read(string path, string begin, string end, string comment, IReadOnlyList<string> domains)
     {
@@ -61,7 +61,7 @@ public static class HostsFileBlock
             string.Join("\n", block) == string.Join("\n", desired));
     }
 
-    /// <summary>Записывает (или обновляет) блок; уже актуален — файл не трогается.</summary>
+    /// <summary>Writes (or updates) the block; if already current, the file is left untouched.</summary>
     public static void Apply(string path, string begin, string end, string comment, IReadOnlyList<string> domains)
     {
         var (kept, current) = Split(File.ReadAllLines(path), begin, end);
@@ -74,7 +74,7 @@ public static class HostsFileBlock
         WriteAll(path, [.. kept, "", .. desired, ""]);
     }
 
-    /// <summary>Снимает блок; при его отсутствии файл не трогается (но хвостовые пустые строки не подрезаются).</summary>
+    /// <summary>Removes the block; if absent, the file is left untouched (but trailing blank lines are not trimmed).</summary>
     public static void Remove(string path, string begin, string end)
     {
         var (kept, current) = Split(File.ReadAllLines(path), begin, end);
@@ -86,7 +86,7 @@ public static class HostsFileBlock
         WriteAll(path, kept);
     }
 
-    /// <summary>Разделение файла: строки вне блока (хвостовые пустые срезаются) и внутри него.</summary>
+    /// <summary>Splits the file: lines outside the block (trailing blanks trimmed) and inside it.</summary>
     private static (List<string> Kept, List<string> Block) Split(string[] lines, string begin, string end)
     {
         var kept = new List<string>();
@@ -139,7 +139,7 @@ public static class HostsFileBlock
         return lines;
     }
 
-    /// <summary>Кодировка ASCII и CRLF — как Set-Content в прежней схеме (hosts не любит другое).</summary>
+    /// <summary>ASCII encoding and CRLF — same as Set-Content in the legacy scheme (hosts dislikes anything else).</summary>
     private static void WriteAll(string path, List<string> lines) =>
         File.WriteAllText(path, string.Join("\r\n", lines) + "\r\n", Encoding.ASCII);
 }

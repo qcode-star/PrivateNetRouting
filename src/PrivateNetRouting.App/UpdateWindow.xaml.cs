@@ -14,12 +14,12 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Окно обновления Claude Desktop (порт ТЗ claude-update-gui): шаги «Проверка версий →
-/// Прокси-цепочка → Скачивание → Установка», проверка версий до подъёма цепочки (без
-/// лишнего UAC), полоса прогресса со скоростью/ETA по сэмплам, пауза перед установкой при
-/// запущенном Claude, отложенная установка и «Повторить». Установка не прерывается:
-/// «Остановить» и закрытие на этом шаге недоступны. Все обращения к ядру — await,
-/// окно не блокируется; прогресс приходит через Progress&lt;T&gt; в UI-поток.
+/// Claude Desktop update window (a port of the claude-update-gui spec): steps "Check versions →
+/// Proxy chain → Download → Install", version check before the chain bring-up (without
+/// an extra UAC), a progress bar with speed/ETA by samples, a pause before installation when
+/// Claude is running, deferred installation and "Retry". Installation is not interrupted:
+/// "Stop" and closing are unavailable at this step. All core calls are await,
+/// the window is not blocked; progress comes via Progress&lt;T&gt; to the UI thread.
 /// </summary>
 public partial class UpdateWindow : Window
 {
@@ -108,7 +108,7 @@ public partial class UpdateWindow : Window
         };
     }
 
-    /// <summary>Полный цикл: проверка → цепочка → скачивание → проверка пакета → пауза → установка.</summary>
+    /// <summary>Full cycle: check → chain → download → package verification → pause → install.</summary>
     private async Task StartAsync(string? manualUrl)
     {
         _cts?.Dispose();
@@ -140,7 +140,7 @@ public partial class UpdateWindow : Window
 
         try
         {
-            // Проверка версий — до цепочки: «нечего ставить» не поднимает ничего и не просит UAC
+            // Version check — before the chain: "nothing to install" brings up nothing and asks no UAC
             SetPhase(UpdatePhase.Check);
             SetStep(0, ChainStepStatus.Active);
             SetDetailKey("Update.Check.Running");
@@ -152,7 +152,7 @@ public partial class UpdateWindow : Window
                 SetDetailKey("Update.Check.InvalidUrl");
                 _clock.Stop();
                 UrlBox.Focus();
-                return; // ждём другой адрес от пользователя
+                return; // waiting for another address from the user
             }
 
             var check = await _runtime.Updater.CheckAsync(new UpdateOptions { ManualUrl = manualUrl }, ct);
@@ -185,19 +185,19 @@ public partial class UpdateWindow : Window
                 SetDetailKey("Update.Check.NoUrl");
                 _clock.Stop();
                 UrlBox.Focus();
-                return; // адрес вводится вручную
+                return; // the address is entered manually
             }
 
             SetDetailKey("Update.Check.AvailableFmt", check.Installed.Version, check.OfferedVersion ?? "?");
 
-            // Цепочка: живой CONNECT сразу закрывает шаг, мёртвая — подъём с подшагами (возможен UAC)
+            // Chain: a live CONNECT closes the step immediately, a dead one — bring-up with substeps (UAC possible)
             SetPhase(UpdatePhase.Chain);
             SetStep(1, ChainStepStatus.Active);
             await _runtime.Updater.EnsureChainAsync(new Progress<ChainStep>(OnChainStep), null, ct);
             SetStep(1, ChainStepStatus.Done);
             SetHintDirect("");
 
-            // Скачивание фрагментами: полоса определённая, скорость/ETA — по сэмплам окна ~10 с
+            // Chunked download: the bar is determinate, speed/ETA — by samples over a ~10 s window
             SetPhase(UpdatePhase.Download);
             SetStep(2, ChainStepStatus.Active);
             var updateProgress = new Progress<UpdateProgress>(OnUpdateProgress);
@@ -205,11 +205,11 @@ public partial class UpdateWindow : Window
             SetStep(2, ChainStepStatus.Done, ByteSize.Format(_totalBytes));
             SetHintDirect("");
 
-            // Проверка пакета: манифест и Publisher
+            // Package verification: manifest and Publisher
             var identity = await _runtime.Updater.VerifyAsync(_packageFile, ct);
             SetDetailKey("Update.Verify.OkFmt", identity.Version, identity.Publisher);
 
-            // Пауза перед установкой — только если Claude запущен (закроется)
+            // Pause before installation — only if Claude is running (it will be closed)
             if (_runtime.Updater.IsClaudeRunning())
             {
                 Progress.Visibility = Visibility.Collapsed;
@@ -233,7 +233,7 @@ public partial class UpdateWindow : Window
                 Progress.Visibility = Visibility.Visible;
             }
 
-            // Установка: не прерывается — «Остановить»/закрытие недоступны
+            // Installation: not interrupted — "Stop"/closing are unavailable
             SetPhase(UpdatePhase.Install);
             SetStep(3, ChainStepStatus.Active);
             Progress.IsIndeterminate = true;
@@ -409,7 +409,7 @@ public partial class UpdateWindow : Window
         }
     }
 
-    /// <summary>Терминальное состояние: часики замирают, «Остановить» исчезает, появляется «Повторить»/«Запустить Claude».</summary>
+    /// <summary>Terminal state: the clock freezes, "Stop" disappears, "Retry"/"Launch Claude" appear.</summary>
     private void Finish(bool success, bool showLaunch = false, bool progressFull = false)
     {
         _terminal = true;
@@ -442,7 +442,7 @@ public partial class UpdateWindow : Window
     {
         if (_pauseDecision is not null)
         {
-            // в паузе стоп = отложка: пакет остаётся в кэше
+            // in pause, stop = defer: the package stays in the cache
             _pauseDecision.TrySetResult(false);
             return;
         }
@@ -472,7 +472,7 @@ public partial class UpdateWindow : Window
         BtnLaunch.IsEnabled = false;
         try
         {
-            // лончер сам проверит/поднимет цепочку и передаст флаги прокси (как ярлык прежней схемы)
+            // the launcher itself will check/bring up the chain and pass the proxy flags (like the legacy scheme's shortcut)
             await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
             SetHintKey("Update.Launch.Done");
         }

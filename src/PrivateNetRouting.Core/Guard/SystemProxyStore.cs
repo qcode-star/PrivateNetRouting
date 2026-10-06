@@ -4,11 +4,11 @@ using Microsoft.Win32;
 namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
-/// Системный прокси WinINET (порт proxy-on/off.ps1): HKCU Internet Settings + InternetSetOption
-/// (SETTINGS_CHANGED/REFRESH — иначе приложения подхватят настройку только после перезапуска).
-/// Прав администратора не требует; адрес — адрес forward-прокси приложения, исключения —
-/// локальные адреса, приватные диапазоны (маски вида 10.*, WinINET не понимает CIDR),
-/// дополнительные зоны из конфига и корпоративные домены (launcher.bypassDomains, обе формы).
+/// WinINET system proxy (port of proxy-on/off.ps1): HKCU Internet Settings + InternetSetOption
+/// (SETTINGS_CHANGED/REFRESH — otherwise applications pick up the setting only after a restart).
+/// Requires no administrator rights; the address is the address of the application's forward proxy,
+/// exceptions are local addresses, private ranges (masks like 10.*, WinINET does not understand CIDR),
+/// extra zones from the config and corporate domains (launcher.bypassDomains, both forms).
 /// </summary>
 public interface ISystemProxyStore
 {
@@ -67,10 +67,10 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
     private static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 }
 
-/// <summary>Сборка значения ProxyOverride из базовых записей, зон конфига и доп. зон.</summary>
+/// <summary>Builds the ProxyOverride value from base entries, config zones and extra zones.</summary>
 public static class SystemProxyBypass
 {
-    /// <summary>Базовые записи фиксированы в коде (протокольные константы, не окружение).</summary>
+    /// <summary>Base entries are fixed in code (protocol constants, not environment).</summary>
     private static readonly string[] BaseParts =
     [
         "localhost", "127.0.0.1", "<local>", "*.local",

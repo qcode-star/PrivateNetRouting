@@ -4,21 +4,21 @@ using System.Runtime.InteropServices;
 namespace PrivateNetRouting.Core.SystemOps;
 
 /// <summary>
-/// Один слушатель TCP: адрес, порт и владелец. Имя процесса (если он ещё жив) resolves
-/// реализацией таблицы — потребителю не нужен отдельный lookup по PID.
+/// One TCP listener: address, port and owner. The process name (if it is still alive) is resolved
+/// by the table implementation — the consumer does not need a separate lookup by PID.
 /// </summary>
 public sealed record TcpListenerEntry(IPAddress Address, int Port, int ProcessId, string? ProcessName);
 
-/// <summary>Слушатели локального TCP-порта с PID владельца (аналог Get-NetTCPConnection -State Listen).</summary>
+/// <summary>Listeners of a local TCP port with the owner PID (analog of Get-NetTCPConnection -State Listen).</summary>
 public interface ITcpConnectionTable
 {
     IReadOnlyList<TcpListenerEntry> GetListeners(int port);
 }
 
 /// <summary>
-/// Таблица TCP-соединений через iphlpapi GetExtendedTcpTable (класс OWNER_PID_LISTENER):
-/// даёт PID владельца слушателя без PowerShell и без прав администратора. Только IPv4 —
-/// все слушатели схемы (демон, forward-прокси, шлюз WSL) биндятся на IPv4-адреса.
+/// TCP connection table via iphlpapi GetExtendedTcpTable (class OWNER_PID_LISTENER):
+/// gives the listener's owner PID without PowerShell and without administrator rights. IPv4 only —
+/// all listeners of the scheme (daemon, forward proxy, WSL gateway) bind to IPv4 addresses.
 /// </summary>
 public sealed class TcpConnectionTable : ITcpConnectionTable
 {
@@ -43,7 +43,7 @@ public sealed class TcpConnectionTable : ITcpConnectionTable
                 return [];
             }
 
-            // MIB_TCPTABLE_OWNER_PID: dwNumEntries, затем строки по 6 DWORD:
+            // MIB_TCPTABLE_OWNER_PID: dwNumEntries, then rows of 6 DWORDs:
             // state, localAddr, localPort, remoteAddr, remotePort, owningPid (network byte order)
             var entries = new List<TcpListenerEntry>();
             var count = Marshal.ReadInt32(buffer, 0);

@@ -13,7 +13,7 @@ public interface ISidecarCli
 {
     Task<CliResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken ct);
 
-    /// <summary>BackendState узла из status --json; null — CLI не ответил.</summary>
+    /// <summary>Node BackendState from status --json; null — the CLI did not respond.</summary>
     Task<string?> GetBackendStateAsync(CancellationToken ct);
 
     Task<CliResult> UpAsync(CancellationToken ct);
@@ -22,8 +22,8 @@ public interface ISidecarCli
 }
 
 /// <summary>
-/// Обёртка `tailscale --socket &lt;pipe&gt; …` (в прежней схеме для этого существовал
-/// ts-sidecar-cli.ps1 — из bash пайп-пути ломались; здесь прямой запуск).
+/// Wrapper around `tailscale --socket &lt;pipe&gt; …` (in the legacy scheme there was
+/// ts-sidecar-cli.ps1 for this — pipe paths broke from bash; here a direct launch).
 /// </summary>
 public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
 {
@@ -71,7 +71,7 @@ public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
 
     public async Task<CliResult> UpAsync(CancellationToken ct)
     {
-        // только set-подобный набор флагов: up перезаписывает неуказанное дефолтами (правило прежней схемы)
+        // set-like flag set only: up overwrites the unspecified with defaults (legacy scheme rule)
         var arguments = new List<string>
         {
             "up",

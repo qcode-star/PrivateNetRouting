@@ -13,17 +13,17 @@ public interface ISidecarDaemon
 
     bool IsProcessAlive { get; }
 
-    /// <summary>Идемпотентный запуск: уже жив — пропуск; протух — добить; старт и ожидание слушателя.</summary>
+    /// <summary>Idempotent start: already alive — skip; stale — kill; start and wait for the listener.</summary>
     Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct);
 
-    /// <summary>Убивает процессы демона (при необходимости — элевейтнуто).</summary>
+    /// <summary>Kills the daemon processes (elevated if necessary).</summary>
     Task KillAsync(CancellationToken ct);
 }
 
 /// <summary>
-/// Userspace-tailscaled (второй демон рядом с системной службой): без TUN, без маршрутов
-/// и DNS в ОС. Неэлевейтнутый процесс не может создать именованный пайп — старт всегда
-/// через UAC (напрямую, если мы уже с правами, иначе через элевейтнутую копию себя).
+/// Userspace-tailscaled (a second daemon next to the system service): no TUN, no routes
+/// or DNS in the OS. A non-elevated process cannot create a named pipe — the start always
+/// goes through UAC (directly if we already have rights, otherwise via an elevated copy of ourselves).
 /// </summary>
 public sealed class SidecarDaemon(
     ChainConfig config,
@@ -37,12 +37,12 @@ public sealed class SidecarDaemon(
     public bool IsHttpListening => ports.IsListening(HttpPort);
 
     /// <summary>
-    /// Живость демона = отзывчивость его именованного пайпа. Командная строка элевейтнутого
-    /// демона не видна неэлевейтнутому читателю WMI (Windows 11 24H2+ отдаёт пустой CommandLine),
-    /// поэтому опознание «своих» по statedir в cmdline для статуса не работает; пайп же с нашим
-    /// именем может держать только демон, запущенный с нашим --socket (у системной службы
-    /// Tailscale свой). Элевейтнутый останов по-прежнему добивает процессы поиском по cmdline —
-    /// из элевейтнутого контекста командные строки видны.
+    /// Daemon liveness = responsiveness of its named pipe. The command line of an elevated
+    /// daemon is not visible to a non-elevated WMI reader (Windows 11 24H2+ returns an empty CommandLine),
+    /// so identifying "our" processes by statedir in the cmdline does not work for status; the pipe with our
+    /// name, though, can only be held by a daemon started with our --socket (the Tailscale system
+    /// service has its own). An elevated shutdown still kills processes by searching the cmdline —
+    /// from an elevated context command lines are visible.
     /// </summary>
     public bool IsProcessAlive => ProbePipe(config.Socket, TimeSpan.FromMilliseconds(500));
 
@@ -82,7 +82,7 @@ public sealed class SidecarDaemon(
 
         if (IsHttpListening && !IsProcessAlive)
         {
-            // чужой слушатель на нашем порту (например, прежняя схема): стартовать нельзя
+            // a foreign listener on our port (e.g. the legacy scheme): we must not start
             throw new IOException(
                 $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.daemonHttpListen");
         }
@@ -117,7 +117,7 @@ public sealed class SidecarDaemon(
             $"daemon listener did not come up within {config.DaemonWaitSeconds}s; log: {Path.Combine(config.StateDir, "daemon.err.log")}");
     }
 
-    /// <summary>Прямой запуск процесса демона (контекст уже с правами администратора).</summary>
+    /// <summary>Direct launch of the daemon process (the context already has administrator rights).</summary>
     public void StartProcess()
     {
         Directory.CreateDirectory(config.StateDir);

@@ -4,10 +4,10 @@ using WinForms = System.Windows.Forms;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Значок в области уведомлений (трей): живёт, пока живёт приложение; двойной клик и
-/// пункт «Открыть» показывают главное окно, «Выход» — единственный способ завершить
-/// приложение (закрытие окна только прячет его в трей). Пункты меню локализуются
-/// и перевязываются при смене языка (Loc.LanguageChanged).
+/// Notification area icon (tray): lives as long as the application; a double click and
+/// the "Open" item show the main window, "Exit" is the only way to terminate
+/// the application (closing the window only hides it to the tray). Menu items are localized
+/// and rebound on language change (Loc.LanguageChanged).
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
@@ -19,10 +19,10 @@ internal sealed class TrayIcon : IDisposable
     private readonly WinForms.ToolStripMenuItem _exitItem;
     private bool _disposed;
 
-    /// <summary>Пользователь попросил показать окно (двойной клик или меню).</summary>
+    /// <summary>The user asked to show the window (double click or menu).</summary>
     public event Action? OpenRequested;
 
-    /// <summary>Пользователь выбрал «Выход» — завершить приложение целиком.</summary>
+    /// <summary>The user chose "Exit" — terminate the application entirely.</summary>
     public event Action? ExitRequested;
 
     public TrayIcon()
@@ -48,7 +48,7 @@ internal sealed class TrayIcon : IDisposable
         Loc.LanguageChanged += ApplyStrings;
     }
 
-    /// <summary>Уведомление (балун) от имени приложения — например, о найденном обновлении.</summary>
+    /// <summary>A notification (balloon) on behalf of the application — for example, about a found update.</summary>
     public void ShowNotice(string text) =>
         _notifyIcon.ShowBalloonTip(10_000, AppTitle, text, WinForms.ToolTipIcon.Info);
 

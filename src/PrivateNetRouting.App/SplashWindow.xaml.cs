@@ -11,12 +11,12 @@ using PrivateNetRouting.Core.Chain;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Заставка подъёма цепочки при запуске Claude (порт claude-splash.ps1): карточка в правом
-/// нижнем углу рабочей области, шаги демона→кипера→узла→прокси→здоровья, счётчик времени,
-/// подсказка про UAC; в конце «Готово» либо текст ошибки с кнопками «Открыть лог»/«Закрыть»
-/// (автозакрытие через минуту). Показывается только там, где есть реальное ожидание:
-/// на живой цепочке окна нет вовсе. Все методы вызываются в UI-потоке (прогресс приходит
-/// через Progress&lt;T&gt;, продолжения — в контексте диспетчера).
+/// Chain bring-up splash screen when launching Claude (a port of claude-splash.ps1): a card in the
+/// bottom-right corner of the work area, steps daemon→keeper→node→proxy→health, an elapsed counter,
+/// a hint about UAC; at the end "Done" or an error text with "Open log"/"Close" buttons
+/// (auto-close in a minute). Shown only where there is a real wait:
+/// on a live chain there is no window at all. All methods are called on the UI thread (progress comes
+/// via Progress&lt;T&gt;, continuations — in the dispatcher context).
 /// </summary>
 public partial class SplashWindow : Window
 {
@@ -33,7 +33,7 @@ public partial class SplashWindow : Window
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _finished;
 
-    /// <summary>Заголовок переопределяется callers с другим контекстом (запуск браузера), null — ресурс по умолчанию.</summary>
+    /// <summary>The title is overridden by callers with a different context (browser launch); null — the default resource.</summary>
     public SplashWindow(string logPath, string? title = null)
     {
         InitializeComponent();
@@ -99,7 +99,7 @@ public partial class SplashWindow : Window
         };
     }
 
-    /// <summary>Завершается, когда окно закрылось (кнопкой, автозакрытием или программно).</summary>
+    /// <summary>Completes when the window has closed (by button, auto-close or programmatically).</summary>
     public Task ClosedAsync => _closed.Task;
 
     public void Update(ChainStep step)
@@ -110,7 +110,7 @@ public partial class SplashWindow : Window
             return;
         }
 
-        // Skipped = звено уже было живо — для заставки это выполненный шаг
+        // Skipped = the link was already alive — for the splash this is a completed step
         var status = step.Status == ChainStepStatus.Skipped ? ChainStepStatus.Done : step.Status;
         _states[index] = status;
         _glyphs[index].Text = status switch
@@ -191,7 +191,7 @@ public partial class SplashWindow : Window
         _failAutoClose.Start();
     }
 
-    /// <summary>Закрытие с коротким затуханием (успех мелькать не должен).</summary>
+    /// <summary>Closing with a short fade (success should not flash).</summary>
     public void CloseSplash(int fadeMs = 120)
     {
         var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(fadeMs));
@@ -219,7 +219,7 @@ public partial class SplashWindow : Window
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
-    /// <summary>Правый нижний угол рабочей области: не поверх окна Claude и не по центру.</summary>
+    /// <summary>Bottom-right corner of the work area: not on top of the Claude window and not centered.</summary>
     private void PositionBottomRight()
     {
         var area = SystemParameters.WorkArea;

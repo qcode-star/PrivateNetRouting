@@ -11,9 +11,9 @@ public interface IDohEndpointSource
 }
 
 /// <summary>
-/// Дочитывает DoH-маршруты из конфига tailnet, каким его видит sidecar-демон:
-/// `tailscale --socket &lt;pipe&gt; debug netmap` содержит все http://ip:port/dns-query.
-/// Изменения на стороне админов подхватываются автоматически.
+/// Reads DoH routes from the tailnet config as seen by the sidecar daemon:
+/// `tailscale --socket &lt;pipe&gt; debug netmap` contains all http://ip:port/dns-query.
+/// Changes on the admins' side are picked up automatically.
 /// </summary>
 public sealed partial class TailscaleNetmapDohSource(DohDiscoveryConfig config) : IDohEndpointSource
 {

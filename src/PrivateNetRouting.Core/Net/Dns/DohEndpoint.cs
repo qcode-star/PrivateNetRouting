@@ -3,8 +3,9 @@ using System.Net;
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// DoH-эндпоинт формы http://IP:PORT/dns-query (RFC 8484, plain HTTP: транспорт шифруется
-/// туннелем апстрима). Хост всегда IP — запрос к нему идёт через SOCKS5 без системного резолва.
+/// DoH endpoint of the form http://IP:PORT/dns-query (RFC 8484, plain HTTP: the transport is
+/// encrypted by the upstream tunnel). The host is always an IP — the request to it goes via
+/// SOCKS5 without system resolution.
 /// </summary>
 public sealed record DohEndpoint(IPAddress Ip, int Port)
 {

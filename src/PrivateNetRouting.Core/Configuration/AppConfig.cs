@@ -3,7 +3,7 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Configuration;
 
-/// <summary>Корневой пользовательский конфиг приложения (см. config/appsettings.example.json).</summary>
+/// <summary>Root user config of the application (see config/appsettings.example.json).</summary>
 public sealed class AppConfig
 {
     public UiConfig Ui { get; set; } = new();
@@ -25,37 +25,37 @@ public sealed class AppConfig
     public GuardConfig Guard { get; set; } = new();
 }
 
-/// <summary>Настройки интерфейса WPF-приложения. CLI всегда английский и их не читает.</summary>
+/// <summary>WPF application UI settings. The CLI is always English and never reads them.</summary>
 public sealed class UiConfig
 {
-    /// <summary>Язык UI: "auto" — язык системы (фолбэк английский), иначе код ("en", "ru").</summary>
+    /// <summary>UI language: "auto" — system language (fallback English), otherwise a code ("en", "ru").</summary>
     public string Language { get; set; } = AppLanguage.Auto;
 
     /// <summary>
-    /// Проверять на старте GUI, нет ли обновления Claude: только чтение версий и журнала
-    /// AppX, без подъёма цепочки и без UAC; при наличии — строка в окне и балун трея.
+    /// Check at GUI start whether a Claude update is available: read-only versions and the AppX
+    /// journal, without bringing up the chain and without UAC; if present — a line in the window and a tray balloon.
     /// </summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 }
 
 /// <summary>
-/// Запуск Claude Desktop через прокси (порт claude-launcher.ps1): проверка/подъём цепочки,
-/// флаги --proxy-server/--proxy-bypass-list. Базовые записи обхода (localhost, приватные
-/// диапазоны) фиксированы в коде — окружение-зависимы только домены зон.
+/// Launching Claude Desktop through the proxy (port of claude-launcher.ps1): chain check/bring-up,
+/// the --proxy-server/--proxy-bypass-list flags. Base bypass entries (localhost, private
+/// ranges) are fixed in code — only the zone domains are environment-dependent.
 /// </summary>
 public sealed class LauncherConfig
 {
-    /// <summary>Исполняемый файл Claude Desktop (execution alias MSIX); переменные окружения раскрываются.</summary>
+    /// <summary>Claude Desktop executable (MSIX execution alias); environment variables are expanded.</summary>
     public string AliasPath { get; set; } = @"%LOCALAPPDATA%\Microsoft\WindowsApps\claude-desktop.exe";
 
-    /// <summary>Зоны обхода прокси: каждая попадает в bypass-list в двух формах (zone и *.zone).</summary>
+    /// <summary>Proxy bypass zones: each goes into the bypass-list in two forms (zone and *.zone).</summary>
     public List<string> BypassDomains { get; set; } = [];
 }
 
 /// <summary>
-/// Параметры sidecar-цепочки (userspace-tailscaled + кипер + узел). Дефолты подобраны так,
-/// чтобы не конфликтовать с параллельно работающей прежней схемой (правило №3 AGENTS.md):
-/// свой пайп, свои порты, свой statedir. Замещение прежней цепочки — явная правка конфига.
+/// Sidecar chain parameters (userspace-tailscaled + keeper + node). The defaults are chosen so as
+/// not to conflict with the legacy scheme running in parallel (rule #3 of AGENTS.md):
+/// own pipe, own ports, own statedir. Replacing the legacy chain is an explicit config edit.
 /// </summary>
 public sealed class ChainConfig
 {
@@ -63,60 +63,60 @@ public sealed class ChainConfig
 
     public string TailscaleCliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
 
-    /// <summary>Statedir демона: там ключ узла; отдельный от системного Tailscale.</summary>
+    /// <summary>Daemon statedir: the node key is there; separate from the system Tailscale.</summary>
     public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\ts-sidecar";
 
-    /// <summary>Именованный пайп демона (CLI цепляется к нему).</summary>
+    /// <summary>Daemon named pipe (the CLI attaches to it).</summary>
     public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
 
-    /// <summary>SOCKS5-слушатель демона (дозвон forward-прокси).</summary>
+    /// <summary>Daemon SOCKS5 listener (the forward proxy dials it).</summary>
     public string DaemonSocksListen { get; set; } = "127.0.0.1:18083";
 
-    /// <summary>HTTP-слушатель демона: его появление = демон жив (так же в прежней схеме).</summary>
+    /// <summary>Daemon HTTP listener: its appearance = the daemon is alive (same as in the legacy scheme).</summary>
     public string DaemonHttpListen { get; set; } = "127.0.0.1:18081";
 
-    /// <summary>Ожидание слушателей демона после старта.</summary>
+    /// <summary>Wait for the daemon listeners after start.</summary>
     public int DaemonWaitSeconds { get; set; } = 15;
 
-    /// <summary>Пауза проверки кипера после старта (сразу вылетевший = ошибка).</summary>
+    /// <summary>Pause to check the keeper after start (one that exits immediately = an error).</summary>
     public int KeeperCheckSeconds { get; set; } = 2;
 
-    /// <summary>Координационный сервер tailnet; пусто — берётся из состояния узла.</summary>
+    /// <summary>Tailnet coordination server; empty — taken from the node state.</summary>
     public string LoginServer { get; set; } = "";
 
-    /// <summary>Таймаут tailscale up (ключом из statedir вход молчаливый).</summary>
+    /// <summary>tailscale up timeout (login by key from statedir is silent).</summary>
     public int UpTimeoutSeconds { get; set; } = 60;
 
-    /// <summary>Ожидание подтверждения UAC и старта элевейтнутого демона.</summary>
+    /// <summary>Wait for UAC confirmation and the elevated daemon start.</summary>
     public int UacWaitSeconds { get; set; } = 90;
 
-    /// <summary>Ожидание полного здоровья цепочки (CONNECT-roundtrip).</summary>
+    /// <summary>Wait for full chain health (CONNECT-roundtrip).</summary>
     public int HealthWaitSeconds { get; set; } = 90;
 }
 
 /// <summary>
-/// Лончер браузера с изолированным профилем и своим прокси (порт browser-proxy.ps1):
-/// Firefox — отдельный профиль с user.js (перезаписывается при каждом запуске, список
-/// обхода всегда свежий), хромоподобный — флагами командной строки. Системные настройки
-/// браузера не трогаются. Домены обхода общие с лончером Claude (launcher.bypassDomains).
+/// Browser launcher with an isolated profile and its own proxy (port of browser-proxy.ps1):
+/// Firefox — a separate profile with user.js (rewritten on every launch, the bypass
+/// list is always fresh), Chromium-like — via command-line flags. The browser's system
+/// settings are not touched. Bypass domains are shared with the Claude launcher (launcher.bypassDomains).
 /// </summary>
 public sealed class BrowserConfig
 {
-    /// <summary>Какой браузер запускать: "firefox" | "chromium" (хромоподобный: Edge, Chrome, ...; незнакомое значение — firefox).</summary>
+    /// <summary>Which browser to launch: "firefox" | "chromium" (Chromium-like: Edge, Chrome, ...; unknown value — firefox).</summary>
     public string Type { get; set; } = "firefox";
 
     [JsonIgnore]
     public BrowserKind EffectiveType => BrowserKindParser.Parse(Type);
 
-    /// <summary>Адрес, открываемый в браузере (публичный домен Anthropic).</summary>
+    /// <summary>URL opened in the browser (a public Anthropic domain).</summary>
     public string Url { get; set; } = "https://claude.ai";
 
-    /// <summary>Приватное окно: Firefox -private-window / Chromium --incognito.</summary>
+    /// <summary>Private window: Firefox -private-window / Chromium --incognito.</summary>
     public bool Private { get; set; }
 
     /// <summary>
-    /// Домены верхнего уровня, ходящие мимо прокси (как *.ru, *.su в прежней схеме):
-    /// локальные сайты не должны уходить в зарубежный выход. Без точки, добавляется как *.tld.
+    /// Top-level domains that go around the proxy (like *.ru, *.su in the legacy scheme):
+    /// local sites must not go out to a foreign exit. Without the dot, added as *.tld.
     /// </summary>
     public List<string> DirectTlds { get; set; } = ["ru", "su", "by", "kz"];
 
@@ -127,23 +127,23 @@ public sealed class BrowserConfig
 
 public sealed class BrowserFirefoxConfig
 {
-    /// <summary>firefox.exe; если не найден — откат на каталог Program Files (x86). Переменные окружения раскрываются.</summary>
+    /// <summary>firefox.exe; if not found — fallback to the Program Files (x86) directory. Environment variables are expanded.</summary>
     public string Path { get; set; } = @"%ProgramFiles%\Mozilla Firefox\firefox.exe";
 
-    /// <summary>Каталог изолированного профиля (куки и входы живут только здесь).</summary>
+    /// <summary>Isolated profile directory (cookies and logins live only here).</summary>
     public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\ff-profile";
 }
 
 public sealed class BrowserChromiumConfig
 {
-    /// <summary>Браузер хромоподобного семейства; дефолт — Edge, если не найден — откат на Program Files. Переменные окружения раскрываются.</summary>
+    /// <summary>Browser of the Chromium-like family; default — Edge, if not found — fallback to Program Files. Environment variables are expanded.</summary>
     public string Path { get; set; } = @"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe";
 
-    /// <summary>Каталог изолированного профиля (--user-data-dir; обязателен — запущенный экземпляр игнорирует флаги).</summary>
+    /// <summary>Isolated profile directory (--user-data-dir; required — a running instance ignores the flags).</summary>
     public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\chromium-profile";
 }
 
-/// <summary>Семейство запускаемого браузера; незнакомое значение конфига — Firefox (как logging.level → info).</summary>
+/// <summary>Family of the launched browser; an unknown config value — Firefox (like logging.level → info).</summary>
 public enum BrowserKind
 {
     Firefox,
@@ -161,91 +161,91 @@ public static class BrowserKindParser
 }
 
 /// <summary>
-/// сторож стартует по явному действию пользователя (команда CLI, переключатель приложения)
-/// и живёт, пока жив запустивший его процесс — в автозапуск не прописывается (правило №4).
+/// The watchdog starts on an explicit user action (a CLI command, an application toggle)
+/// and lives as long as the process that started it — it is not written to autostart (rule #4).
 /// </summary>
 public sealed class WatchdogConfig
 {
-    /// <summary>Интервал проверки занятости, сек; это же окно свежести маркера активности.</summary>
+    /// <summary>Busyness check interval, sec; also the freshness window of the activity marker.</summary>
     public int CheckSeconds { get; set; } = 600;
 
-    /// <summary>Дистрибутив WSL с хостом Claude Desktop; пусто — WSL-хост при автостопе не трогается.</summary>
+    /// <summary>WSL distro with the Claude Desktop host; empty — the WSL host is not touched on idle auto-stop.</summary>
     public string WslDistro { get; set; } = "";
 }
 
 /// <summary>
-/// Ручное обновление Claude Desktop (MSIX): установленная версия, адрес пакета из журнала
-/// AppX (или вручную), многопоточная докачка фрагментами через прокси-цепочку, сверка
-/// Publisher, закрытие Claude и Add-AppxPackage (порт схемы claude-desktop-update).
+/// Manual Claude Desktop update (MSIX): installed version, package URL from the AppX journal
+/// (or manual), multithreaded chunked download through the proxy chain, Publisher
+/// verification, closing Claude and Add-AppxPackage (port of the claude-desktop-update scheme).
 /// </summary>
 public sealed class UpdaterConfig
 {
-    /// <summary>Имя MSIX-пакета Claude Desktop (Get-AppxPackage -Name).</summary>
+    /// <summary>MSIX package name of Claude Desktop (Get-AppxPackage -Name).</summary>
     public string PackageName { get; set; } = "Claude";
 
-    /// <summary>Хост раздачи пакетов (публичная константа Anthropic; адрес ищется в журнале AppX).</summary>
+    /// <summary>Package distribution host (a public Anthropic constant; the URL is looked up in the AppX journal).</summary>
     public string PackageHost { get; set; } = "downloads.claude.ai";
 
-    /// <summary>Кэш пакетов и фрагментов докачки; переменные окружения раскрываются.</summary>
+    /// <summary>Cache of packages and download chunks; environment variables are expanded.</summary>
     public string CacheDir { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\update-cache";
 
-    /// <summary>Windows PowerShell (Get-AppxPackage/Add-AppxPackage/Get-WinEvent) — компонент ОС.</summary>
+    /// <summary>Windows PowerShell (Get-AppxPackage/Add-AppxPackage/Get-WinEvent) — an OS component.</summary>
     public string PowerShellPath { get; set; } = @"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe";
 
-    /// <summary>Имя процесса Claude Desktop — закрывается перед установкой.</summary>
+    /// <summary>Claude Desktop process name — closed before installation.</summary>
     public string ClaudeProcessName { get; set; } = "Claude";
 
-    /// <summary>Сколько свежих событий журнала AppX просматривать при поиске адреса.</summary>
+    /// <summary>How many recent AppX journal events to scan when looking up the URL.</summary>
     public int JournalMaxEvents { get; set; } = 400;
 
-    /// <summary>Размер фрагмента докачки.</summary>
+    /// <summary>Download chunk size.</summary>
     public int ChunkBytes { get; set; } = 8 * 1024 * 1024;
 
-    /// <summary>Фрагментов качать параллельно (один поток через цепочку упирается в задержку DoH).</summary>
+    /// <summary>Chunks to download in parallel (a single stream through the chain hits DoH latency).</summary>
     public int ParallelChunks { get; set; } = 6;
 
-    /// <summary>Повторных попыток на фрагмент после неудачи.</summary>
+    /// <summary>Retries per chunk after a failure.</summary>
     public int ChunkRetries { get; set; } = 3;
 
-    /// <summary>Пауза между попытками фрагмента, сек.</summary>
+    /// <summary>Pause between chunk attempts, sec.</summary>
     public int RetryDelaySeconds { get; set; } = 5;
 
-    /// <summary>Таймаут одной попытки фрагмента, сек (как --max-time curl прежней схемы).</summary>
+    /// <summary>Timeout of a single chunk attempt, sec (like curl --max-time in the legacy scheme).</summary>
     public int ChunkTimeoutSeconds { get; set; } = 1800;
 
-    /// <summary>Сколько секунд ждать самостоятельного закрытия Claude перед гашением процесса.</summary>
+    /// <summary>How many seconds to wait for Claude to close on its own before killing the process.</summary>
     public int CloseWaitSeconds { get; set; } = 25;
 
-    /// <summary>Пауза после гашения процессов Claude перед установкой, сек.</summary>
+    /// <summary>Pause after killing the Claude processes before installation, sec.</summary>
     public int KillSettleSeconds { get; set; } = 3;
 }
 
 /// <summary>
-/// Гарды прямого доступа (порт set-egress-proxy.ps1, ban-ai-hosts.ps1, proxy-on/off.ps1,
-/// sync-claude-noproxy.ps1 и стартового скрипта WSL): managed-политика egressProxyUrl,
-/// три слоя локального бана (hosts/NRPT/firewall), env в settings.json Claude Code
-/// (Windows и WSL), системный прокси WinINET. Идентификаторы правил бана по умолчанию
-/// совпадают с прежней схемой — приложение подхватывает и ведёт уже стоящий бан,
-/// а не создаёт параллельный (снять их можно и старыми скриптами).
+/// Direct-access guards (port of set-egress-proxy.ps1, ban-ai-hosts.ps1, proxy-on/off.ps1,
+/// sync-claude-noproxy.ps1 and the WSL startup script): the managed policy egressProxyUrl,
+/// three layers of the local ban (hosts/NRPT/firewall), env in Claude Code settings.json
+/// (Windows and WSL), the WinINET system proxy. The default ban rule identifiers
+/// match the legacy scheme — the application picks up and maintains the ban already in place
+/// rather than creating a parallel one (they can also be removed by the old scripts).
 /// </summary>
 public sealed class GuardConfig
 {
-    // --- локальный бан: hosts + NRPT + firewall (порт ban-ai-hosts.ps1) ---
+    // --- local ban: hosts + NRPT + firewall (port of ban-ai-hosts.ps1) ---
 
-    /// <summary>Файл hosts; переменные окружения раскрываются.</summary>
+    /// <summary>hosts file; environment variables are expanded.</summary>
     public string HostsFile { get; set; } = @"%SystemRoot%\System32\drivers\etc\hosts";
 
-    /// <summary>Маркер начала/конца управляемого блока в hosts (точное совпадение строки).</summary>
+    /// <summary>Start/end marker of the managed block in hosts (exact line match).</summary>
     public string HostsBeginMarker { get; set; } = "# >>> ai-direct-ban (ban-ai-hosts.ps1, C:\\ovpn-script)";
 
     public string HostsEndMarker { get; set; } = "# <<< ai-direct-ban";
 
-    /// <summary>Строка-комментарий внутри блока (человекочитаемая, ни на что не завязана).</summary>
+    /// <summary>Comment line inside the block (human-readable, not tied to anything).</summary>
     public string HostsComment { get; set; } = "# AI services (Claude/OpenAI) blocked from direct access; Claude: local ts-fwd proxy 127.0.0.1:8082 only";
 
     /// <summary>
-    /// Точные имена в hosts (apex'ы поддеревьев плюс хосты, которые реально зовут приложения,
-    /// и специфичные имена сервисов на общих CDN). Публичные домены Anthropic/OpenAI.
+    /// Exact names in hosts (subtree apexes plus hosts that applications actually call,
+    /// and service-specific names on shared CDNs). Public Anthropic/OpenAI domains.
     /// </summary>
     public List<string> BanHosts { get; set; } =
     [
@@ -263,7 +263,7 @@ public sealed class GuardConfig
         "production-openaicom-storage.azureedge.net", "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
     ];
 
-    /// <summary>Поддеревья для NRPT: на каждое две записи — apex и «.apex» (все поддомены).</summary>
+    /// <summary>Subtrees for NRPT: two entries each — the apex and ".apex" (all subdomains).</summary>
     public List<string> BanTrees { get; set; } =
     [
         "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
@@ -272,82 +272,82 @@ public sealed class GuardConfig
         "chatgpt.site", "oaistatsig.com", "crixet.com",
     ];
 
-    /// <summary>DisplayName NRPT-правила — по нему правило опознаётся и снимается.</summary>
+    /// <summary>DisplayName of the NRPT rule — by it the rule is identified and removed.</summary>
     public string NrptRuleName { get; set; } = "ai-direct-ban";
 
-    /// <summary>Comment NRPT-правила (текст для человека, ни на что не завязан).</summary>
-    public string NrptComment { get; set; } = "Claude/OpenAI: прямой доступ закрыт; Claude — только через локальный forward-прокси (ban-ai-hosts.ps1)";
+    /// <summary>Comment of the NRPT rule (human-readable text, not tied to anything).</summary>
+    public string NrptComment { get; set; } = "Claude/OpenAI: direct access blocked; Claude — only through the local forward proxy (ban-ai-hosts.ps1)";
 
-    /// <summary>Подсети Anthropic для firewall outbound Block (публичные константы; общие облака по IP не банятся).</summary>
+    /// <summary>Anthropic subnets for firewall outbound Block (public constants; shared clouds are not banned by IP).</summary>
     public List<string> FirewallSubnets { get; set; } = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
 
-    /// <summary>Group правил firewall — по ней правила опознаются и снимаются.</summary>
+    /// <summary>Group of the firewall rules — by it the rules are identified and removed.</summary>
     public string FirewallGroup { get; set; } = "ai-direct-ban (ban-ai-hosts.ps1)";
 
-    /// <summary>Пробное имя поддерева anthropic.com: в hosts его нет, до бана резолвится — чистая проверка NRPT.</summary>
+    /// <summary>Probe name of the anthropic.com subtree: absent from hosts, resolves before the ban — a clean NRPT check.</summary>
     public string BanProbeName { get; set; } = "www.anthropic.com";
 
-    // --- env в settings.json Claude Code (порт sync-claude-noproxy.ps1) ---
+    // --- env in Claude Code settings.json (port of sync-claude-noproxy.ps1) ---
 
-    /// <summary>settings.json Claude Code в Windows; переменные окружения раскрываются.</summary>
+    /// <summary>Claude Code settings.json on Windows; environment variables are expanded.</summary>
     public string ClaudeSettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
 
-    // --- WSL: стартовый скрипт + settings.json дистрибутивов (слой целиком опционален) ---
+    // --- WSL: startup script + settings.json of the distros (the whole layer is optional) ---
 
-    /// <summary>Весь WSL-слой гарда: режим и список дистрибутивов с индивидуальным выбором синхронизации.</summary>
+    /// <summary>The whole WSL guard layer: mode and list of distros with an individual sync choice.</summary>
     public GuardWslConfig Wsl { get; set; } = new();
 
-    /// <summary>Стартовый скрипт WSL, обновляющий адрес прокси (шлюз NAT) при старте дистрибутива; путь одинаков во всех дистрибутивах.</summary>
+    /// <summary>WSL startup script that refreshes the proxy address (NAT gateway) when the distro starts; the path is the same in all distros.</summary>
     public string WslStartupScript { get; set; } = "/etc/wsl.d/startup/10-claude-proxy.sh";
 
-    // --- системный прокси WinINET (порт proxy-on/off.ps1) ---
+    // --- WinINET system proxy (port of proxy-on/off.ps1) ---
 
-    /// <summary>Дополнительные записи обхода системного прокси (локальные адреса и приватные диапазоны фиксированы в коде).</summary>
+    /// <summary>Additional system proxy bypass entries (local addresses and private ranges are fixed in code).</summary>
     public List<string> SystemProxyExtraBypass { get; set; } = ["*.ru", "*.su", "*.by", "*.kz"];
 }
 
 /// <summary>
-/// WSL-слой гарда: полностью опционален. mode: "on" — вести всегда; "off" — не трогать вовсе;
-/// "auto" — вкл, если WSL есть и хотя бы один настроенный дистрибутив установлен на машине,
-/// иначе выкл. По каждому дистрибутиву из списка — свой выбор, синкать ли в него конфиг
-/// (sync=false — только показывать статус, ничего не писать).
+/// WSL guard layer: fully optional. mode: "on" — always maintain; "off" — do not touch at all;
+/// "auto" — on if WSL is present and at least one configured distro is installed on the machine,
+/// otherwise off. For each distro in the list — its own choice of whether to sync the config
+/// into it (sync=false — only show status, write nothing).
 /// </summary>
 public sealed class GuardWslConfig
 {
     /// <summary>"on" | "off" | "auto".</summary>
     public string Mode { get; set; } = "auto";
 
-    /// <summary>Дистрибутивы: имя и пользователь (владелец ~/.claude) обязательны, остальное игнорируется.</summary>
+    /// <summary>Distros: the name and user (owner of ~/.claude) are required, the rest is ignored.</summary>
     public List<WslDistroConfig> Distros { get; set; } = [];
 }
 
 public sealed class WslDistroConfig
 {
-    /// <summary>Имя дистрибутива, как в `wsl --list`.</summary>
+    /// <summary>Distro name, as in `wsl --list`.</summary>
     public string Name { get; set; } = "";
 
-    /// <summary>Пользователь дистрибутива (владелец ~/.claude/settings.json).</summary>
+    /// <summary>Distro user (owner of ~/.claude/settings.json).</summary>
     public string User { get; set; } = "";
 
-    /// <summary>Синхронизировать конфиг Claude в этот дистрибутив; false — только статус.</summary>
+    /// <summary>Sync the Claude config into this distro; false — status only.</summary>
     public bool Sync { get; set; } = true;
 }
 
 public sealed class LoggingConfig
 {
-    /// <summary>Каталог логов; переменные окружения (%LOCALAPPDATA% и т.п.) раскрываются при загрузке.</summary>
+    /// <summary>Log directory; environment variables (%LOCALAPPDATA% etc.) are expanded on load.</summary>
     public string Directory { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\logs";
 
     /// <summary>
-    /// Минимальный уровень записей: "debug" | "info" | "warn" | "error". По умолчанию "info" —
-    /// разовые события без per-request шума; "debug" — для разбора проблем (незнакомое → info).
+    /// Minimum record level: "debug" | "info" | "warn" | "error". Default "info" —
+    /// one-off events without per-request noise; "debug" — for troubleshooting (unknown → info).
     /// </summary>
     public string Level { get; set; } = "info";
 
-    /// <summary>Порог ротации; сама ротация выполняется один раз на старте процесса.</summary>
+    /// <summary>Rotation threshold; the rotation itself is performed once at process start.</summary>
     public int MaxBytes { get; set; } = 1_000_000;
 
-    /// <summary>Сколько старых файлов (.1, .2, ...) держать.</summary>
+    /// <summary>How many old files (.1, .2, ...) to keep.</summary>
     public int Keep { get; set; } = 2;
 
     [JsonIgnore]
@@ -358,34 +358,34 @@ public sealed class ForwardProxyConfig
 {
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Основной слушатель "host:port".</summary>
+    /// <summary>Main listener "host:port".</summary>
     public string Listen { get; set; } = "127.0.0.1:18082";
 
-    /// <summary>Одноразовый бинд на шлюзе WSL NAT (адрес адаптера ищется на старте с повторами).</summary>
+    /// <summary>One-time bind on the WSL NAT gateway (the adapter address is looked up at start with retries).</summary>
     public bool BindWslGateway { get; set; } = true;
 
     /// <summary>
-    /// Прокси в отдельном detached-воркере (свой exe с маркером --proxy-worker), переживающем
-    /// выход команды/GUI (паритет ts-fwd прежней схемы): chain up поднимает воркер, chain down
-    /// останавливает. Выключено — прокси живёт в процессе GUI/команды, как раньше.
+    /// The proxy in a separate detached worker (its own exe with the --proxy-worker marker) that survives
+    /// the exit of the command/GUI (parity with ts-fwd of the legacy scheme): chain up brings the worker up, chain down
+    /// stops it. Disabled — the proxy lives in the GUI/command process, as before.
     /// </summary>
     public bool Detached { get; set; }
 
-    /// <summary>Сколько секунд ждать слушатель detached-воркера после его запуска.</summary>
+    /// <summary>How many seconds to wait for the detached worker's listener after its launch.</summary>
     public int WorkerStartWaitSeconds { get; set; } = 15;
 
-    /// <summary>Сколько секунд ждать освобождения порта после останова detached-воркера.</summary>
+    /// <summary>How many seconds to wait for the port to be released after stopping the detached worker.</summary>
     public int WorkerStopWaitSeconds { get; set; } = 10;
 
-    /// <summary>SOCKS5-апстрим "host:port" (userspace-sidecar), дозвон по IP после резолва.</summary>
+    /// <summary>SOCKS5 upstream "host:port" (userspace-sidecar), dialing by IP after resolution.</summary>
     public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
 
-    /// <summary>Стартовый пул DoH-резолверов в форме "http://IP:PORT/dns-query".</summary>
+    /// <summary>Seed pool of DoH resolvers in the form "http://IP:PORT/dns-query".</summary>
     public List<string> DohSeed { get; set; } = [];
 
     public DohDiscoveryConfig DohDiscovery { get; set; } = new();
 
-    /// <summary>Цель health-check (CONNECT-roundtrip через собственный прокси); публичный API-хост Anthropic.</summary>
+    /// <summary>Health-check target (CONNECT-roundtrip through our own proxy); a public Anthropic API host.</summary>
     public string HealthCheckHost { get; set; } = "api.anthropic.com";
 
     public int HealthCheckPort { get; set; } = 443;
@@ -396,24 +396,24 @@ public sealed class ForwardProxyConfig
 
     public int SocksTimeoutSeconds { get; set; } = 12;
 
-    /// <summary>Таймаут чтения заголовка запроса от клиента.</summary>
+    /// <summary>Timeout for reading the request header from the client.</summary>
     public int HeaderTimeoutSeconds { get; set; } = 30;
 
-    /// <summary>Период обновления пула DoH (обнаружение + пробы).</summary>
+    /// <summary>DoH pool refresh period (discovery + probes).</summary>
     public int DohRefreshSeconds { get; set; } = 600;
 
-    /// <summary>Кулдаун отбракованного DoH-эндпоинта.</summary>
+    /// <summary>Cooldown of a rejected DoH endpoint.</summary>
     public int DohDeadCooldownSeconds { get; set; } = 300;
 
-    /// <summary>Домен для пробы DoH-эндпоинтов (уже маршрутизируется, побочных эффектов нет).</summary>
+    /// <summary>Domain for probing DoH endpoints (already routed, no side effects).</summary>
     public string DohProbeName { get; set; } = "claude.ai";
 
-    /// <summary>Кэш резолва: TTL ответа клампится в [Min, Max].</summary>
+    /// <summary>Resolution cache: the response TTL is clamped to [Min, Max].</summary>
     public int CacheTtlMinSeconds { get; set; } = 60;
 
     public int CacheTtlMaxSeconds { get; set; } = 3600;
 
-    /// <summary>Маркер активности: mtime файла = время последнего проксированного запроса.</summary>
+    /// <summary>Activity marker: the file mtime = the time of the last proxied request.</summary>
     public string ActivityMarkerPath { get; set; } = @"%APPDATA%\PrivateNetRouting\proxy-activity";
 
     public int ActivityTouchIntervalSeconds { get; set; } = 60;
@@ -421,12 +421,12 @@ public sealed class ForwardProxyConfig
 
 public sealed class DohDiscoveryConfig
 {
-    /// <summary>Автодополнение пула DoH из конфига tailnet (tailscale debug netmap).</summary>
+    /// <summary>Auto-completion of the DoH pool from the tailnet config (tailscale debug netmap).</summary>
     public bool Enabled { get; set; }
 
     public string CliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
 
-    /// <summary>Именованный пайп sidecar-демона.</summary>
+    /// <summary>Named pipe of the sidecar daemon.</summary>
     public string Socket { get; set; } = @"\\.\pipe\ts-sidecar";
 
     [JsonIgnore]

@@ -7,15 +7,15 @@ namespace PrivateNetRouting.Core.Updater;
 
 public interface IUpdateUrlFinder
 {
-    /// <summary>Последний адрес пакета из журнала AppX; null — свежего адреса нет.</summary>
+    /// <summary>Latest package URL from the AppX journal; null — no fresh URL.</summary>
     Task<string?> FindLatestPackageUrlAsync(CancellationToken ct);
 }
 
 /// <summary>
-/// Адрес последнего пакета Claude из журнала AppX: штатный апдейтер, не сумев скачать,
-/// оставляет его в Microsoft-Windows-AppXDeploymentServer/Operational примерно раз в час
-/// (первые события журнала — самые свежие). Сообщение целиком забирается через Get-WinEvent,
-/// разбор адреса — <see cref="PackageUrl.ExtractFromMessage"/>.
+/// URL of the latest Claude package from the AppX journal: the built-in updater, having failed to download,
+/// leaves it in Microsoft-Windows-AppXDeploymentServer/Operational about once an hour
+/// (the first events of the journal are the freshest). The whole message is fetched via Get-WinEvent,
+/// the URL is parsed by <see cref="PackageUrl.ExtractFromMessage"/>.
 /// </summary>
 public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, IPowerShellExecutor powershell, FileLog log) : IUpdateUrlFinder
 {
@@ -51,15 +51,15 @@ public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, IPowerShell
     }
 }
 
-/// <summary>Разбор адресов пакетов: извлечение из событий журнала, версия и имя файла из URL.</summary>
+/// <summary>Parsing of package URLs: extraction from journal events, version and file name from the URL.</summary>
 public static partial class PackageUrl
 {
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
     /// <summary>
-    /// Извлекает адрес пакета из сообщения события. URL в сообщении может быть разорван
-    /// переносом строки — поэтому пробелы схлопываются до поиска.
+    /// Extracts the package URL from the event message. The URL in the message may be broken
+    /// by a line break — so whitespace is collapsed before the search.
     /// </summary>
     public static string? ExtractFromMessage(string message, string host)
     {
@@ -73,21 +73,21 @@ public static partial class PackageUrl
         return match.Success ? match.Value : null;
     }
 
-    /// <summary>Версия из пути пакета (/releases/win32/x64/&lt;version&gt;/...); null — путь другой формы.</summary>
+    /// <summary>Version from the package path (/releases/win32/x64/&lt;version&gt;/...); null — a path of another shape.</summary>
     public static string? ParseOfferedVersion(string url)
     {
         var match = Regex.Match(url, @"/releases/win32/x64/([^/]+)/", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : null;
     }
 
-    /// <summary>Имя файла пакета без строки запроса; пусто, если адрес не указывает на .msix.</summary>
+    /// <summary>Package file name without the query string; empty if the URL does not point to .msix.</summary>
     public static string ParseFileName(string url)
     {
         var name = Path.GetFileName(url.Split('?')[0]);
         return name.EndsWith(".msix", StringComparison.OrdinalIgnoreCase) ? name : "";
     }
 
-    /// <summary>Ручной адрес пригоден: https и указывает на .msix.</summary>
+    /// <summary>A manual URL is valid: https and points to .msix.</summary>
     public static bool IsValidPackageUrl(string url) =>
         url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && ParseFileName(url).Length > 0;
 }

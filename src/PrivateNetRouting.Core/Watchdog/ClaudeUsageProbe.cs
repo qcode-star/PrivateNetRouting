@@ -3,7 +3,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Watchdog;
 
-/// <summary>Установленные соединения на локальный порт (сторона слушателя прокси).</summary>
+/// <summary>Established connections to the local port (the listener side of the proxy).</summary>
 public interface IEstablishedConnectionCounter
 {
     int CountOnLocalPort(int port);
@@ -18,9 +18,9 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
 }
 
 /// <summary>
-/// Признак занятости Claude или null при простое (порт Test-ClaudeInUse супервизора прежней
-/// схемы). Проверяются по очереди: процессы claude* → установленные коннекты к прокси →
-/// свежесть маркера активности (прикрывает Claude Code в WSL, у которого нет claude.exe).
+/// A sign that Claude is busy, or null when idle (port of Test-ClaudeInUse from the supervisor of
+/// the legacy scheme). Checked in order: claude* processes -> established connections to the proxy ->
+/// freshness of the activity marker (covers Claude Code in WSL, which has no claude.exe).
 /// </summary>
 public interface IClaudeUsageProbe
 {
@@ -28,8 +28,8 @@ public interface IClaudeUsageProbe
 }
 
 /// <summary>
-/// Отказ отдельного источника (например, WMI) трактуется как «сигнала нет» — так же, как
-/// -ErrorAction SilentlyContinue в источнике; решение принимает первый ответивший источник.
+/// A failure of an individual source (e.g. WMI) is treated as "no signal" — just like
+/// -ErrorAction SilentlyContinue in the source; the first source that responds decides.
 /// </summary>
 public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
@@ -82,7 +82,7 @@ public sealed class ClaudeUsageProbe(
         }
         catch (IOException)
         {
-            // маркер недоступен — просто нет сигнала
+            // marker unavailable — simply no signal
         }
 
         return null;

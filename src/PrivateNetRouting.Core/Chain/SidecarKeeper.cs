@@ -9,16 +9,16 @@ public interface ISidecarKeeper
 {
     bool IsRunning { get; }
 
-    /// <summary>Старт кипера, если его нет; сразу вылетевший процесс = ошибка.</summary>
+    /// <summary>Start the keeper if it is absent; a process that exits immediately = an error.</summary>
     Task EnsureStartedAsync(CancellationToken ct);
 
     Task KillAsync(CancellationToken ct);
 }
 
 /// <summary>
-/// Кипер watch-ipn: Windows userspace-tailscaled гасит движок при отключении последнего
-/// локального ipn-клиента и сбрасывает WantRunning — держим перманентного подписчика шины.
-/// stdout (поток netmap-JSON непрерывно) уходит в NUL, stderr — в watch.err.log.
+/// watch-ipn keeper: Windows userspace-tailscaled shuts down the engine when the last
+/// local ipn client disconnects and resets WantRunning — so we keep a permanent bus subscriber.
+/// stdout (a continuous netmap-JSON stream) goes to NUL, stderr — to watch.err.log.
 /// </summary>
 public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, FileLog log) : ISidecarKeeper
 {
@@ -41,7 +41,7 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
             "debug", "watch-ipn");
         var started = ProcessOps.StartViaCmd(
             commandLine,
-            stdoutPath: null, // NUL: netmap-JSON не нужен никому
+            stdoutPath: null, // NUL: nobody needs the netmap-JSON
             stderrPath: Path.Combine(config.StateDir, "watch.err.log"));
         log.Info($"keeper: started via cmd, pid={started?.Id}");
 

@@ -1,6 +1,6 @@
 namespace PrivateNetRouting.Core.Logging;
 
-/// <summary>Уровень записи: порядок значений — убывающая подробность.</summary>
+/// <summary>Record level: the order of values is decreasing verbosity.</summary>
 public enum LogLevel
 {
     Debug = 0,
@@ -11,7 +11,7 @@ public enum LogLevel
 
 public static class LogLevelParser
 {
-    /// <summary>Строка конфига ("debug"/"info"/"warn"/"error") в уровень; незнакомое — Info.</summary>
+    /// <summary>Config string ("debug"/"info"/"warn"/"error") to a level; unknown — Info.</summary>
     public static LogLevel Parse(string? text) => text?.Trim().ToLowerInvariant() switch
     {
         "debug" => LogLevel.Debug,

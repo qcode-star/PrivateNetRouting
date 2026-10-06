@@ -6,16 +6,16 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Chain;
 
-/// <summary>Элевейтнутые команды приложения: запуск самим собой через runas (UAC).</summary>
+/// <summary>Elevated application commands: self-launch via runas (UAC).</summary>
 public static class ElevatedChainCommands
 {
     public const string StartDaemon = "--elevated-start-daemon";
     public const string StopChain = "--elevated-stop-chain";
 
     /// <summary>
-    /// Выполняется в уже элевейтнутом процессе (App или pnr). Возвращает код выхода;
-    /// результат пишется в файл с nonce, чтобы неэлевейтнутый родитель дождался именно
-    /// своего запуска (как start-result.txt в прежней схеме, но с защитой от устаревшего).
+    /// Runs in an already elevated process (App or pnr). Returns the exit code;
+    /// the result is written to a file with a nonce so the non-elevated parent waits for
+    /// exactly its own launch (like start-result.txt in the legacy scheme, but guarded against a stale one).
     /// </summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
     {
@@ -145,8 +145,8 @@ public static class ElevatedChainCommands
 public sealed record ElevatedResult(bool Ok, string Detail);
 
 /// <summary>
-/// Запуск элевейтнутой команды приложения (цепочка, гарды): сам через runas (UAC) с ожиданием
-/// файла-результата, либо — если процесс уже с правами — исполнение в текущем процессе.
+/// Launches an elevated application command (chain, guards): self via runas (UAC) waiting for
+/// the result file, or — if the process already has rights — execution in the current process.
 /// </summary>
 public interface IElevatedCommandRunner
 {
@@ -154,9 +154,9 @@ public interface IElevatedCommandRunner
 }
 
 /// <summary>
-/// Запускает собственный exe приложения элевейтнуто (runas, UAC) и ждёт файл-результат
-/// с nonce. В элевейтнутом процессе (elevatedBypass) стартует без UAC — уже с правами.
-/// executor — что именно исполнить в обходном процессе (команды цепочки или гардов).
+/// Launches the application's own exe elevated (runas, UAC) and waits for the result file
+/// with a nonce. In an elevated process (elevatedBypass) it starts without UAC — already with rights.
+/// executor — what exactly to execute in the bypass process (chain or guard commands).
 /// </summary>
 public sealed class ElevatedRunner(
     ChainConfig config,
@@ -186,7 +186,7 @@ public sealed class ElevatedRunner(
         }
 
         var resultPath = MakeResultPath(command, out var nonce);
-        _ = nonce; // уникальность гарантирована именем файла
+        _ = nonce; // uniqueness is guaranteed by the file name
         var exe = Environment.ProcessPath
             ?? throw new InvalidOperationException("failed to determine own executable path");
 

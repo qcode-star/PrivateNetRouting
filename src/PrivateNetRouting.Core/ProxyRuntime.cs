@@ -16,17 +16,17 @@ using System.Net;
 namespace PrivateNetRouting.Core;
 
 /// <summary>
-/// Композиция forward-прокси и цепочки из конфига — единая точка сборки для WPF-приложения
-/// и CLI. Владеет логом, пулом DoH и самим прокси; Dispose останавливает всё.
+/// Composition of the forward proxy and the chain from the config — the single assembly point for the
+/// WPF application and the CLI. Owns the log, the DoH pool and the proxy itself; Dispose stops everything.
 /// </summary>
 public sealed class ProxyRuntime : IAsyncDisposable
 {
     public AppConfig Config { get; }
 
-    /// <summary>Сам прокси-сервер (in-process); консольный режим и воркер стартуют его напрямую.</summary>
+    /// <summary>The proxy server itself (in-process); the console mode and the worker start it directly.</summary>
     public ForwardProxyService ProxyService { get; }
 
-    /// <summary>Управление слушателем порта: in-process или detached-воркер (forwardProxy.detached).</summary>
+    /// <summary>Port listener management: in-process or a detached worker (forwardProxy.detached).</summary>
     public ForwardProxySupervisor ProxyControl { get; }
 
     public FileLog Log { get; }
@@ -175,8 +175,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
-        // скачивание идёт через собственный forward-прокси (DoH-резолв, дозвон SOCKS5);
-        // общий таймаут HttpClient отключён — лимит задаётся на фрагмент (chunkTimeoutSeconds)
+        // the download goes through its own forward proxy (DoH resolution, SOCKS5 dial);
+        // the global HttpClient timeout is disabled — the limit is set per fragment (chunkTimeoutSeconds)
         var updaterHttp = new HttpClient(new SocketsHttpHandler
         {
             Proxy = new WebProxy("http://" + fp.Listen),
@@ -257,9 +257,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
     }
 
     /// <summary>
-    /// Ротация лога по имени файла: живой лог этого процесса ротируется на месте
-    /// (FileLog.RotateNow — работает всегда), файл, который никто не держит, — сдвигом;
-    /// занятое другим процессом отмечается как locked.
+    /// Log rotation by file name: this process's live log is rotated in place
+    /// (FileLog.RotateNow — always works); a file nobody holds is rotated by shifting;
+    /// one held by another process is reported as locked.
     /// </summary>
     public LogRotationResult RotateLog(string fileName)
     {
@@ -276,8 +276,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        // ConfigureAwait: Dispose блокирующе ждут из GUI (OnExit) — без него цепочка
-        // останова упирается в захваченный Dispatcher-контекст и дедлочит процесс
+        // ConfigureAwait: Dispose is awaited blocking from the GUI (OnExit) — without it the
+        // shutdown chain hits the captured Dispatcher context and deadlocks the process
         await ProxyService.DisposeAsync().ConfigureAwait(false);
         DohPool.Dispose();
         _chainLog.Dispose();

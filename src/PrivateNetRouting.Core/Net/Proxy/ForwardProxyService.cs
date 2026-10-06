@@ -9,7 +9,7 @@ using PrivateNetRouting.Core.Runtime;
 
 namespace PrivateNetRouting.Core.Net.Proxy;
 
-/// <summary>Статистика прокси для сводки диагностики (реализация — ForwardProxyService).</summary>
+/// <summary>Proxy statistics for the diagnostics summary (implementation — ForwardProxyService).</summary>
 public interface IProxyStatistics
 {
     bool IsRunning { get; }
@@ -24,8 +24,8 @@ public interface IProxyStatistics
 }
 
 /// <summary>
-/// Один экземпляр прокси с точки зрения супервизора: управление и статистика.
-/// IsRunning переобъявлен, чтобы снять неоднозначность двух родительских интерфейсов.
+/// A single proxy instance from the supervisor's point of view: control and statistics.
+/// IsRunning is redeclared to disambiguate the two parent interfaces.
 /// </summary>
 public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
 {
@@ -33,10 +33,11 @@ public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
 }
 
 /// <summary>
-/// Локальный CONNECT-прокси (порт ts-fwd). Имена резолвит DoH через SOCKS5-апстрим —
-/// системный резолв не используется (он перекрыт банами), дозвон идёт по IP тем же SOCKS5.
-/// Биндится на основной адрес из конфига и один раз на шлюзе WSL NAT, когда адаптер появится.
-/// Штатный режим — тишина в логе: старт/стоп, варнинги, ошибки; per-request трассировка — Debug.
+/// Local CONNECT proxy (port ts-fwd). It resolves names via DoH through the SOCKS5 upstream —
+/// system resolution is not used (it is overridden by the bans), dialing goes by IP over the same
+/// SOCKS5. It binds to the primary address from the config and once on the WSL NAT gateway when the
+/// adapter appears. Normal mode — silence in the log: start/stop, warnings, errors; per-request
+/// tracing — Debug.
 /// </summary>
 public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposable
 {
@@ -128,8 +129,8 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
 
         _running = false;
-        // ConfigureAwait обязателен: остановку ждут блокирующе (OnExit GUI) под
-        // Dispatcher-контекстом — захваченный контекст дедлочит ожидание
+        // ConfigureAwait is mandatory: the shutdown is awaited blocking (OnExit GUI) under the
+        // Dispatcher context — a captured context would deadlock the wait
         await _cts.CancelAsync().ConfigureAwait(false);
         lock (_gate)
         {
@@ -144,7 +145,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         _log.Info("forward-proxy: stopped");
     }
 
-    /// <summary>Одноразовый бинд на шлюзе WSL: ждём адаптер с повторами, биндим, выходим.</summary>
+    /// <summary>One-time bind on the WSL gateway: wait for the adapter with retries, bind, exit.</summary>
     private async Task WslBindWaitAsync()
     {
         while (!_cts.IsCancellationRequested)
@@ -197,13 +198,13 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             TcpClient client;
             try
             {
-                // без захвата контекста вызывающего: цикл приёма не должен зависеть
-                // от живости UI-потока (продолжения — в пул)
+                // without capturing the caller's context: the accept loop must not depend
+                // on the liveness of the UI thread (continuations — to the pool)
                 client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
             {
-                // слушатель снят остановкой службы
+                // the listener was taken down by the service stop
                 return;
             }
 
@@ -252,7 +253,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
         catch (OperationCanceledException) when (!_running)
         {
-            // остановка службы: закрываемся молча
+            // service stop: close silently
         }
         catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException or FormatException)
         {
@@ -275,7 +276,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
     }
 
-    /// <summary>Качает байты в обе стороны; конец одного направления гасит оба сокета.</summary>
+    /// <summary>Pumps bytes in both directions; the end of one direction shuts down both sockets.</summary>
     private static async Task TunnelAsync(NetworkStream client, NetworkStream upstream)
     {
         var up = PumpAsync(client, upstream);
@@ -318,7 +319,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
     }
 
-    /// <summary>Читает заголовок до \r\n\r\n с ограничением размера; null — клиент ушёл молча.</summary>
+    /// <summary>Reads the header up to \r\n\r\n with a size limit; null — the client left silently.</summary>
     private static async Task<byte[]?> ReadHeaderAsync(NetworkStream stream, CancellationToken ct)
     {
         var buffer = new MemoryStream();

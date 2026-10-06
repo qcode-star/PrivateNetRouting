@@ -6,7 +6,7 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Guard;
 
-/// <summary>Живые проверки бана (порт Get-LiveChecks ban-ai-hosts.ps1): только чтение, прав не требует.</summary>
+/// <summary>Live ban checks (port of Get-LiveChecks from ban-ai-hosts.ps1): read-only, requires no rights.</summary>
 public sealed record BanLiveChecks(
     bool DnsBlocked,
     string DnsDetail,
@@ -31,10 +31,10 @@ public sealed record GuardSnapshot(
 }
 
 /// <summary>
-/// Оркестрация гардов прямого доступа: статус — только чтением (реестр, hosts, NRPT/firewall
-/// командлетами, settings.json, WSL), включение бана/политики — элевейтнутым helper'ом,
-/// settings.json/WSL/системный прокси — без элевации. После применения бана выполняются живые
-/// проверки (правило №6 AGENTS.md: не «должно работать», а проверка на живом трафике).
+/// Orchestration of direct-access guards: status is read-only (registry, hosts, NRPT/firewall
+/// via cmdlets, settings.json, WSL), enabling the ban/policy goes through the elevated helper,
+/// settings.json/WSL/system proxy need no elevation. After applying the ban, live checks run
+/// (rule #6 of AGENTS.md: not "it should work", but a check on live traffic).
 /// </summary>
 public sealed class GuardService(
     AppConfig config,
@@ -59,8 +59,8 @@ public sealed class GuardService(
     }
 
     /// <summary>
-    /// Только бан и политика (реестр, hosts, NRPT/firewall) — быстрое ядро для сводки
-    /// диагностики; settings.json и WSL не читаются (wsl.exe — секунды).
+    /// Ban and policy only (registry, hosts, NRPT/firewall) — the fast core for the diagnostics
+    /// summary; settings.json and WSL are not read (wsl.exe takes seconds).
     /// </summary>
     public async Task<(LocalBanStatus Ban, EgressPolicyStatus Policy)> GetCoreStatusAsync(CancellationToken ct)
     {
@@ -114,7 +114,7 @@ public sealed class GuardService(
     private static EgressPolicyStatus UnknownPolicy(Exception ex) =>
         new EgressPolicyStatus(GuardState.Unknown, null, "", null) { Detail = ex.Message };
 
-    /// <summary>Готовые английские строки статуса для CLI; GUI форматирует из типизированных полей.</summary>
+    /// <summary>Ready-made English status strings for the CLI; the GUI formats from the typed fields.</summary>
     internal static IReadOnlyList<GuardItemStatus> BuildItems(
         LocalBanStatus ban,
         EgressPolicyStatus policy,
@@ -153,7 +153,7 @@ public sealed class GuardService(
         _ => "unknown",
     };
 
-    /// <summary>Включение/снятие трёх слоёв бана (UAC) с живыми проверками после применения.</summary>
+    /// <summary>Enabling/disabling the three ban layers (UAC) with live checks after applying.</summary>
     public async Task<BanApplyResult> BanAsync(bool enable, CancellationToken ct)
     {
         var command = enable ? GuardElevatedCommands.BanOn : GuardElevatedCommands.BanOff;
@@ -169,7 +169,7 @@ public sealed class GuardService(
         return new BanApplyResult(result.Detail, live);
     }
 
-    /// <summary>Включение/снятие managed-политики (UAC); после — контрольное чтение.</summary>
+    /// <summary>Enabling/disabling the managed policy (UAC); a control read follows.</summary>
     public async Task<string> PolicyAsync(bool enable, CancellationToken ct)
     {
         var command = enable ? GuardElevatedCommands.PolicyOn : GuardElevatedCommands.PolicyOff;
@@ -216,7 +216,7 @@ public sealed class GuardService(
         return result;
     }
 
-    /// <summary>Системный прокси WinINET (прав не требует); выключатель возвращает прямой доступ.</summary>
+    /// <summary>WinINET system proxy (requires no rights); disabling restores direct access.</summary>
     public Task SetSystemProxyAsync(bool enable, CancellationToken ct) =>
         Task.Run(() =>
         {
@@ -235,9 +235,9 @@ public sealed class GuardService(
         }, ct);
 
     /// <summary>
-    /// Живые проверки (порт Get-LiveChecks): пробное имя не должно резолвиться и не должно
-    /// отвечать прямым соединением; проксируемый путь проверяется CONNECT-roundtrip'ом
-    /// (цепочка не поднята — проверка пропускается, как в прежней схеме).
+    /// Live checks (port of Get-LiveChecks): the probe name must not resolve and must not
+    /// answer a direct connection; the proxied path is checked with a CONNECT roundtrip
+    /// (chain not up — the check is skipped, as in the legacy scheme).
     /// </summary>
     public async Task<BanLiveChecks> LiveChecksAsync(CancellationToken ct)
     {
@@ -278,7 +278,7 @@ public sealed class GuardService(
 
     private static async Task<(bool Blocked, string Detail)> ProbeDirectAsync(string probe, CancellationToken ct)
     {
-        // без системного прокси: SocketsHttpHandler по умолчанию читает WinINET — отключаем
+        // without the system proxy: SocketsHttpHandler reads WinINET by default — disable that
         using var http = new HttpClient(new SocketsHttpHandler
         {
             UseProxy = false,

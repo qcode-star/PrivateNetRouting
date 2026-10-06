@@ -5,21 +5,21 @@ namespace PrivateNetRouting.Core.Guard;
 public sealed record EgressPolicyValues(bool KeyExists, string? EgressProxyUrl, int? DisableWslSessions);
 
 /// <summary>
-/// Managed-политика Claude Desktop (порт set-egress-proxy.ps1): HKLM\SOFTWARE\Policies\Claude —
-/// egressProxyUrl (проксируется при любом способе запуска) и disableWslSessions=0 (наличие
-/// любого значения в Policies переводит Claude в managed-режим, где WSL-сессии по умолчанию
-/// запрещены; явный 0 на уровне машины возвращает их). Оба имени документированы Anthropic.
-/// Ветка SOFTWARE\Policies защищена: запись — только администратор (элевейтнутый helper),
-/// чтение доступно всем.
+/// Managed policy of Claude Desktop (port of set-egress-proxy.ps1): HKLM\SOFTWARE\Policies\Claude —
+/// egressProxyUrl (proxied no matter how the app is started) and disableWslSessions=0 (the presence
+/// of any value under Policies puts Claude into managed mode, where WSL sessions are disabled by
+/// default; an explicit 0 at the machine level brings them back). Both names are documented by Anthropic.
+/// The SOFTWARE\Policies branch is protected: writing is administrator-only (elevated helper),
+/// reading is available to everyone.
 /// </summary>
 public interface IEgressPolicyStore
 {
     EgressPolicyValues Read();
 
-    /// <summary>Требует прав администратора.</summary>
+    /// <summary>Requires administrator rights.</summary>
     void Apply(string proxyUrl);
 
-    /// <summary>Требует прав администратора: снимает оба значения, пустой ключ удаляет целиком.</summary>
+    /// <summary>Requires administrator rights: removes both values, deletes the whole key if empty.</summary>
     void Remove();
 }
 

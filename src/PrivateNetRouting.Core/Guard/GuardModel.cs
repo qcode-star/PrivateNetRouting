@@ -2,19 +2,19 @@ namespace PrivateNetRouting.Core.Guard;
 
 public enum GuardKind
 {
-    /// <summary>Локальный бан прямого доступа: hosts + NRPT + firewall (порт ban-ai-hosts.ps1).</summary>
+    /// <summary>Local direct-access ban: hosts + NRPT + firewall (port of ban-ai-hosts.ps1).</summary>
     LocalBan,
 
-    /// <summary>Managed-политика Claude egressProxyUrl + disableWslSessions=0 (порт set-egress-proxy.ps1).</summary>
+    /// <summary>Managed policy of Claude egressProxyUrl + disableWslSessions=0 (port of set-egress-proxy.ps1).</summary>
     EgressPolicy,
 
-    /// <summary>env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) в settings.json Claude Code, Windows (порт sync-claude-noproxy.ps1).</summary>
+    /// <summary>env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) in settings.json of Claude Code, Windows (port of sync-claude-noproxy.ps1).</summary>
     ClaudeSettings,
 
-    /// <summary>WSL: стартовый скрипт с адресом прокси + settings.json в дистрибутиве.</summary>
+    /// <summary>WSL: startup script with the proxy address + settings.json in the distro.</summary>
     WslConfig,
 
-    /// <summary>Системный прокси WinINET (порт proxy-on/off.ps1).</summary>
+    /// <summary>WinINET system proxy (port of proxy-on/off.ps1).</summary>
     SystemProxy,
 }
 
@@ -27,8 +27,8 @@ public enum GuardState
 }
 
 /// <summary>
-/// Статус одного гарда: только чтение, без прав администратора. Detail — готовая строка
-/// для CLI (английская); GUI форматирует свои строки из типизированных статусов ниже.
+/// Status of one guard: read-only, no administrator rights. Detail is a ready-made string
+/// for the CLI (English); the GUI formats its own strings from the typed statuses below.
 /// </summary>
 public sealed record GuardItemStatus(GuardKind Kind, GuardState State, string Detail);
 
@@ -45,7 +45,7 @@ public sealed record LocalBanStatus(
     public static readonly LocalBanStatus Off = new(GuardState.Off, 0, false, 0, [], 0, []);
 }
 
-/// <summary>Чтение HKLM\Policies\Claude прав не требует; запись — только администратор.</summary>
+/// <summary>Reading HKLM\Policies\Claude requires no rights; writing is administrator-only.</summary>
 public sealed record EgressPolicyStatus(
     GuardState State,
     string? CurrentUrl,

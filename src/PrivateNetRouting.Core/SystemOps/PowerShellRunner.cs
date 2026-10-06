@@ -3,9 +3,9 @@ using System.Diagnostics;
 namespace PrivateNetRouting.Core.SystemOps;
 
 /// <summary>
-/// Запуск Windows PowerShell без окна (обновлятор: Get-AppxPackage/Add-AppxPackage/Get-WinEvent;
-/// гард: Get-DnsClientNrptRule/NetFirewall). PowerShell 5.1 — компонент ОС,
-/// путь берётся из конфига (updater.powerShellPath).
+/// Launching Windows PowerShell without a window (updater: Get-AppxPackage/Add-AppxPackage/Get-WinEvent;
+/// guard: Get-DnsClientNrptRule/NetFirewall). PowerShell 5.1 is an OS component,
+/// the path is taken from the config (updater.powerShellPath).
 /// </summary>
 public interface IPowerShellExecutor
 {
@@ -44,7 +44,7 @@ public sealed class PowerShellRunner(string powerShellPath) : IPowerShellExecuto
             }
             catch (System.ComponentModel.Win32Exception)
             {
-                // процесс уже завершился сам
+                // the process has already exited on its own
             }
 
             throw;

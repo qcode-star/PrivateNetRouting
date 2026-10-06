@@ -1,9 +1,9 @@
 namespace PrivateNetRouting.Core.Runtime;
 
 /// <summary>
-/// Маркер активности прокси: mtime файла = время последнего проксированного запроса.
-/// Обновляется не чаще раза в интервал (сторож опрашивает раз в 10 минут — чаще не нужно);
-/// ошибки файловой системы молча проглатываются: маркер вспомогательный.
+/// Proxy activity marker: the file mtime = the time of the last proxied request.
+/// Updated no more often than once per interval (the watchdog polls every 10 minutes — more often is not needed);
+/// file system errors are silently swallowed: the marker is auxiliary.
 /// </summary>
 public sealed class ActivityMarker(string path, TimeSpan minInterval, TimeProvider? time = null)
 {
@@ -41,7 +41,7 @@ public sealed class ActivityMarker(string path, TimeSpan minInterval, TimeProvid
         }
         catch (IOException)
         {
-            // маркер вспомогательный: тихая норма
+            // the marker is auxiliary: silently normal
         }
         catch (UnauthorizedAccessException)
         {

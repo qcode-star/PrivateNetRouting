@@ -3,14 +3,14 @@ using System.Xml.Linq;
 
 namespace PrivateNetRouting.Core.Updater;
 
-/// <summary>Identity из AppxManifest.xml пакета (сверяется с установленным перед установкой).</summary>
+/// <summary>Identity from the package AppxManifest.xml (verified against the installed one before install).</summary>
 public sealed record MsixIdentity(string Name, string Version, string Publisher, string Architecture);
 
 public static class MsixPackage
 {
     /// <summary>
-    /// Читает Identity из AppxManifest.xml внутри пакета; null — манифеста нет (не одиночный
-    /// MSIX, вручную не поставить).
+    /// Reads Identity from the AppxManifest.xml inside the package; null — no manifest (not a standalone
+    /// MSIX, cannot be installed manually).
     /// </summary>
     public static MsixIdentity? TryReadIdentity(string packagePath)
     {

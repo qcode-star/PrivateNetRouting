@@ -6,8 +6,8 @@ using PrivateNetRouting.Core.Net.Socks;
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// Одна DoH-проверка (RFC 8484, GET с base64url-параметром dns). HTTP/1.0: тело ответа
-/// delimитируется Content-Length или закрытием — парсим только статус и тело.
+/// A single DoH query (RFC 8484, GET with a base64url dns parameter). HTTP/1.0: the response
+/// body is delimited by Content-Length or by closure — we parse only the status and the body.
 /// </summary>
 public static class DohClient
 {

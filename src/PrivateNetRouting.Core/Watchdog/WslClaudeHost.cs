@@ -5,31 +5,31 @@ namespace PrivateNetRouting.Core.Watchdog;
 
 public enum WslHostState
 {
-    /// <summary>В дистрибутиве нет ни демона, ни сессий (или дистрибутив не запущен).</summary>
+    /// <summary>There is neither a daemon nor sessions in the distro (or the distro is not running).</summary>
     None,
 
-    /// <summary>Хост остановлен (RPC или эскалацией сигналов).</summary>
+    /// <summary>The host is stopped (by RPC or by signal escalation).</summary>
     Stopped,
 
-    /// <summary>Часть процессов осталась — остановка не подтвердилась.</summary>
+    /// <summary>Some processes remain — the stop was not confirmed.</summary>
     Stuck,
 }
 
 public sealed record WslHostStopResult(WslHostState State, string Detail);
 
 /// <summary>
-/// Штатная остановка WSL-хоста Claude Desktop (порт claude-wsl-stop.ps1): демон
-/// remote/srv/&lt;hash&gt;/server останавливается своим же бинарником (RPC server.shutdown),
-/// сессии ccd-cli гасятся им же; на осиротевших процессах — эскалация SIGTERM → SIGKILL.
-/// Остальной дистрибутив и запущенный руками Claude Code CLI не трогаются; дистрибутив
-/// ради проверки не поднимается.
+/// Graceful stop of the WSL host of Claude Desktop (port of claude-wsl-stop.ps1): the daemon
+/// remote/srv/&lt;hash&gt;/server is stopped by its own binary (RPC server.shutdown),
+/// ccd-cli sessions are shut down by the same; for orphaned processes — SIGTERM → SIGKILL escalation.
+/// The rest of the distro and a manually started Claude Code CLI are left alone; the distro
+/// is not started just for a check.
 /// </summary>
 public interface IWslClaudeHost
 {
     Task<WslHostStopResult> StopAsync(CancellationToken ct);
 }
 
-/// <summary>Запуск wsl.exe с аргументами и опциональным stdin (для тестов — фейк).</summary>
+/// <summary>Running wsl.exe with arguments and optional stdin (a fake for tests).</summary>
 public interface IWslProcessRunner
 {
     Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct);
@@ -70,10 +70,10 @@ public sealed class WslProcessRunner : IWslProcessRunner
 }
 
 /// <summary>
-/// Остановщик через `wsl.exe -d &lt;дистрибутив&gt; -- bash -s`: bash-скрипт идентичен телу
-/// claude-wsl-stop.ps1 (только текст сообщений английский и считаются оставшиеся процессы
-/// после эскалации). Предварительно проверяется, что дистрибутив запущен (`--list --running`,
-/// вывод wsl.exe — UTF-16LE с возможными NUL), иначе шаг пропускается без запуска дистрибутива.
+/// Stopper via `wsl.exe -d &lt;distro&gt; -- bash -s`: the bash script is identical to the body of
+/// claude-wsl-stop.ps1 (only the message text is English and the remaining processes are counted
+/// after escalation). It first checks that the distro is running (`--list --running`,
+/// wsl.exe output is UTF-16LE with possible NULs), otherwise the step is skipped without starting the distro.
 /// </summary>
 public sealed class WslClaudeHostStopper(string distro, IWslProcessRunner wsl) : IWslClaudeHost
 {
@@ -103,7 +103,7 @@ public sealed class WslClaudeHostStopper(string distro, IWslProcessRunner wsl) :
             "none" => WslHostState.None,
             "stopped" => WslHostState.Stopped,
             "stuck" => WslHostState.Stuck,
-            _ => WslHostState.Stuck, // bash не ответил состоянием — считаем неподтверждённой остановкой
+            _ => WslHostState.Stuck, // bash did not answer with a state — treat as an unconfirmed stop
         };
         if (stateLine is null)
         {

@@ -11,14 +11,14 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Точка входа GUI-режимов: обычный (окно + трей), ярлыковый (--launch: если Claude уже
-/// запущен — только окно, иначе окно с процессом запуска цепочки/Claude) и элевейтнутые
-/// helper-команды (--elevated-*, выполняются до всего прочего и сразу завершают процесс —
-/// их запускает ElevatedRunner через runas), а также тело detached-воркера прокси
-/// (--proxy-worker, до mutex одиночного экземпляра и до UI — это второй процесс).
-/// Одиночный экземпляр — mutex + событие активации: повторный запуск показывает уже
-/// открытое (или свёрнутое в трей) окно. Закрытие окна и минимизация прячут приложение
-/// в трей; настоящий выход — «Выход» в меню трея (или завершение сеанса Windows).
+/// Entry point for GUI modes: normal (window + tray), shortcut mode (--launch: if Claude is
+/// already running — window only, otherwise a window with the chain/Claude launch process) and
+/// elevated helper commands (--elevated-*, executed before everything else and immediately
+/// terminating the process — they are started by ElevatedRunner via runas), as well as the body
+/// of the detached proxy worker (--proxy-worker, before the single-instance mutex and before the
+/// UI — this is a second process). Single instance — mutex + activation event: a repeated launch
+/// shows the already open (or minimized to tray) window. Closing and minimizing the window hides
+/// the application to the tray; the real exit is "Exit" in the tray menu (or Windows session end).
 /// </summary>
 public partial class App : Application
 {
@@ -36,8 +36,8 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // detached-воркер прокси (spawnится супервизором цепочки): никакого UI и
-        // одиночного экземпляра — живёт, пока его не убьёт останов цепочки
+        // detached proxy worker (spawned by the chain supervisor): no UI and no
+        // single instance — lives until the chain shutdown kills it
         if (e.Args.Contains(ForwardProxySupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
         {
             Shutdown(ProxyWorker.RunAsync(CancellationToken.None).GetAwaiter().GetResult());
@@ -82,8 +82,8 @@ public partial class App : Application
         {
             try
             {
-                // в пуле, без Dispatcher-контекста: задержанный старт (ждём слушателя
-                // detached-воркера) иначе дедлочит блокирующее ожидание на UI-потоке
+                // on the pool, without Dispatcher context: a delayed start (waiting for the
+                // detached worker's listener) would otherwise deadlock the blocking wait on the UI thread
                 Task.Run(() => _runtime.StartAsync(CancellationToken.None)).GetAwaiter().GetResult();
             }
             catch (Exception ex)
@@ -98,7 +98,7 @@ public partial class App : Application
         {
             if (_exiting)
             {
-                return; // настоящий выход: окно закрывается, OnExit остановит всё
+                return; // real exit: the window closes, OnExit will stop everything
             }
 
             e2.Cancel = true;
@@ -174,9 +174,10 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Фоновая проверка обновления Claude на старте (ui.checkUpdatesOnStart): только чтение
-    /// версий и журнала AppX — без подъёма цепочки и без UAC. Есть что ставить — строка
-    /// в главном окне и балун трея; сбой тихо пишется в лог обновлятора.
+    /// Background Claude update check on startup (ui.checkUpdatesOnStart): read-only of
+    /// versions and the AppX journal — without bringing up the chain and without UAC. If there
+    /// is something to install — a line in the main window and a tray balloon; a failure is
+    /// written quietly to the updater log.
     /// </summary>
     private async Task RunStartupUpdateCheckAsync(MainWindow window)
     {
@@ -208,8 +209,8 @@ public partial class App : Application
         _activationSubscription?.Unregister(null);
         _activate?.Dispose();
         _tray?.Dispose();
-        // останов рантайма — в пуле: продолжения await'ов внутри DisposeAsync не должны
-        // попадать в очередь диспетчера, чей поток здесь же блокирующе ждёт
+        // runtime shutdown — on the pool: await continuations inside DisposeAsync must not
+        // land in the dispatcher queue, whose thread is blocking here as well
         if (_runtime is not null)
         {
             Task.Run(() => _runtime.DisposeAsync().AsTask()).GetAwaiter().GetResult();

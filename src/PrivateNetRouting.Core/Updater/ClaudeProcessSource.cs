@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace PrivateNetRouting.Core.Updater;
 
-/// <summary>Процесс Claude, который можно попросить закрыться или погасить.</summary>
+/// <summary>A Claude process that can be asked to close or be killed.</summary>
 public interface IClaudeProcessHandle
 {
     bool CloseMainWindow();
@@ -10,7 +10,7 @@ public interface IClaudeProcessHandle
     void Kill();
 }
 
-/// <summary>Процессы Claude Desktop по точному имени (как Get-Process -Name в прежней схеме).</summary>
+/// <summary>Claude Desktop processes by exact name (like Get-Process -Name in the legacy scheme).</summary>
 public interface IClaudeProcessSource
 {
     IReadOnlyList<IClaudeProcessHandle> Find(string processName);

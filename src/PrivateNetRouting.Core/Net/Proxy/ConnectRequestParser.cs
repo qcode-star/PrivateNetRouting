@@ -1,14 +1,14 @@
 namespace PrivateNetRouting.Core.Net.Proxy;
 
-/// <summary>Разобранный CONNECT: хост нормализован (без хвостовой точки, нижний регистр).</summary>
+/// <summary>Parsed CONNECT: the host is normalized (no trailing dot, lowercase).</summary>
 public sealed record ConnectRequest(string Host, int Port)
 {
     public override string ToString() => $"{Host}:{Port}";
 }
 
 /// <summary>
-/// Разбор первой строки прокси-запроса: "CONNECT host:port HTTP/x.y". Поддерживается только
-/// CONNECT (https-трафик); обычный HTTP получает 400 с записью в лог.
+/// Parses the first line of a proxy request: "CONNECT host:port HTTP/x.y". Only CONNECT is
+/// supported (https traffic); plain HTTP gets a 400 with a log entry.
 /// </summary>
 public static class ConnectRequestParser
 {

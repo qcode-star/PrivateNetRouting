@@ -10,10 +10,10 @@ public sealed record BanLayersState(int NrptRules, IReadOnlyList<string> NrptNam
 }
 
 /// <summary>
-/// Системные слои бана: NRPT (одно правило сразу на все поддеревья, серверы 127.0.0.1 —
-/// на localhost:53 никто не слушает, поэтому имена поддеревьев не резолвятся) и firewall
-/// (outbound Block по подсетям). Управление — командлетами DnsClient/NetSecurity, как в
-/// прежней схеме; запись требует прав администратора (элевейтнутый helper), чтение — нет.
+/// System layers of the ban: NRPT (one rule covering all subtrees at once, servers 127.0.0.1 —
+/// nobody listens on localhost:53, so subtree names are never resolved) and firewall
+/// (outbound Block by subnet). Managed via DnsClient/NetSecurity cmdlets, as in the
+/// legacy scheme; writing requires administrator rights (elevated helper), reading does not.
 /// </summary>
 public interface IBanSystemOps
 {
@@ -64,7 +64,7 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
         ThrowIfFailed(what, code, output);
     }
 
-    /// <summary>Одно NRPT-правило на все поддеревья: apex + «.apex»; правило сначала снимается — применение идемпотентно.</summary>
+    /// <summary>One NRPT rule for all subtrees: apex + ".apex"; the rule is removed first — applying is idempotent.</summary>
     internal string BuildNrptScript(bool apply)
     {
         var name = PsLiteral(config.NrptRuleName);
@@ -82,7 +82,7 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
             """;
     }
 
-    /// <summary>Правила outbound Block по группам семейств (IPv4/IPv6); группа сначала снимается — применение идемпотентно.</summary>
+    /// <summary>Outbound Block rules grouped by address family (IPv4/IPv6); the group is removed first — applying is idempotent.</summary>
     internal string BuildFirewallScript(bool apply)
     {
         var group = PsLiteral(config.FirewallGroup);
@@ -140,6 +140,6 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
         }
     }
 
-    /// <summary>Одинарные кавычки PowerShell с удвоением внутренних.</summary>
+    /// <summary>PowerShell single quotes with inner quotes doubled.</summary>
     internal static string PsLiteral(string value) => $"'{value.Replace("'", "''")}'";
 }

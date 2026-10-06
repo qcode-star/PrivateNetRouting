@@ -7,7 +7,7 @@ using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Core.Guard;
 
-/// <summary>Статус одного дистрибутива из guard.wsl.distros.</summary>
+/// <summary>Status of one distro from guard.wsl.distros.</summary>
 public sealed record WslDistroStatus(
     string Distro,
     bool Sync,
@@ -16,7 +16,7 @@ public sealed record WslDistroStatus(
     string? CurrentProxy,
     string Reason);
 
-/// <summary>Статус WSL-слоя: выключен (Reason поясняет) или агрегат по дистрибутивам.</summary>
+/// <summary>Status of the WSL layer: off (Reason explains) or an aggregate over distros.</summary>
 public sealed record WslConfigStatus(
     GuardState State,
     IReadOnlyList<WslDistroStatus> Distros,
@@ -40,15 +40,15 @@ public sealed record WslDistroSyncResult(
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
 /// <summary>
-/// WSL-слой гарда (порт стартового скрипта /etc/wsl.d/startup/10-claude-proxy.sh и WSL-части
-/// sync-claude-noproxy.ps1). Слой целиком опционален: guard.wsl.mode = on | off | auto
-/// (auto — вкл, только если WSL есть и хотя бы один настроенный дистрибутив установлен).
-/// По каждому дистрибутиву из guard.wsl.distros — свой выбор, синкать ли в него:
-/// sync=true — стартовый скрипт (адрес прокси = IP виндовой стороны WSL NAT + порт приложения;
-/// NO_PROXY не трогает — его ведёт синхронизация) и полный env в ~/.claude/settings.json
-/// (прокси + NO_PROXY), с бэкапами; sync=false — только статус.
-/// Статус — только чтение и только в запущенных дистрибутивах (ради проверки не поднимаются);
-/// синхронизация дистрибутив не поднимает — пропускает его с причиной.
+/// WSL layer of the guard (port of the startup script /etc/wsl.d/startup/10-claude-proxy.sh and the
+/// WSL part of sync-claude-noproxy.ps1). The layer is entirely optional: guard.wsl.mode = on | off | auto
+/// (auto — on only if WSL is present and at least one configured distro is installed).
+/// Per distro from guard.wsl.distros there is a separate choice of whether to sync into it:
+/// sync=true — startup script (proxy address = IP of the Windows side of WSL NAT + application port;
+/// NO_PROXY is not touched — it is managed by the sync) and the full env in ~/.claude/settings.json
+/// (proxy + NO_PROXY), with backups; sync=false — status only.
+/// Status is read-only and only in running distros (they are not started just for a check);
+/// sync does not start a distro — it skips it with a reason.
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -111,17 +111,17 @@ public sealed class WslConfigGuard(
         return new WslSyncResult(false, null, results);
     }
 
-    /// <summary>Дистрибутивы с обязательными полями; порядок конфига сохраняется.</summary>
+    /// <summary>Distros with the required fields; the config order is preserved.</summary>
     internal IReadOnlyList<WslDistroConfig> ConfiguredDistros() =>
         config.Guard.Wsl.Distros
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !string.IsNullOrWhiteSpace(d.User))
             .ToList();
 
     /// <summary>
-    /// Вкл/выкл слоя: off — всегда выкл; пустой список настроенных дистрибутивов — выкл;
-    /// on — вкл; auto — вкл, только если WSL отвечает и хотя бы один настроенный дистрибутив
-    /// установлен (запуск wsl без дистрибутивов выдаёт сообщение вместо имён — ни одно имя
-    /// не совпадёт, локализация вывода не важна).
+    /// Layer on/off: off — always off; an empty list of configured distros — off;
+    /// on — on; auto — on only if WSL responds and at least one configured distro
+    /// is installed (running wsl with no distros prints a message instead of names — no name
+    /// will match, output localization does not matter).
     /// </summary>
     internal async Task<(bool Enabled, string Reason)> EvaluateLayerAsync(CancellationToken ct)
     {
@@ -208,7 +208,7 @@ public sealed class WslConfigGuard(
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
 
-        // settings.json дистрибутива: полный env (прокси шлюза + NO_PROXY), чужие ключи сохраняются
+        // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved
         var root = read.SettingsRoot ?? [];
         var env = root["env"] as JsonObject ?? [];
         env["HTTPS_PROXY"] = proxy;
@@ -224,7 +224,7 @@ public sealed class WslConfigGuard(
             """;
         await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
 
-        // стартовый скрипт: обновляет адрес прокси при каждом старте дистрибутива
+        // startup script: refreshes the proxy address on every distro start
         var scriptPath = config.Guard.WslStartupScript;
         var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config.ForwardProxy));
         var rootScript = $"""
@@ -258,7 +258,7 @@ public sealed class WslConfigGuard(
         string? SettingsProxy,
         JsonObject? SettingsRoot);
 
-    /// <summary>Один заход в дистрибутив за всем состоянием (root: видит и /etc, и home).</summary>
+    /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
     {
         var scriptPath = config.Guard.WslStartupScript;
@@ -305,7 +305,7 @@ public sealed class WslConfigGuard(
                     break;
                 case "SETTINGS=present":
                     settingsFilePresent = true;
-                    // тело settings.json — до строки SETTINGS=END (или конца вывода)
+                    // settings.json body — up to the SETTINGS=END line (or the end of the output)
                     var end = Array.IndexOf(lines, "SETTINGS=END", i + 1);
                     var jsonText = string.Join('\n', lines[(i + 1)..(end > 0 ? end : lines.Length)]).Trim();
                     if (jsonText.Length > 0)
@@ -340,7 +340,7 @@ public sealed class WslConfigGuard(
         return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root);
     }
 
-    /// <summary>Текст стартового скрипта (те же действия, что у скрипта прежней схемы, порт — приложения).</summary>
+    /// <summary>Startup script text (same actions as the script of the legacy scheme, but the application port).</summary>
     internal static string BuildStartupScript(string user, int port) => $$"""
         #!/bin/bash
         # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy

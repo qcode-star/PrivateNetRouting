@@ -8,7 +8,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Diagnostics;
 
-/// <summary>Подсветка строки сводки: зелёный — норма, янтарный — внимание, красный — проблема.</summary>
+/// <summary>Summary line highlight: green — fine, amber — attention, red — problem.</summary>
 public enum DiagMark
 {
     Neutral,
@@ -17,24 +17,24 @@ public enum DiagMark
     Bad,
 }
 
-/// <summary>Строка сводки: техническое имя (английское) и готовое значение.</summary>
+/// <summary>Summary line: technical name (English) and the ready-made value.</summary>
 public sealed record DiagLine(string Name, string Value, DiagMark Mark = DiagMark.Neutral);
 
-/// <summary>Секция сводки; Key — stable-идентификатор (chain/proxy/health/guards/watchdog), GUI локализует заголовок по нему.</summary>
+/// <summary>Summary section; Key is a stable identifier (chain/proxy/health/guards/watchdog), the GUI localizes the header by it.</summary>
 public sealed record DiagSection(string Key, IReadOnlyList<DiagLine> Lines);
 
 /// <summary>
-/// Сводка состояния. ChainStopped — краевой случай прежнего proxy-status.ps1: ни демона,
-/// ни слушателя forward-прокси нет вовсе — это норма, пока Claude не нужен (короткое
-/// сообщение вместо полной картины).
+/// State summary. ChainStopped is the edge case of the legacy proxy-status.ps1: neither the daemon
+/// nor a forward proxy listener exists at all — that is normal while Claude is not needed (a short
+/// message instead of the full picture).
 /// </summary>
 public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSection> Sections);
 
 /// <summary>
-/// Диагностика (порт proxy-status.ps1), только чтение: процессы цепочки и владельцы
-/// слушателей (PID по таблице TCP, как Get-NetTCPConnection), WSL-бинд прокси, счётчики,
-/// возраст маркера активности, детальный CONNECT-roundtrip (время и первая строка ответа),
-/// ядро гардов (политика + бан) и живость сторожа. Ничего не поднимает и не останавливает.
+/// Diagnostics (port of proxy-status.ps1), read-only: chain processes and listener
+/// owners (PID via the TCP table, like Get-NetTCPConnection), WSL bind of the proxy, counters,
+/// activity marker age, detailed CONNECT roundtrip (time and first response line),
+/// the core of the guards (policy + ban) and watchdog liveness. It starts and stops nothing.
 /// </summary>
 public sealed class DiagnosticsService(
     AppConfig config,
@@ -47,7 +47,7 @@ public sealed class DiagnosticsService(
     LogStore logs,
     TimeProvider? time = null)
 {
-    private const string WatchdogProcessName = "pnr.exe"; // CLI-процесс команды `pnr watchdog`
+    private const string WatchdogProcessName = "pnr.exe"; // CLI process of the `pnr watchdog` command
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
@@ -100,7 +100,7 @@ public sealed class DiagnosticsService(
         return new DiagSection("chain", lines);
     }
 
-    /// <summary>Кипер watch-ipn опознаётся так же, как SidecarKeeper: tailscale CLI + наш пайп + watch-ipn в cmdline.</summary>
+    /// <summary>The watch-ipn keeper is identified the same way as in SidecarKeeper: tailscale CLI + our pipe + watch-ipn in the cmdline.</summary>
     private DiagLine KeeperLine()
     {
         var keepers = processes
@@ -153,7 +153,7 @@ public sealed class DiagnosticsService(
         return new DiagSection("proxy", lines);
     }
 
-    /// <summary>Возраст маркера активности (mtime): насколько недавно был проксированный запрос.</summary>
+    /// <summary>Age of the activity marker (mtime): how recently a proxied request happened.</summary>
     private DiagLine ActivityLine()
     {
         try
@@ -172,7 +172,7 @@ public sealed class DiagnosticsService(
         }
     }
 
-    /// <summary>CONNECT-roundtrip всей цепочкой: время и первая строка ответа (порт health-check прежней схемы).</summary>
+    /// <summary>CONNECT roundtrip through the whole chain: time and first response line (the health-check port of the legacy scheme).</summary>
     private async Task<DiagSection> HealthSectionAsync(bool proxyListening, CancellationToken ct)
     {
         if (!proxyListening)
@@ -222,8 +222,8 @@ public sealed class DiagnosticsService(
     }
 
     /// <summary>
-    /// Сторож автостопа виден извне только как процесс `pnr watchdog` (в GUI он живёт внутри
-    /// окна приложения и по командной строке не отличается) — строка честно об этом говорит.
+    /// The idle auto-stop watchdog is visible from outside only as a `pnr watchdog` process (in the GUI it
+    /// lives inside the application window and is indistinguishable by command line) — the line says so honestly.
     /// </summary>
     private DiagSection WatchdogSection()
     {

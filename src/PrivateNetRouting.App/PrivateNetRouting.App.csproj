@@ -6,8 +6,8 @@
 
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
-    <!-- WinForms нужен только для трея (TrayIcon.cs с алиасом): без глобальных юзингов,
-         чтобы System.Windows.Forms/System.Drawing не конфликтовали с типами WPF. -->
+    <!-- WinForms is needed only for the tray (TrayIcon.cs with an alias): no global usings,
+         so that System.Windows.Forms/System.Drawing do not conflict with WPF types. -->
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
   </ItemGroup>

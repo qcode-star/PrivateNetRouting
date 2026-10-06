@@ -15,11 +15,11 @@ using PrivateNetRouting.Core.Launcher;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Главное окно: статус forward-прокси и цепочки, управление, выбор языка интерфейса.
-/// Состояние цепочки опрашивается реже, чем счётчики прокси: каждый опрос — это
-/// CLI-вызов и CONNECT-roundtrip. Все строки — из словарей Localization/Strings.*.xaml:
-/// XAML берёт их DynamicResource'ом, код — через Loc.S/Loc.F; смена языка перевязывает
-/// словарь на лету (Loc.LanguageChanged), ViewModel перерисовывает свои строки.
+/// Main window: forward proxy and chain status, control, UI language selection.
+/// Chain state is polled less often than proxy counters: each poll is a
+/// CLI call and a CONNECT roundtrip. All strings come from the Localization/Strings.*.xaml
+/// dictionaries: XAML takes them via DynamicResource, code via Loc.S/Loc.F; a language change
+/// rebinds the dictionary on the fly (Loc.LanguageChanged), the view model redraws its strings.
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -57,8 +57,8 @@ public partial class MainWindow : Window
         _chainTimer.Start();
         _ = RefreshChainAsync();
 
-        // статусы гардов — только чтение (реестр/hosts/NRPT/firewall/WSL), но NRPT и firewall
-        // читаются командлетами PowerShell — опрос реже, чем состояние цепочки
+        // guard statuses — read-only (registry/hosts/NRPT/firewall/WSL), but NRPT and firewall
+        // are read by PowerShell cmdlets — polled less often than chain state
         _guardTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _guardTimer.Tick += async (_, _) => await RefreshGuardsAsync();
         _guardTimer.Start();
@@ -66,7 +66,7 @@ public partial class MainWindow : Window
         _ = RefreshGuardsAsync();
     }
 
-    /// <summary>Минимизация прячется в трей (приложение продолжает работать) — как и закрытие окна.</summary>
+    /// <summary>Minimizing hides to the tray (the app keeps running) — same as closing the window.</summary>
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
@@ -106,8 +106,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Гарды прямого доступа: статусы читаются целиком (реестр, hosts, NRPT/firewall,
-    /// settings.json, WSL) и раскрашивают карточку; «Обновить» и таймер — тот же путь.
+    /// Direct-access guards: statuses are read in full (registry, hosts, NRPT/firewall,
+    /// settings.json, WSL) and color the card; "Refresh" and the timer — the same path.
     /// </summary>
     private async Task RefreshGuardsAsync()
     {
@@ -178,7 +178,7 @@ public partial class MainWindow : Window
             : string.Join("\n", snapshot.Wsl.Distros.Select(d => $"{d.Distro}: {d.Reason}"));
     }
 
-    /// <summary>Строка одного дистрибутива: имя + локализованное состояние (детали — в тултипе).</summary>
+    /// <summary>Line of a single distro: name + localized state (details are in the tooltip).</summary>
     private static string LocalizeDistroStatus(WslDistroStatus distro) => distro.State switch
     {
         GuardState.On => Loc.F("Main.Guard.Wsl.DistroOnFmt", distro.Distro, distro.ScriptPort),
@@ -238,7 +238,7 @@ public partial class MainWindow : Window
         _ => Brushes.Gray,
     };
 
-    /// <summary>Бан и политика идут через элевейтнутый helper (UAC); живые проверки — сразу после.</summary>
+    /// <summary>Ban and policy go through the elevated helper (UAC); live checks — right after.</summary>
     private async void OnGuardBanOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.BanAsync(enable: true, CancellationToken.None);
@@ -269,7 +269,7 @@ public partial class MainWindow : Window
         _viewModel.SetCheckResult("Main.Guard.Policy.OffDone");
     });
 
-    /// <summary>Запись env (прокси + NO_PROXY) в settings.json Claude Code; бэкап рядом с файлом.</summary>
+    /// <summary>Writing env (proxy + NO_PROXY) into Claude Code settings.json; a backup next to the file.</summary>
     private async void OnGuardSettingsSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
@@ -279,7 +279,7 @@ public partial class MainWindow : Window
             result.BackupPath ?? Loc.S("Main.Guard.Backup.None"));
     });
 
-    /// <summary>Обновление стартового скрипта WSL и settings.json дистрибутивов (не поднимает их).</summary>
+    /// <summary>Updating the WSL startup script and distro settings.json (does not start them).</summary>
     private async void OnGuardWslSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
@@ -393,10 +393,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Сторож автостопа по простою (порт ts-sidecar-watch-claude.ps1): цикл живёт, пока
-    /// открыт запускший его процесс — здесь это окно приложения. Включение/выключение —
-    /// явное действие пользователя; при простое сторож сам гасит WSL-хост и цепочку
-    /// (подтверждение UAC на останов демона) и снимает галку.
+    /// Idle auto-stop watchdog (a port of ts-sidecar-watch-claude.ps1): the loop lives while
+    /// the process that started it is open — here it is the application window. Enabling/disabling
+    /// is an explicit user action; on idle the watchdog itself shuts down the WSL host and the chain
+    /// (UAC confirmation for the daemon shutdown) and clears the checkbox.
     /// </summary>
     private void OnWatchdogToggled(object sender, RoutedEventArgs e)
     {
@@ -444,17 +444,17 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Запуск Claude (порт claude-launcher.ps1): сначала живой CONNECT-roundtrip; если цепочка
-    /// отвечает — Claude стартует сразу, без заставки. Иначе поднимается заставка подъёма и
-    /// лончер идемпотентно поднимает цепочку; сбой рисуется заставкой (лог/закрыть,
-    /// автозакрытие минутой), успех — «Готово» и короткое затухание.
+    /// Launching Claude (a port of claude-launcher.ps1): first a live CONNECT roundtrip; if the chain
+    /// responds — Claude starts immediately, without a splash screen. Otherwise the bring-up splash is
+    /// shown and the launcher idempotently brings up the chain; a failure is drawn by the splash
+    /// (log/close, auto-close in a minute), success — "Done" and a short fade.
     /// </summary>
     private async void OnLaunchClaude(object sender, RoutedEventArgs e) => await RunLaunchAsync();
 
     /// <summary>
-    /// Ярлыковый режим (App --launch вместо ярлыка Claude): Claude уже запущен — просто
-    /// показать окно, без второго экземпляра; не запущен — обычный запуск с заставкой
-    /// подъёма цепочки (старт туннеля, проверки, затем Claude с флагами прокси).
+    /// Shortcut mode (App --launch instead of the Claude shortcut): Claude is already running — just
+    /// show the window, without a second instance; not running — a normal launch with the chain
+    /// bring-up splash (tunnel start, checks, then Claude with proxy flags).
     /// </summary>
     public async void LaunchFromShortcut()
     {
@@ -518,7 +518,7 @@ public partial class MainWindow : Window
             if (splash is not null)
             {
                 splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Launcher.Log.FilePath));
-                await splash.ClosedAsync; // кнопки/автозакрытие через 60 с — как Wait-SplashClose в прежней схеме
+                await splash.ClosedAsync; // buttons/auto-close after 60 s — like Wait-SplashClose in the legacy scheme
             }
 
             _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
@@ -532,16 +532,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Запуск браузера с изолированным профилем и прокси приложения (порт browser-proxy.ps1):
-    /// та же схема, что у запуска Claude — живой CONNECT-roundtrip, заставка только при
-    /// реальном ожидании подъёма цепочки. Уже запущенный наш экземпляр не дублируется
-    /// (Firefox на том же профиле упирается в блокировку) — пометка в строке результата.
+    /// Launching a browser with an isolated profile and the app's proxy (a port of browser-proxy.ps1):
+    /// the same scheme as the Claude launch — a live CONNECT roundtrip, the splash only on
+    /// a real wait for the chain bring-up. An already running instance of ours is not duplicated
+    /// (Firefox on the same profile hits a lock) — a note in the result line.
     /// </summary>
     private async void OnLaunchBrowser(object sender, RoutedEventArgs e) => await RunBrowserLaunchAsync();
 
     /// <summary>
-    /// Ярлыковый режим (App --launch-browser вместо ярлыка «Claude (браузер)»): браузер
-    /// с нашим профилем уже запущен — просто окно приложения; не запущен — обычный запуск.
+    /// Shortcut mode (App --launch-browser instead of the "Claude (browser)" shortcut): a browser
+    /// with our profile is already running — just the application window; not running — a normal launch.
     /// </summary>
     public async void LaunchBrowserFromShortcut() => await RunBrowserLaunchAsync();
 
@@ -611,8 +611,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Сигнал о найденном на старте обновлении Claude: строка возле кнопок запуска.
-    /// Возвращает локализованный текст — им же App показывает балун трея.
+    /// Signal about a Claude update found at startup: a line next to the launch buttons.
+    /// Returns the localized text — App uses it for the tray balloon as well.
     /// </summary>
     public string SetUpdateNotice(string installedVersion, string? offeredVersion)
     {
@@ -623,8 +623,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Окно обновления Claude Desktop (MSIX через прокси-цепочку): одно на приложение,
-    /// повторный клик активирует открытое.
+    /// Claude Desktop update window (MSIX via the proxy chain): one per application,
+    /// a repeated click activates the open one.
     /// </summary>
     private void OnUpdateClaude(object sender, RoutedEventArgs e)
     {
@@ -640,8 +640,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Окно диагностики (порт proxy-status.ps1), только чтение: сводка состояния и просмотр
-    /// логов; одно на приложение, повторный клик активирует открытое.
+    /// Diagnostics window (a port of proxy-status.ps1), read-only: state summary and log
+    /// viewing; one per application, a repeated click activates the open one.
     /// </summary>
     private void OnDiagnostics(object sender, RoutedEventArgs e)
     {
@@ -656,7 +656,7 @@ public partial class MainWindow : Window
         _diagnosticsWindow.Show();
     }
 
-    /// <summary>Наполняет селектор языка: авто + поддержанные; выбор — по значению конфига.</summary>
+    /// <summary>Fills the language selector: auto + supported; selection — by the config value.</summary>
     private void FillLanguages(string preference)
     {
         _fillingLanguages = true;
@@ -793,10 +793,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _logPath, value);
     }
 
-    /// <summary>Форматируется из ключа+аргументов при каждом чтении — переживает смену языка.</summary>
+    /// <summary>Formatted from key+args on every read — survives a language change.</summary>
     public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
 
-    /// <summary>Готовый текст без локализации (составные результаты операций гардов).</summary>
+    /// <summary>Ready-made text without localization (composite results of guard operations).</summary>
     public void SetCheckText(string text)
     {
         _checkResultKey = null;
@@ -804,7 +804,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CheckResult));
     }
 
-    /// <summary>Сигнал о найденном на старте обновлении Claude; пуст, когда обновления нет.</summary>
+    /// <summary>Signal about a Claude update found at startup; empty when there is no update.</summary>
     public string UpdateNotice => _updateNoticeKey is null ? "" : Loc.F(_updateNoticeKey, _updateNoticeArgs);
 
     public void SetUpdateNotice(string installedVersion, string? offeredVersion)
@@ -855,7 +855,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CanGuard { get; private set; } = true;
 
-    /// <summary>Занятость операций гардов (UAC/запись): кнопки карточки гаснут на время действия.</summary>
+    /// <summary>Busy state of guard operations (UAC/write): the card's buttons gray out during the action.</summary>
     public void SetGuardBusy(bool busy)
     {
         CanGuard = !busy;
@@ -902,7 +902,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public void Refresh()
     {
-        // порт — истина: в detached-режиме слушатель держит воркер, карточка показывает его
+        // the port is the truth: in detached mode the listener is held by the worker, the card shows it
         var proxy = _runtime.ProxyControl;
         var running = proxy.IsRunning;
         StateText = running ? Loc.S("Main.State.Running") : Loc.S("Main.State.Stopped");
