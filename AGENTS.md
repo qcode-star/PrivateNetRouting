@@ -255,6 +255,11 @@ config/
   appsettings.example.json   # user config template with placeholders
 ```
 
+The test project references `PrivateNetRouting.Core` only, plus `Fakes.cs` (the shared fake
+implementations — add new fakes there). The WPF app and the CLI therefore have no automated
+coverage: for changes in them, build and exercise the real window/command, and keep logic in Core
+so it stays testable.
+
 The user config is `%APPDATA%\PrivateNetRouting\appsettings.json` (created on first launch from the
 default values); logs are in `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
 
@@ -273,13 +278,28 @@ dotnet run --project src/PrivateNetRouting.App
 dotnet format --verify-no-changes   # formatting before a commit
 ```
 
+From the repository root, `dotnet build` / `dotnet test` act on all four projects
+(`PrivateNetRouting.slnx`, the XML solution format). A focused run of one module:
+`dotnet test --filter "FullyQualifiedName~Guard"` — test classes are grouped per module
+(`GuardTests`, `UpdaterTests`, `WatchdogTests`, …). `dotnet format` is the source of truth for
+style; run it before committing.
+
 Commits: in small steps, the message in the infinitive ("Add forward proxy core", "Fix splash
 focus"). Branching: `main` is the buildable state; features go in short branches or straight into
 `main` (a personal repository, the main thing is not to break the build).
 
 ## Code conventions
 
-- C# 14 / .NET 10, `net10.0-windows` for the WPF project, `net10.0` for the core and the CLI.
+- C# 14 / .NET 10; every project targets `net10.0-windows` (Core and the CLI need Windows APIs —
+  WMI, iphlpapi), so the whole solution is Windows-only.
+- `Directory.Build.props` sets `Nullable=enable`, `ImplicitUsings=enable` and
+  `TreatWarningsAsErrors=true`: any compiler warning fails `dotnet build`. Fix the warning; do not
+  silence it with `#pragma warning disable` or `NoWarn`. The WPF app is `WinExe`, the CLI's
+  `AssemblyName` is `pnr`, and Core exposes internals to the test project (`InternalsVisibleTo`).
+  Keep `Version`/`Company`/`Authors` as the anonymous placeholders they are (rule #2) — never fill
+  in real author metadata.
+- Core's only external package is `System.Management` (WMI process lookup). Prefer the BCL and
+  `SystemOps` wrappers; adding a dependency needs a reason.
 - Naming and style follow `dotnet format` (`.editorconfig` is in place).
 - Interaction with the system (processes, registry, AppX, WSL, firewall) is only behind interfaces in
   Core; implementations are marked with documenting comments about the required privileges
@@ -298,6 +318,19 @@ focus"). Branching: `main` is the buildable state; features go in short branches
 - The `pnr` CLI, Core strings/exceptions and log file records are English; code comments are English
   too (rule #1: the only non-English content is the UI localization dictionaries and the local
   `.secret.agents.md`).
+
+## Where to look first
+
+- `.secret.agents.md` (repository root, git-ignored, the deliberate exception to rule #1) — the
+  machine-specific facts: real addresses, distro and user names, references to sources. Read it
+  when a task needs real environment values; never copy its contents into a commit or another file.
+- `config/appsettings.example.json` — the authoritative config schema with placeholders. A new
+  setting goes here and into `AppConfig` before any code reads it (rule #3).
+- `README.md` — the human-facing module overview.
+- `.zcodeignore` — the block above the sync marker is rewritten from `.gitignore`; put agent-only
+  rules below the marker line, or they will be lost on the next sync.
+- `.zcode/` is not git-ignored and holds no tracked files; anything written there (e.g. under
+  `plans/`) shows up as untracked in `git status`. Keep scratch files out of commits.
 
 ## Working in the shell (environment quirks, briefly)
 
