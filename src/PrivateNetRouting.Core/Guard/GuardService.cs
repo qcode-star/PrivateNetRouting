@@ -34,7 +34,7 @@ public sealed record GuardSnapshot(
 /// Orchestration of direct-access guards: status is read-only (registry, hosts, NRPT/firewall
 /// via cmdlets, settings.json, WSL), enabling the ban/policy goes through the elevated helper,
 /// settings.json/WSL/system proxy need no elevation. After applying the ban, live checks run
-/// (rule #6 of AGENTS.md: not "it should work", but a check on live traffic).
+/// (rule #7 of AGENTS.md: not "it should work", but a check on live traffic).
 /// </summary>
 public sealed class GuardService(
     AppConfig config,

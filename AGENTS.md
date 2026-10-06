@@ -13,7 +13,15 @@ what the defaults are, what counts as an error — do not silently invent an ans
 desired behavior with the user. One short question before the code is cheaper than reworking it
 after.
 
-## Rule #1: repository anonymity — check every commit
+## Rule #1: repository language — English
+
+Everything in the repository is in English: code, identifiers, comments in any file (C#, XAML,
+csproj, JSON configs), md files, config templates, and commit messages. The only exceptions are the
+UI localization dictionaries (`src/PrivateNetRouting.App/Localization/Strings.<code>.xaml`), each of
+which is in its own language, and the local, non-committed `.secret.agents.md`. No other language may
+leak into the rest of the repository.
+
+## Rule #2: repository anonymity — check every commit
 
 The repository is private and must stay **as anonymous as possible**: it does not contain and must
 never receive my settings, secrets, or anything that links the machine or the author to the
@@ -28,7 +36,7 @@ employer, the corporate network, or its infrastructure. It is forbidden to commi
 - logs and config fragments containing any of the above, and screenshots with them.
 
 Everything environment-specific lives in the application's user config (`%APPDATA%`, not committed,
-see rule #2). The repository holds only templates with placeholders (`config/*.example.json`).
+see rule #3). The repository holds only templates with placeholders (`config/*.example.json`).
 The git identity is set locally in the repository: GitHub login + noreply address; do not touch the
 global one.
 
@@ -46,7 +54,7 @@ sources) live in the local file `.secret.agents.md` in the repository root: it i
 `.gitignore` and must never end up in a commit — this is the deliberate single exception to the ban
 on environment-specific values; everything else is as above.
 
-## Rule #2: secrets and configuration
+## Rule #3: secrets and configuration
 
 - The application reads the user config from `%APPDATA%\<Application>\` (created on first launch
   from the template). The repository example is `config/appsettings.example.json` with placeholders.
@@ -56,7 +64,7 @@ on environment-specific values; everything else is as above.
 - Do not store secrets in the config at all (the scheme has no authentication); if they ever appear —
   only Windows Credential Manager / DPAPI, never a plaintext file.
 
-## Rule #3: the old script scheme — the production setup until parity
+## Rule #4: the old script scheme — the production setup until parity
 
 The working setup is the PowerShell/Python set in `C:\ovpn-script` (launcher, supervisor, ts-fwd
 proxy, sidecar chain boot/stop, ban, NO_PROXY sync, status). Until the application replaces the
@@ -67,9 +75,9 @@ functionality completely:
   or a config switch); replacing a link of the old scheme is a deliberate decision by the owner,
   not a side effect;
 - the details of how the legacy scheme works are in the old project's docs
-  (`%USERPROFILE%\ZCodeProject\docs`); remember rule #1 when carrying knowledge over from there.
+  (`%USERPROFILE%\ZCodeProject\docs`); remember rule #2 when carrying knowledge over from there.
 
-## Rule #4: nothing in autostart without explicit confirmation
+## Rule #5: nothing in autostart without explicit confirmation
 
 Do not register or add anything to autostart on your own initiative (scheduled tasks, services,
 autostart keys, background processes that outlive the session) — even if the feature is ready and
@@ -77,20 +85,20 @@ the benefit is obvious. First show what exactly will be created and where, wait 
 same applies to removing existing autostart entries. This is a legacy of the production machine and
 extends to the application: background modes (tray, watchdog) — only on an explicit user action.
 
-## Rule #5: no drivers and no injection
+## Rule #6: no drivers and no injection
 
 Do not use and do not propose tools with drivers or process injection (Proxifier-like tools, WFP
 interception, DLL injection). All routing is solved by the proxy and the application's policies.
 This is a fundamental limitation of the scheme, not a shortcoming.
 
-## Rule #6: routes, DNS, hosts, firewall — state before, live check after
+## Rule #7: routes, DNS, hosts, firewall — state before, live check after
 
 Before changes to routes/DNS/hosts/NRPT/firewall, look at the current state first; afterwards, verify
 the result on live traffic, not "it should work". Separately remember: the application has layers of
 protection against direct access (managed policy, hosts, NRPT, firewall) — change them only through
 the application's modules, with a transparent status of what was done.
 
-## Rule #7: project md files — current state only
+## Rule #8: project md files — current state only
 
 In all md files of the repository we record only the current actual state: no history of "it was
 like this, then we changed it", no check dates, no session references. When a fact stops being true
@@ -114,7 +122,7 @@ Application modes (the owner's decision):
 
 Ports per the owner's decision: **18081** (daemon HTTP), **18082** (forward proxy, the address for
 the client), **18083** (daemon SOCKS5); the defaults do not conflict with the legacy scheme —
-replacing it only by explicitly editing the user config (rule #3).
+replacing it only by explicitly editing the user config (rule #4).
 Porting proceeds module by module from the production set; every module in the application
 reproduces the semantics of its source (including edge cases), but takes addresses/ports/names from
 the config.
@@ -305,7 +313,7 @@ focus"). Branching: `main` is the buildable state; features go in short branches
   A new language = a dictionary + a code in `AppLanguage.Supported`; a test compares the key and
   placeholder sets against the en dictionary.
 - The `pnr` CLI, Core strings/exceptions and log file records are English; code comments are English
-  too (the only Russian text in the repo is the `Strings.ru.xaml` UI dictionary and the local
+  too (rule #1: the only non-English content is the UI localization dictionaries and the local
   `.secret.agents.md`).
 
 ## Working in the shell (machine legacy, briefly)

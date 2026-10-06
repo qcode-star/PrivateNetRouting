@@ -12,7 +12,7 @@ namespace PrivateNetRouting.Core.Watchdog;
 /// The first poll happens one interval after startup; every timer firing is logged at Debug,
 /// at Info — only a change of the busy reason and the auto-stop itself. The chain stop goes through
 /// the existing orchestrator (killing the daemon raises UAC if needed). It is started only by an explicit
-/// action (CLI/application toggle); it is never registered for autostart (rule #4 of AGENTS.md).
+/// action (CLI/application toggle); it is never registered for autostart (rule #5 of AGENTS.md).
 /// </summary>
 public sealed class WatchdogService(
     WatchdogConfig config,

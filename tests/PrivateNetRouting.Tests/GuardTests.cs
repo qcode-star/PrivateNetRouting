@@ -606,7 +606,7 @@ public class GuardTests : IDisposable
         var result = await service.BanAsync(enable: true, CancellationToken.None);
 
         Assert.Equal(GuardElevatedCommands.BanOn, Assert.Single(elevated.Commands));
-        Assert.Equal(1, healthCalls); // live check after applying (rule #6)
+        Assert.Equal(1, healthCalls); // live check after applying (rule #7)
         Assert.True(result.Live.DnsBlocked);
         Assert.True(result.Live.DirectBlocked);
         Assert.Contains("skipped", result.Live.ProxiedDetail); // the chain does not answer, so skipped

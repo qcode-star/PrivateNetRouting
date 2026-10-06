@@ -54,7 +54,7 @@ public sealed class LauncherConfig
 
 /// <summary>
 /// Sidecar chain parameters (userspace-tailscaled + keeper + node). The defaults are chosen so as
-/// not to conflict with the legacy scheme running in parallel (rule #3 of AGENTS.md):
+/// not to conflict with the legacy scheme running in parallel (rule #4 of AGENTS.md):
 /// own pipe, own ports, own statedir. Replacing the legacy chain is an explicit config edit.
 /// </summary>
 public sealed class ChainConfig
@@ -162,7 +162,7 @@ public static class BrowserKindParser
 
 /// <summary>
 /// The watchdog starts on an explicit user action (a CLI command, an application toggle)
-/// and lives as long as the process that started it — it is not written to autostart (rule #4).
+/// and lives as long as the process that started it — it is not written to autostart (rule #5).
 /// </summary>
 public sealed class WatchdogConfig
 {

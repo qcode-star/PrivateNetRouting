@@ -24,4 +24,4 @@ dotnet run --project src/PrivateNetRouting.App
 Everything environment-specific (endpoint addresses, ports, bypass domain lists, paths, timeouts)
 lives in the application's user config and never reaches git. The repository holds only templates
 with placeholders in `config/*.example.json`. The repository is private and anonymous: no real
-addresses, domains, names, or secrets (rule #1 in AGENTS.md).
+addresses, domains, names, or secrets (rule #2 in AGENTS.md).

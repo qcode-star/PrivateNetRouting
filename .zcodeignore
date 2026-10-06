@@ -34,7 +34,7 @@ packages/
 publish/
 *.pubxml.user
 
-# LOCAL CONFIG AND SECRETS — never commit (rule #1 in AGENTS.md)
+# LOCAL CONFIG AND SECRETS — never commit (rule #2 in AGENTS.md)
 # appsettings.*.local.json
 # *.local.json
 # config/local/

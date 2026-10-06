@@ -5,7 +5,7 @@ namespace PrivateNetRouting.Core.Configuration;
 
 /// <summary>
 /// Loading/saving the user config. The file lives in %APPDATA% and does not go into git;
-/// the repository contains only the template config/appsettings.example.json with placeholders (rules #1-2 of AGENTS.md).
+/// the repository contains only the template config/appsettings.example.json with placeholders (rules #2-3 of AGENTS.md).
 /// </summary>
 public static class AppConfigStore
 {
