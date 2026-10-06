@@ -44,7 +44,7 @@ public class DohClientTests
     private static byte[] Head(int status) =>
         Encoding.ASCII.GetBytes($"HTTP/1.0 {status} X\r\nContent-Type: application/dns-message\r\n\r\n");
 
-    /// <summary>DNS-ответ на вопрос о probe.example: ноль или одна A-запись.</summary>
+    /// <summary>DNS response to the probe.example question: zero or one A record.</summary>
     private static byte[] BuildResponse(string? ip, uint ttl)
     {
         var writer = new MemoryStream();

@@ -8,8 +8,8 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Лончер браузера: bypass-списки (Chromium и Firefox), user.js, командные строки Firefox
-/// и Chromium, порядок «проверка → подъём → запуск», режимы, откат пути exe, «уже запущен».
+/// Browser launcher: bypass lists (Chromium and Firefox), user.js, Firefox and Chromium
+/// command lines, the "check → up → launch" order, modes, exe path fallback, "already running".
 /// </summary>
 public class BrowserLauncherTests : IDisposable
 {
@@ -86,7 +86,7 @@ public class BrowserLauncherTests : IDisposable
         Assert.Equal(
             "localhost, 127.0.0.1, ::1, *.local, corp.example.com, .corp.example.com, team.example.net, .team.example.net, *.ru, *.by",
             list);
-        Assert.DoesNotContain("/", list); // Firefox не понимает CIDR — приватных диапазонов в списке нет
+        Assert.DoesNotContain("/", list); // Firefox does not understand CIDR, so private ranges are absent from the list
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class BrowserLauncherTests : IDisposable
         Assert.Equal(
             ["-profile", config.Browser.Firefox.ProfileDir, "--new-instance", "https://claude.ai"],
             psi.ArgumentList);
-        // user.js перезаписывается при каждом запуске — адрес прокси из конфига приложения
+        // user.js is rewritten on every launch, with the proxy address from the app config
         var userJs = await File.ReadAllTextAsync(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js"));
         Assert.Contains(@"user_pref(""network.proxy.http_port"", 18082);", userJs);
         Assert.Contains("team.example.net", userJs);
@@ -194,7 +194,7 @@ public class BrowserLauncherTests : IDisposable
         Assert.Equal("--no-first-run", psi.ArgumentList[3]);
         Assert.Equal("--no-default-browser-check", psi.ArgumentList[4]);
         Assert.Equal("https://claude.ai", psi.ArgumentList[5]);
-        // у Chromium нет user.js — профиль создаёт сам браузер при первом запуске
+        // Chromium has no user.js; the browser itself creates the profile on first launch
         Assert.False(File.Exists(Path.Combine(config.Browser.Chromium.ProfileDir, "user.js")));
     }
 
@@ -326,7 +326,7 @@ public class BrowserLauncherTests : IDisposable
         Assert.True(launcher.IsOurBrowserRunning());
     }
 
-    // FileLog держит файл открытым на запись — читать с общим доступом ReadWrite
+    // FileLog keeps the file open for writing, so read with ReadWrite sharing
     private string ReadLog()
     {
         using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

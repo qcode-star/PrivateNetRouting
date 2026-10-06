@@ -7,8 +7,8 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Фрагментная докачка: сборка из Range-запросов, возобновление по готовым частям,
-/// ретраи фрагмента, отказ сервера, отмена с сохранением частей.
+/// Fragment download: assembly from Range requests, resume from completed parts,
+/// fragment retries, server refusal, cancellation with parts kept.
 /// </summary>
 public class FragmentDownloaderTests : IDisposable
 {
@@ -53,7 +53,7 @@ public class FragmentDownloaderTests : IDisposable
 
         Assert.Equal(RecordingHandler.Payload, await File.ReadAllBytesAsync(target));
         Assert.False(Directory.Exists(target + ".parts"));
-        // каждый фрагмент запрошен ровно своим диапазоном
+        // each fragment is requested with exactly its own range
         Assert.Equal(10, _handler.Requests.Count(r => r.Method == "GET"));
         Assert.All(_handler.Requests, r => Assert.True(r.From is not null && r.To is not null && r.To - r.From + 1 == 10));
     }
@@ -75,7 +75,7 @@ public class FragmentDownloaderTests : IDisposable
             .Select(r => r.From!.Value)
             .OrderBy(from => from)
             .ToList();
-        Assert.Equal([10L, 20L, 40L, 50L, 60L, 70L, 80L, 90L], ranges); // фрагменты 0 и 3 уже готовы
+        Assert.Equal([10L, 20L, 40L, 50L, 60L, 70L, 80L, 90L], ranges); // fragments 0 and 3 are already complete
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class FragmentDownloaderTests : IDisposable
     [Fact]
     public async Task FailingChunkIsRetriedAndThenSucceeds()
     {
-        _handler.FailFirstAttempts[(20L, 29L)] = 2; // первые две попытки фрагмента — 500
+        _handler.FailFirstAttempts[(20L, 29L)] = 2; // the first two attempts of the fragment return 500
         var target = Path.Combine(_root, "app.msix");
 
         await _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None);
@@ -112,14 +112,14 @@ public class FragmentDownloaderTests : IDisposable
             _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None));
 
         Assert.Contains("incomplete fragments", error.Message);
-        Assert.True(Directory.Exists(target + ".parts")); // докачка сохранена
+        Assert.True(Directory.Exists(target + ".parts")); // the resume data is kept
         Assert.False(File.Exists(target));
     }
 
     [Fact]
     public async Task FullBodyInsteadOfRangeFailsFragment()
     {
-        // сервер игнорирует Range и отдаёт 200 с целым телом — фрагмент не может сойтись по размеру
+        // the server ignores Range and returns 200 with the whole body, so the fragment cannot match in size
         _handler.FullBodyForRanges = true;
         var target = Path.Combine(_root, "app.msix");
 
@@ -130,15 +130,15 @@ public class FragmentDownloaderTests : IDisposable
     [Fact]
     public async Task CancellationKeepsDownloadedParts()
     {
-        _handler.StallFrom = 50; // один фрагмент висит до отмены
+        _handler.StallFrom = 50; // one fragment hangs until cancellation
         var target = Path.Combine(_root, "app.msix");
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, cts.Token));
 
-        Assert.False(File.Exists(target)); // цель не собрана
-        Assert.True(Directory.Exists(target + ".parts")); // части сохранены для докачки
+        Assert.False(File.Exists(target)); // the target is not assembled
+        Assert.True(Directory.Exists(target + ".parts")); // parts are kept for resume
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class FragmentDownloaderTests : IDisposable
             CancellationToken.None);
 
         Assert.Contains(reports, r => r.Total == RecordingHandler.ContentLength);
-        // первый отчёт — до старта (0), последний — полный размер
+        // the first report is before start (0), the last is the full size
         Assert.Equal(0, reports[0].Done);
         Assert.Equal(RecordingHandler.ContentLength, reports[^1].Done);
     }
@@ -179,7 +179,7 @@ public class FragmentDownloaderTests : IDisposable
         }
     }
 
-    /// <summary>Фейковый сервер: отдаёт срезы пейлоада по Range, умеет падать и зависать.</summary>
+    /// <summary>Fake server: serves payload slices by Range, can fail and hang.</summary>
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public const int ContentLength = 100;
@@ -189,13 +189,13 @@ public class FragmentDownloaderTests : IDisposable
 
         public List<(string Method, long? From, long? To)> Requests { get; } = [];
 
-        /// <summary>Сколько первых попыток диапазона отклонить (ключ — from/to).</summary>
+        /// <summary>How many first attempts of a range to reject (key is from/to).</summary>
         public Dictionary<(long From, long To), int> FailFirstAttempts { get; } = [];
 
-        /// <summary>Отвечать 200 с целым телом на Range-запросы (сервер игнорирует Range).</summary>
+        /// <summary>Answer 200 with the whole body to Range requests (server ignores Range).</summary>
         public bool FullBodyForRanges { get; set; }
 
-        /// <summary>Диапазон, начинающийся с этого смещения, висит до отмены.</summary>
+        /// <summary>The range starting at this offset hangs until cancellation.</summary>
         public long? StallFrom { get; set; }
 
         private readonly Dictionary<(long From, long To), int> _attempts = [];
@@ -236,7 +236,7 @@ public class FragmentDownloaderTests : IDisposable
 
             if (stall)
             {
-                await Task.Delay(Timeout.Infinite, ct); // имитация зависшего фрагмента — до отмены
+                await Task.Delay(Timeout.Infinite, ct); // simulate a hung fragment, until cancellation
             }
 
             return response;

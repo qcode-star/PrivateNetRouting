@@ -8,8 +8,8 @@ using PrivateNetRouting.Core.Watchdog;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Сторож автостопа на фейках: порядок «WSL-хост → цепочка», пропуск WSL без дистрибутива,
-/// ожидание интервала до первой проверки, парсер вывода остановщика и семантика пробы занятости.
+/// Idle-stop watchdog on fakes: the "WSL host → chain" order, skipping WSL without a distro,
+/// waiting for the interval before the first check, the stopper output parser and usage-probe semantics.
 /// </summary>
 public class WatchdogTests : IDisposable
 {
@@ -76,7 +76,7 @@ public class WatchdogTests : IDisposable
 
         await Assert.ThrowsAsync<ChainException>(() => watchdog.RunAsync(null, CancellationToken.None));
 
-        Assert.Equal(["wsl.stop", "chain.stop"], events); // WSL-хост погашен до попытки останова цепочки
+        Assert.Equal(["wsl.stop", "chain.stop"], events); // the WSL host is shut down before the attempt to stop the chain
     }
 
     [Fact]
@@ -89,18 +89,18 @@ public class WatchdogTests : IDisposable
 
         Assert.Equal(WslHostState.None, result.State);
         Assert.Contains("distro-not-running", result.Detail);
-        Assert.Single(wsl.Calls); // bash не запускался — дистрибутив не поднимается ради проверки
+        Assert.Single(wsl.Calls); // bash was not started; the distro is not brought up just for the check
     }
 
     [Fact]
     public async Task DistroListingNulsAreStripped()
     {
-        var wsl = new FakeWsl([]) { ListResponse = "deb\0ian\r\n" }; // UTF-16LE-подобный мусор
+        var wsl = new FakeWsl([]) { ListResponse = "deb\0ian\r\n" }; // UTF-16LE-like junk
         var stopper = new WslClaudeHostStopper("debian", wsl);
 
         await stopper.StopAsync(CancellationToken.None);
 
-        Assert.Equal(2, wsl.Calls.Count); // листинг + bash-остановка
+        Assert.Equal(2, wsl.Calls.Count); // listing + bash stop
     }
 
     [Theory]
@@ -120,8 +120,8 @@ public class WatchdogTests : IDisposable
         Assert.Contains("no STATE", result.Detail);
     }
 
-    /// <summary>Скрипт остановки переносит семантику claude-wsl-stop.ps1: опознание демона/сессий,
-    /// RPC-остановка своим бинарником, эскалация SIGTERM → SIGKILL с ожиданием.</summary>
+    /// <summary>The stop script ports claude-wsl-stop.ps1 semantics: identifying the daemon/sessions,
+    /// RPC shutdown with its own binary, SIGTERM → SIGKILL escalation with a wait.</summary>
     [Fact]
     public void StopScriptPortsSourceSemantics()
     {
@@ -130,8 +130,8 @@ public class WatchdogTests : IDisposable
         Assert.Contains("--stop --socket", WslClaudeHostStopper.StopScript);
         Assert.Contains("kill -TERM", WslClaudeHostStopper.StopScript);
         Assert.Contains("kill -KILL", WslClaudeHostStopper.StopScript);
-        Assert.Contains("wait_empty 15", WslClaudeHostStopper.StopScript); // ожидание после RPC
-        Assert.Contains("wait_empty 10", WslClaudeHostStopper.StopScript); // ожидание после SIGTERM
+        Assert.Contains("wait_empty 15", WslClaudeHostStopper.StopScript); // wait after RPC
+        Assert.Contains("wait_empty 10", WslClaudeHostStopper.StopScript); // wait after SIGTERM
         Assert.Contains("STATE=", WslClaudeHostStopper.StopScript);
     }
 
@@ -154,7 +154,7 @@ public class WatchdogTests : IDisposable
 
         probe = new ClaudeUsageProbe(new FakeFinder(0), new FakeCounter(0), 18082, marker);
         Assert.StartsWith("proxy activity", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
-        Assert.Null(probe.GetInUseReason(TimeSpan.FromSeconds(10))); // маркер старее окна — простой
+        Assert.Null(probe.GetInUseReason(TimeSpan.FromSeconds(10))); // the marker is older than the window, so idle
     }
 
     [Fact]

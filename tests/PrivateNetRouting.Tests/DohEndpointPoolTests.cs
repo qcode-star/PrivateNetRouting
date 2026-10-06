@@ -46,7 +46,7 @@ public class DohEndpointPoolTests : IDisposable
         await UntilAsync(() => pool.SnapshotAlive() is { Count: > 0 } alive && alive[^1].Equals(b));
 
         var alive = pool.SnapshotAlive();
-        Assert.Equal(b, alive[^1]); // мёртвый уходит в конец
+        Assert.Equal(b, alive[^1]); // the dead one moves to the end
         Assert.Contains(a, alive);
         Assert.Contains(c, alive);
     }
@@ -60,10 +60,10 @@ public class DohEndpointPoolTests : IDisposable
         using var pool = CreatePool([a, b], (_, _) => Task.FromResult(true), time);
 
         pool.MarkDead(a);
-        Assert.Equal([b], pool.SnapshotAlive()); // остывающий исключён
+        Assert.Equal([b], pool.SnapshotAlive()); // the cooling one is excluded
 
         time.Advance(TimeSpan.FromMinutes(6));
-        Assert.Equal([a, b], pool.SnapshotAlive()); // кулдаун истёк
+        Assert.Equal([a, b], pool.SnapshotAlive()); // cooldown has expired
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class DohEndpointPoolTests : IDisposable
         }, time, source);
 
         await pool.RefreshAsync(CancellationToken.None);
-        // фоновое обновление из конструктора гоняется с явным за общий gate — ждём результат
+        // the background refresh from the constructor races the explicit one for the shared gate, so wait for the result
         await UntilAsync(() => probed.Count >= 2);
 
         Assert.Contains(seed, probed);
@@ -120,7 +120,7 @@ public class DohEndpointPoolTests : IDisposable
     private sealed class ThrowingSource : IDohEndpointSource
     {
         public Task<IReadOnlyList<DohEndpoint>> GetEndpointsAsync(CancellationToken ct) =>
-            throw new IOException("netmap недоступен");
+            throw new IOException("netmap unavailable");
     }
 
     public void Dispose()

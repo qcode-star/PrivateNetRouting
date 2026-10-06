@@ -4,7 +4,7 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Tests;
 
-/// <summary>Оркестрация цепочки на фейках: порядок, идемпотентность, отказы звеньев.</summary>
+/// <summary>Chain orchestration on fakes: order, idempotence, link failures.</summary>
 public class ChainSupervisorTests : IDisposable
 {
     private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-chain-{Guid.NewGuid():N}.log");
@@ -41,7 +41,7 @@ public class ChainSupervisorTests : IDisposable
 
         await supervisor.EnsureRunningAsync(null, CancellationToken.None);
 
-        Assert.Empty(_calls); // ни одного действия — всё пропущено
+        Assert.Empty(_calls); // no action at all, everything is skipped
         var state = await supervisor.GetStateAsync(CancellationToken.None);
         Assert.True(state.IsFullyUp);
     }
@@ -57,7 +57,7 @@ public class ChainSupervisorTests : IDisposable
         Assert.Equal(
             ["daemon.ensure", "keeper.ensure", "cli.up", "proxy.start"],
             _calls);
-        Assert.Equal("Running", cli.BackendState); // после up узел обязан стать Running
+        Assert.Equal("Running", cli.BackendState); // after up the node must become Running
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class ChainSupervisorTests : IDisposable
     {
         var daemon = new FakeDaemon(_calls)
         {
-            EnsureThrows = new IOException("UAC отклонён"),
+            EnsureThrows = new IOException("UAC declined"),
         };
         var supervisor = Create(daemon: daemon);
 
@@ -78,7 +78,7 @@ public class ChainSupervisorTests : IDisposable
     [Fact]
     public async Task KeeperCrashFailsBeforeUp()
     {
-        var keeper = new FakeKeeper(_calls) { EnsureThrows = new IOException("вылетел сразу") };
+        var keeper = new FakeKeeper(_calls) { EnsureThrows = new IOException("crashed immediately") };
         var supervisor = Create(keeper: keeper);
 
         await Assert.ThrowsAsync<ChainException>(() =>

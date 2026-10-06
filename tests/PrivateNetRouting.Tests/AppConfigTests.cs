@@ -60,7 +60,7 @@ public class AppConfigTests : IDisposable
     {
         File.WriteAllText(_path, """
             {
-              // пользовательский конфиг
+              // user config
               "forwardProxy": { "enabled": false, "socks5Upstream": "127.0.0.1:11055", }
             }
             """);
@@ -139,7 +139,7 @@ public class AppConfigTests : IDisposable
         AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
 
         Assert.Contains("\"language\": \"ru\"", File.ReadAllText(_path));
-        Assert.Contains("%TEMP%", File.ReadAllText(_path)); // %VAR% хранится нераскрытым
+        Assert.Contains("%TEMP%", File.ReadAllText(_path)); // %VAR% is stored unexpanded
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.Equal("ru", loaded.Ui.Language);
         Assert.Equal(Path.Combine(Path.GetTempPath(), "marker-file"), loaded.ForwardProxy.ActivityMarkerPath);

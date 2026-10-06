@@ -5,9 +5,9 @@ using PrivateNetRouting.Core.Configuration;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Словари локализации держат одинаковый с английским базовым набор ключей и
-/// плейсхолдеров — иначе смена языка оставит в UI дырки ([ключ] или кривой формат).
-/// Заодно список AppLanguage.Supported сверяется с файлами словарей.
+/// Localization dictionaries keep the same set of keys and placeholders as the English
+/// baseline, otherwise a language switch leaves holes in the UI ([key] or a broken format).
+/// The AppLanguage.Supported list is also checked against the dictionary files.
 /// </summary>
 public class LocalizationDictionariesTests
 {

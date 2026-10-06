@@ -33,10 +33,10 @@ public class ConnectRequestParserTests
 
     [Theory]
     [InlineData("GET http://example.com/ HTTP/1.1")]
-    [InlineData("CONNECT example.com:443")]              // нет версии протокола
-    [InlineData("CONNECT example.com:0 HTTP/1.1")]       // порт вне диапазона
+    [InlineData("CONNECT example.com:443")]              // no protocol version
+    [InlineData("CONNECT example.com:0 HTTP/1.1")]       // port out of range
     [InlineData("CONNECT example.com:notaport HTTP/1.1")]
-    [InlineData("CONNECT :443 HTTP/1.1")]                // пустой хост
+    [InlineData("CONNECT :443 HTTP/1.1")]                // empty host
     public void Rejects(string firstLine)
     {
         var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out _, out var error);

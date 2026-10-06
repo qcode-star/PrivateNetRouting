@@ -10,7 +10,7 @@ using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Tests;
 
-// ----- фейки системных частей гарда -----
+// ----- guard system-part fakes -----
 
 internal sealed class FakeEgressPolicyStore : IEgressPolicyStore
 {
@@ -96,17 +96,17 @@ internal sealed class FakeElevatedRunner(bool ok = true, string detail = "done")
     }
 }
 
-/// <summary>wsl.exe по аргументам: списки дистрибутивов и запрограммированные ответы на bash -s.</summary>
+/// <summary>wsl.exe by arguments: distro lists and canned answers to bash -s.</summary>
 internal sealed class FakeWslRunner : IWslProcessRunner
 {
     public List<string> Running { get; set; } = [];
 
     public List<string> Installed { get; set; } = [];
 
-    /// <summary>Ответ root-захода (чтение состояния) по имени дистрибутива.</summary>
+    /// <summary>Answer of the root pass (state read) by distro name.</summary>
     public Func<string, string> ProbeOutput { get; set; } = _ => "SCRIPT=missing\nSETTINGS=missing\n";
 
-    /// <summary>stdin скриптов, переданных в дистрибутив: (distro, user, script).</summary>
+    /// <summary>stdin of scripts passed to the distro: (distro, user, script).</summary>
     public List<(string Distro, string? User, string Script)> Scripts { get; } = [];
 
     public Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct)
@@ -122,8 +122,8 @@ internal sealed class FakeWslRunner : IWslProcessRunner
         var user = arguments[IndexOf(arguments, "-u") + 1];
         if (standardInput is not null)
         {
-            // читающий probe (echo SCRIPT=…) отвечает запрограммированным выводом;
-            // пишущие скрипты (settings/стартовый) — только запоминаются
+            // the reading probe (echo SCRIPT=…) answers with the canned output;
+            // the writing scripts (settings/startup) are only recorded
             if (standardInput.Contains("echo SCRIPT="))
             {
                 return Task.FromResult(ProbeOutput(distro));
@@ -156,7 +156,7 @@ public class GuardTests : IDisposable
 
     private readonly List<FileLog> _logs = [];
 
-    // ----- hosts-блок -----
+    // ----- hosts block -----
 
     [Fact]
     public void HostsBlockAppliesAndReads()
@@ -173,8 +173,8 @@ public class GuardTests : IDisposable
         Assert.True(state.Current);
 
         var text = File.ReadAllText(path);
-        Assert.Contains("10.0.0.1 corp.internal", text); // чужие строки целы
-        Assert.Contains("\r\n\r\n# >>> ban\r\n# comment\r\n0.0.0.0 claude.ai\r\n0.0.0.0 openai.com\r\n# <<< ban\r\n", text); // хвостовые пустые срезаны, блок в конце
+        Assert.Contains("10.0.0.1 corp.internal", text); // foreign lines untouched
+        Assert.Contains("\r\n\r\n# >>> ban\r\n# comment\r\n0.0.0.0 claude.ai\r\n0.0.0.0 openai.com\r\n# <<< ban\r\n", text); // trailing blank lines are trimmed, the block is at the end
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public class GuardTests : IDisposable
         var domains = new List<string> { "claude.ai" };
         HostsFileBlock.Apply(path, "# >>> b", "# <<< b", "# c", domains);
 
-        // повторное применение уже актуального блока не трогает файл (readonly не мешает)
+        // reapplying an already current block does not touch the file (readonly does not interfere)
         var attr = File.GetAttributes(path);
         File.SetAttributes(path, attr | FileAttributes.ReadOnly);
         try
@@ -201,7 +201,7 @@ public class GuardTests : IDisposable
 
         HostsFileBlock.Remove(path, "# >>> b", "# <<< b");
 
-        // блока больше нет — повторное снятие тоже no-op (readonly не мешает)
+        // the block is gone, so removal again is a no-op too (readonly does not interfere)
         File.SetAttributes(path, attr | FileAttributes.ReadOnly);
         try
         {
@@ -222,7 +222,7 @@ public class GuardTests : IDisposable
         File.WriteAllText(path, "127.0.0.1 localhost\r\n");
         HostsFileBlock.Apply(path, "# >>> b", "# <<< b", "# c", ["claude.ai", "old.example"]);
 
-        // список изменился — блок пересобирается
+        // the list changed, so the block is rebuilt
         HostsFileBlock.Apply(path, "# >>> b", "# <<< b", "# c", ["claude.ai", "new.example"]);
         var state = HostsFileBlock.Read(path, "# >>> b", "# <<< b", "# c", ["claude.ai", "new.example"]);
         Assert.True(state.Current);
@@ -233,7 +233,7 @@ public class GuardTests : IDisposable
         Assert.False(HostsFileBlock.Read(path, "# >>> b", "# <<< b", "# c", []).Present);
     }
 
-    // ----- env-значения -----
+    // ----- env values -----
 
     [Fact]
     public void NoProxyPartsBuildBothFormsPerZone()
@@ -310,7 +310,7 @@ public class GuardTests : IDisposable
         var config = SettingsConfig();
         var guard = new ClaudeSettingsGuard(config);
 
-        Assert.True(guard.Read().FileMissing); // файла нет
+        Assert.True(guard.Read().FileMissing); // the file is missing
         guard.Sync();
         Assert.Equal(GuardState.On, guard.Read().State);
 
@@ -320,7 +320,7 @@ public class GuardTests : IDisposable
         Assert.Equal("http://other:2", mismatch.CurrentProxy);
     }
 
-    // ----- PowerShell-скрипты NRPT/firewall -----
+    // ----- NRPT/firewall PowerShell scripts -----
 
     [Fact]
     public void NrptScriptCoversBothFormsAndEscapesQuotes()
@@ -331,7 +331,7 @@ public class GuardTests : IDisposable
         var ops = new PowerShellBanSystemOps(config.Guard, new StubPowerShell());
 
         var script = ops.BuildNrptScript(apply: true);
-        Assert.Contains("Remove-DnsClientNrptRule", script); // идемпотентность: сначала снять
+        Assert.Contains("Remove-DnsClientNrptRule", script); // idempotence: remove first
         Assert.Contains("-Namespace @('claude.ai','.claude.ai','openai.com','.openai.com')", script);
         Assert.Contains("-NameServers @('127.0.0.1')", script);
         Assert.Contains("-DisplayName 'ai''direct'", script);
@@ -371,7 +371,7 @@ public class GuardTests : IDisposable
         public Task<(int Code, string Output)> RunScriptAsync(string script, CancellationToken ct) => Task.FromResult((0, ""));
     }
 
-    // ----- WSL-слой -----
+    // ----- WSL layer -----
 
     private AppConfig WslConfig(string mode, params (string Name, string User, bool Sync)[] distros)
     {
@@ -396,10 +396,10 @@ public class GuardTests : IDisposable
 
         var runner = new FakeWslRunner { Installed = ["d1", "d2"], Running = ["d1"] };
         var on = new WslConfigGuard(WslConfig("on", ("d9", "u9", true)), runner);
-        Assert.True((await on.EvaluateLayerAsync(CancellationToken.None)).Enabled); // on не смотрит на установку
+        Assert.True((await on.EvaluateLayerAsync(CancellationToken.None)).Enabled); // on does not look at installation
 
         var auto = new WslConfigGuard(WslConfig("auto", ("d9", "u9", true)), runner);
-        Assert.False((await auto.EvaluateLayerAsync(CancellationToken.None)).Enabled); // d9 не установлен
+        Assert.False((await auto.EvaluateLayerAsync(CancellationToken.None)).Enabled); // d9 is not installed
 
         var autoMatch = new WslConfigGuard(WslConfig("auto", ("d1", "u1", true)), runner);
         Assert.True((await autoMatch.EvaluateLayerAsync(CancellationToken.None)).Enabled);
@@ -411,7 +411,7 @@ public class GuardTests : IDisposable
         var runner = new FakeWslRunner
         {
             Installed = ["d1", "d2"],
-            Running = ["d1"], // d2 не запущен — ради статуса не поднимается
+            Running = ["d1"], // d2 is not running; not started just for status
             ProbeOutput = distro => distro == "d1"
                 ? $"SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nSETTINGS=present\n{{\"env\":{{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}}}\nSETTINGS=END\n"
                 : "",
@@ -422,7 +422,7 @@ public class GuardTests : IDisposable
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
         var status = await guard.ReadAsync(CancellationToken.None);
-        Assert.Equal(GuardState.Unknown, status.State); // d2 не запущен — неизвестно
+        Assert.Equal(GuardState.Unknown, status.State); // d2 is not running, so unknown
         Assert.Equal(2, status.Distros.Count);
         Assert.Equal(GuardState.On, status.Distros[0].State);
         Assert.Equal(18082, status.Distros[0].ScriptPort);
@@ -439,7 +439,7 @@ public class GuardTests : IDisposable
             Installed = ["d1", "d3"],
             Running = ["d1", "d3"],
             ProbeOutput = distro => distro == "d1"
-                ? "SCRIPT=present\nPORT=8082\nSETTINGS=missing\n" // порт прежней схемы
+                ? "SCRIPT=present\nPORT=8082\nSETTINGS=missing\n" // port of the old scheme
                 : "SCRIPT=missing\nSETTINGS=missing\n",
         };
         var guard = new WslConfigGuard(
@@ -451,7 +451,7 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.Partial, status.State);
         Assert.Equal(GuardState.Partial, status.Distros[0].State);
         Assert.Contains("script PORT=8082", status.Distros[0].Reason);
-        Assert.Equal(GuardState.Off, status.Distros[1].State); // скрипта нет
+        Assert.Equal(GuardState.Off, status.Distros[1].State); // no script
     }
 
     [Fact]
@@ -460,7 +460,7 @@ public class GuardTests : IDisposable
         var runner = new FakeWslRunner
         {
             Installed = ["d1", "d2", "d3"],
-            Running = ["d1", "d3"], // d2 не запущен — пропуск без подъёма
+            Running = ["d1", "d3"], // d2 is not running, skip without bringing it up
             ProbeOutput = _ => "SCRIPT=present\nPORT=8082\nSETTINGS=present\n{}\nSETTINGS=END\n",
         };
         var guard = new WslConfigGuard(
@@ -471,7 +471,7 @@ public class GuardTests : IDisposable
         var result = await guard.SyncAsync(CancellationToken.None);
 
         Assert.False(result.LayerDisabled);
-        Assert.Equal(2, result.Distros.Count); // sync=false (d3) не синхронизируется
+        Assert.Equal(2, result.Distros.Count); // sync=false (d3) is not synced
         var d1 = Assert.Single(result.Distros, d => d.Distro == "d1");
         var d2 = Assert.Single(result.Distros, d => d.Distro == "d2");
         Assert.False(d1.Skipped);
@@ -479,20 +479,20 @@ public class GuardTests : IDisposable
         Assert.True(d2.Skipped);
         Assert.Contains("not running", d2.Reason);
 
-        // d1: два захода — settings от пользователя и скрипт от root
+        // d1: two passes, settings as the user and the script as root
         var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1");
         Assert.Contains("base64 -d > ~/.claude/settings.json", settings.Script);
         var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root");
         Assert.Contains("/etc/wsl.d/startup/10-claude-proxy.sh", root.Script);
         Assert.DoesNotContain("chmod 755", settings.Script);
 
-        // содержимое стартового скрипта: порт приложения и пользователь дистрибутива
+        // startup script contents: the app port and the distro user
         var payload = ExtractBase64Payload(root.Script, "/etc/wsl.d/startup/10-claude-proxy.sh");
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
         Assert.Contains("USER_NAME='u1'", script);
         Assert.Contains("PORT=18082", script);
-        Assert.Contains("env['HTTPS_PROXY'] = proxy", script); // python-часть прежней схемы
-        Assert.DoesNotContain("env['NO_PROXY']", script); // NO_PROXY стартовый скрипт не трогает (упоминается только в комментарии)
+        Assert.Contains("env['HTTPS_PROXY'] = proxy", script); // the python part of the old scheme
+        Assert.DoesNotContain("env['NO_PROXY']", script); // the startup script does not touch NO_PROXY (mentioned only in a comment)
     }
 
     [Fact]
@@ -516,7 +516,7 @@ public class GuardTests : IDisposable
         return line[(quote + 1)..line.IndexOf('\'', quote + 1)];
     }
 
-    // ----- оркестрация GuardService -----
+    // ----- GuardService orchestration -----
 
     private GuardService MakeService(
         AppConfig config,
@@ -580,7 +580,7 @@ public class GuardTests : IDisposable
         var service = MakeService(
             config,
             new FakeEgressPolicyStore { Values = new EgressPolicyValues(true, "http://10.0.0.9:1", 0) },
-            new FakeBanSystemOps { Layers = new BanLayersState(1, [".claude.ai"], 0, []) }, // firewall нет
+            new FakeBanSystemOps { Layers = new BanLayersState(1, [".claude.ai"], 0, []) }, // no firewall
             new FakeSystemProxyStore(),
             new FakeElevatedRunner(),
             out _);
@@ -597,7 +597,7 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-x");
-        config.Guard.BanProbeName = "probe.invalid"; // не резолвится — проверки детерминированы
+        config.Guard.BanProbeName = "probe.invalid"; // does not resolve, so the checks are deterministic
         var elevated = new FakeElevatedRunner();
         var healthCalls = 0;
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), elevated,
@@ -606,10 +606,10 @@ public class GuardTests : IDisposable
         var result = await service.BanAsync(enable: true, CancellationToken.None);
 
         Assert.Equal(GuardElevatedCommands.BanOn, Assert.Single(elevated.Commands));
-        Assert.Equal(1, healthCalls); // живая проверка после применения (правило №6)
+        Assert.Equal(1, healthCalls); // live check after applying (rule #6)
         Assert.True(result.Live.DnsBlocked);
         Assert.True(result.Live.DirectBlocked);
-        Assert.Contains("skipped", result.Live.ProxiedDetail); // цепочка не отвечает — пропущено
+        Assert.Contains("skipped", result.Live.ProxiedDetail); // the chain does not answer, so skipped
     }
 
     [Fact]
@@ -637,7 +637,7 @@ public class GuardTests : IDisposable
         Assert.True(sysProxy.Disabled);
     }
 
-    // ----- элевейтнутый helper: порядок слоёв бана -----
+    // ----- elevated helper: order of ban layers -----
 
     [Fact]
     public void ElevatedBanAppliesHostsThenNrptThenFirewallThenFlush()
@@ -651,7 +651,7 @@ public class GuardTests : IDisposable
 
         var detail = GuardElevatedCommands.ApplyBanLayers(config, log, ops, enable: true);
 
-        Assert.Equal(["nrpt-on", "fw-on", "flush"], ops.Calls); // hosts применяется напрямую файлом
+        Assert.Equal(["nrpt-on", "fw-on", "flush"], ops.Calls); // hosts is applied directly via the file
         var hosts = HostsFileBlock.Read(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.Guard.BanHosts);
         Assert.True(hosts.Present);
         Assert.Equal(config.Guard.BanHosts.Count, hosts.EntryCount);

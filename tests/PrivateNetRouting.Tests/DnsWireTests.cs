@@ -15,9 +15,9 @@ public class DnsWireTests
         Assert.Equal(0xABCD, U16(0));
         Assert.Equal(0x0100, U16(2));  // RD
         Assert.Equal(1, U16(4));       // QDCOUNT
-        // вопрос: 13 символов имён + 3 байта длин меток + корневой ноль
+        // question: 13 name characters + 3 label-length bytes + root zero
         Assert.Equal(13 + 3 + 1, query.Length - 12 - 4);
-        // вопрос заканчивается QTYPE=A, QCLASS=IN
+        // question ends with QTYPE=A, QCLASS=IN
         Assert.Equal(DnsWire.QtypeA, U16(query.Length - 4));
         Assert.Equal(1, U16(query.Length - 2));
     }
@@ -45,7 +45,7 @@ public class DnsWireTests
     [Fact]
     public void SkipsCnameAnswers()
     {
-        // сначала CNAME, затем A: парсер должен пропустить CNAME и собрать A
+        // CNAME first, then A: the parser must skip CNAME and collect A
         var writer = new MemoryStream();
         WriteHeader(writer, qd: 1, an: 2);
         WriteQuestion(writer, "www.example.com");
@@ -63,7 +63,7 @@ public class DnsWireTests
     [Fact]
     public void HandlesNameCompression()
     {
-        // имя ответа — указатель на вопрос (0xC00C)
+        // the answer name is a pointer to the question (0xC00C)
         var writer = new MemoryStream();
         WriteHeader(writer, qd: 1, an: 1);
         WriteQuestion(writer, "example.com");

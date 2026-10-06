@@ -6,7 +6,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
 
-// ----- фейки супервизора прокси -----
+// ----- proxy supervisor fakes -----
 
 internal sealed class FakePortProbe : IPortProbe
 {
@@ -46,7 +46,7 @@ internal sealed class FakeProxyInstance : IForwardProxyInstance
     }
 }
 
-/// <summary>Поиск по PID: запрограммированные командные строки (Find/FindByNameContains пусты).</summary>
+/// <summary>Lookup by PID: canned command lines (Find/FindByNameContains are empty).</summary>
 internal sealed class FakeFinderById : IProcessFinder
 {
     public Dictionary<int, string> CommandLineById { get; } = [];
@@ -133,7 +133,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
     [Fact]
     public async Task Start_SkipsBind_WhenPortAlreadyHeld()
     {
-        // порт занят (GUI в трее, detached-воркер или чужой процесс) — второй экземпляр не биндится
+        // port is busy (GUI in the tray, detached worker or a foreign process), so the second instance does not bind
         var inner = new FakeProxyInstance();
         var ports = new FakePortProbe { Listening = true };
         var tcp = new FakeTcpTable();
@@ -161,7 +161,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             spawn: (commandLine, stdoutPath, stderrPath) =>
             {
                 spawns.Add((commandLine, stdoutPath, stderrPath));
-                ports.Listening = true; // воркер «поднялся»
+                ports.Listening = true; // the worker "came up"
                 return 4242;
             },
             exePath: @"C:\app with space\pnr.exe");
@@ -231,7 +231,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
     {
         var ports = new FakePortProbe { Listening = true };
         var tcp = new FakeTcpTable();
-        // оба слушателя (localhost + шлюз WSL) за одним владельцем
+        // both listeners (localhost + WSL gateway) belong to one owner
         tcp.Listeners[18082] = [Entry(42, "pnr"), Entry(42, "pnr", WslGateway)];
         var processes = new FakeFinderById { CommandLineById = { { 42, @"""C:\app\pnr.exe"" --proxy-worker" } } };
         var kills = new List<int>();
@@ -255,7 +255,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
     [Fact]
     public async Task Stop_LeavesForeignOwner_Alone()
     {
-        // порт держит GUI (без маркера) — останов цепочки его не убивает, только предупреждение в лог
+        // the GUI holds the port (no marker): chain shutdown does not kill it, only logs a warning
         var ports = new FakePortProbe { Listening = true };
         var tcp = new FakeTcpTable();
         tcp.Listeners[18082] = [Entry(7, "PrivateNetRouting.App")];
@@ -307,9 +307,9 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             ports,
             tcp,
             processes,
-            kill: _ => { }); // порт не освобождается
+            kill: _ => { }); // the port is not released
 
-        await supervisor.StopAsync(); // не бросает, только предупреждает в лог
+        await supervisor.StopAsync(); // does not throw, only warns to the log
 
         Assert.True(ports.Listening);
     }

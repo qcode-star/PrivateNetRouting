@@ -8,9 +8,9 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Оркестрация обновления: сравнение версий по префиксу, «нечего ставить» не трогает
-/// цепочку, ручной URL, Publisher-сверка, закрытие Claude, флаги, место на диске,
-/// разбор адресов из журнала и JSON Get-AppxPackage.
+/// Update orchestration: version comparison by prefix, "nothing to install" does not touch
+/// the chain, manual URL, Publisher check, closing Claude, flags, disk space,
+/// parsing URLs from the journal and Get-AppxPackage JSON.
 /// </summary>
 public class UpdaterTests : IDisposable
 {
@@ -59,7 +59,7 @@ public class UpdaterTests : IDisposable
             _log,
             freeSpace);
 
-    // --- Проверка версий ---
+    // --- Version check ---
 
     [Fact]
     public async Task CheckComparesVersionByPrefix()
@@ -70,7 +70,7 @@ public class UpdaterTests : IDisposable
 
         Assert.NotNull(check.Installed);
         Assert.Equal("2.26455.1", check.OfferedVersion);
-        Assert.False(check.UpToDate); // 2.26454.2.0 не начинается с 2.26455.1
+        Assert.False(check.UpToDate); // 2.26454.2.0 does not start with 2.26455.1
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class UpdaterTests : IDisposable
         Assert.Contains("2.26460.0", check.PackageUrl);
     }
 
-    // --- Полный цикл (CLI) ---
+    // --- Full cycle (CLI) ---
 
     [Fact]
     public async Task UpToDateRunTouchesNeitherChainNorDownloader()
@@ -140,7 +140,7 @@ public class UpdaterTests : IDisposable
     [Fact]
     public async Task DeadChainIsRaisedOnceAndCheckedAfter()
     {
-        // цепочка считается живой, как только оркестратор её поднял (EnsureRunningAsync)
+        // the chain is considered alive as soon as the orchestrator has raised it (EnsureRunningAsync)
         var updater = Create(health: () => _chain.EnsureCalls > 0);
 
         var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
@@ -186,7 +186,7 @@ public class UpdaterTests : IDisposable
         var file = Assert.Single(_appx.AddedFiles);
         Assert.Equal(result.PackageFile, file);
         Assert.StartsWith(_config.Updater.CacheDir, file);
-        Assert.False(File.Exists(file)); // пакет удалён из кэша после установки
+        Assert.False(File.Exists(file)); // the package is removed from the cache after install
     }
 
     [Fact]
@@ -225,14 +225,14 @@ public class UpdaterTests : IDisposable
         Assert.Empty(_appx.AddedFiles);
     }
 
-    // --- Установка и закрытие Claude ---
+    // --- Install and closing Claude ---
 
     [Fact]
     public async Task InstallClosesClaudeWhenItIsRunning()
     {
         var processes = new[] { new FakeClaudeProcess(), new FakeClaudeProcess() };
         _claude.Processes = processes;
-        _claude.CloseAfterRequest = true; // после CloseMainWindow процессы исчезают
+        _claude.CloseAfterRequest = true; // the processes disappear after CloseMainWindow
         var updater = Create();
         var package = await WritePackageAsync(MatchingPublisher);
 
@@ -247,7 +247,7 @@ public class UpdaterTests : IDisposable
     {
         var processes = new[] { new FakeClaudeProcess() };
         _claude.Processes = processes;
-        _claude.CloseAfterRequest = false; // сам не закроется
+        _claude.CloseAfterRequest = false; // it will not close on its own
         var updater = Create();
         var package = await WritePackageAsync(MatchingPublisher);
 
@@ -278,7 +278,7 @@ public class UpdaterTests : IDisposable
 
         await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
 
-        Assert.Equal(1, _claude.FindCalls); // один опрос «запущен ли» — и дальше ничего
+        Assert.Equal(1, _claude.FindCalls); // a single "is it running" poll, and nothing after
         Assert.Empty(_claude.Processes);
     }
 
@@ -292,11 +292,11 @@ public class UpdaterTests : IDisposable
         var error = await Assert.ThrowsAsync<IOException>(() =>
             updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None));
 
-        Assert.Contains("deployment blocked", error.Message); // текст движка доносится как есть
-        Assert.True(File.Exists(package)); // неудача — пакет не удаляем
+        Assert.Contains("deployment blocked", error.Message); // the engine text is passed through as is
+        Assert.True(File.Exists(package)); // on failure the package is not deleted
     }
 
-    // --- Скачивание: адрес, место, маркер ---
+    // --- Download: URL, space, marker ---
 
     [Fact]
     public async Task DownloadRejectsNonMsixUrl()
@@ -314,7 +314,7 @@ public class UpdaterTests : IDisposable
         var updater = Create(freeSpace: dir =>
         {
             asked = dir;
-            return 1024; // места нет
+            return 1024; // no free space
         });
 
         var error = await Assert.ThrowsAsync<IOException>(() =>
@@ -332,7 +332,7 @@ public class UpdaterTests : IDisposable
 
         await updater.DownloadAsync(JournalUrl.ToString(), null, CancellationToken.None);
 
-        Assert.True(File.Exists(_marker.Path)); // автостоп не погасит цепочку под загрузкой
+        Assert.True(File.Exists(_marker.Path)); // the idle stop will not shut the chain down under the download
     }
 
     [Fact]
@@ -344,16 +344,16 @@ public class UpdaterTests : IDisposable
         Assert.True(updater.IsClaudeRunning());
     }
 
-    // --- Проверка пакета ---
+    // --- Package verification ---
 
     [Fact]
     public async Task VerifyFailsWithoutManifest()
     {
-        // архив без AppxManifest.xml — не одиночный MSIX
+        // archive without AppxManifest.xml, not a single MSIX
         var plain = Path.Combine(_root, "no-manifest.msix");
         using (ZipFile.Open(plain, ZipArchiveMode.Create))
         {
-            // пустой архив
+            // empty archive
         }
 
         var updater = Create();
@@ -363,14 +363,14 @@ public class UpdaterTests : IDisposable
         Assert.Contains("no AppxManifest.xml", error.Message);
     }
 
-    // --- Разбор адресов и JSON ---
+    // --- URL and JSON parsing ---
 
     [Theory]
     [InlineData(
-        "не удалось получить сеанс размещения для https://downloads.claude.ai/\nreleases/win32/x64/2.26455.1/Claude-abc.msix",
+        "failed to acquire a placement session for https://downloads.claude.ai/\nreleases/win32/x64/2.26455.1/Claude-abc.msix",
         "https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-abc.msix")]
-    [InlineData("ошибка 0x80072EE2 для 'https://downloads.claude.ai/pkg/Claude-x.msix?token=1'", "https://downloads.claude.ai/pkg/Claude-x.msix")]
-    [InlineData("какая-то другая ошибка про https://example.com/a.msix", null)]
+    [InlineData("error 0x80072EE2 for 'https://downloads.claude.ai/pkg/Claude-x.msix?token=1'", "https://downloads.claude.ai/pkg/Claude-x.msix")]
+    [InlineData("some other error about https://example.com/a.msix", null)]
     public void JournalMessageYieldsPackageUrl(string message, string? expected)
     {
         Assert.Equal(expected, PackageUrl.ExtractFromMessage(message, "downloads.claude.ai"));
@@ -573,7 +573,7 @@ public class UpdaterTests : IDisposable
     {
         public IReadOnlyList<FakeClaudeProcess> Processes { get; set; } = [];
 
-        /// <summary>Процессы исчезают, как только их попросили закрыться (вежливый выход).</summary>
+        /// <summary>Processes disappear as soon as they are asked to close (polite exit).</summary>
         public bool CloseAfterRequest { get; set; }
 
         public int FindCalls { get; private set; }

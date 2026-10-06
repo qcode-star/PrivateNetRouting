@@ -7,7 +7,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
 
-/// <summary>Лончер Claude: bypass-list, порядок «проверка → подъём → запуск», режимы, предупреждения.</summary>
+/// <summary>Claude launcher: bypass list, the "check → up → launch" order, modes, warnings.</summary>
 public class LauncherTests : IDisposable
 {
     private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-launcher-{Guid.NewGuid():N}.log");
@@ -113,7 +113,7 @@ public class LauncherTests : IDisposable
         Assert.Equal(LaunchOutcome.CheckOnly, result.Outcome);
         Assert.Equal(1, _chain.EnsureCalls);
         Assert.Empty(_started);
-        Assert.DoesNotContain("WARN", ReadLog()); // политика/процессы в check-only не проверяются
+        Assert.DoesNotContain("WARN", ReadLog()); // policy/processes are not checked in check-only
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class LauncherTests : IDisposable
         Assert.Contains("without --proxy-server", ReadLog());
     }
 
-    // FileLog держит файл открытым на запись — читать с общим доступом ReadWrite
+    // FileLog keeps the file open for writing, so read with ReadWrite sharing
     private string ReadLog()
     {
         using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

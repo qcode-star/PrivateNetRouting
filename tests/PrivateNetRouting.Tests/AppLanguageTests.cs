@@ -3,7 +3,7 @@ using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.Tests;
 
-/// <summary>Выбор языка UI: авто — язык системы, неподдержанное — английский фолбэк.</summary>
+/// <summary>UI language selection: auto means the system language, unsupported falls back to English.</summary>
 public class AppLanguageTests
 {
     [Theory]

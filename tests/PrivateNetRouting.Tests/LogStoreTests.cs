@@ -7,7 +7,7 @@ public class LogStoreTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-logs-").FullName;
 
-    // ----- список и хвост -----
+    // ----- listing and tail -----
 
     [Fact]
     public void ListShowsCurrentAndRotatedLogsOnly()
@@ -39,7 +39,7 @@ public class LogStoreTests : IDisposable
         Assert.Null(store.ReadTail("missing", 10));
     }
 
-    // ----- внешняя ротация -----
+    // ----- external rotation -----
 
     [Fact]
     public void RotateShiftsAgeChainAndDropsBeyondKeep()
@@ -52,10 +52,10 @@ public class LogStoreTests : IDisposable
         var result = store.Rotate("proxy.log", keep: 2);
 
         Assert.True(result.Ok);
-        Assert.Equal("current", File.ReadAllText(Path.Combine(_tempDir, "proxy.log.1"))); // текущий ушёл в .1
-        Assert.Equal("one", File.ReadAllText(Path.Combine(_tempDir, "proxy.log.2"))); // старый .1 сдвинулся в .2
+        Assert.Equal("current", File.ReadAllText(Path.Combine(_tempDir, "proxy.log.1"))); // the current one moved to .1
+        Assert.Equal("one", File.ReadAllText(Path.Combine(_tempDir, "proxy.log.2"))); // the old .1 shifted to .2
         Assert.False(File.Exists(Path.Combine(_tempDir, "proxy.log")));
-        Assert.False(File.Exists(Path.Combine(_tempDir, "proxy.log.3"))); // старый .2 («two») вытолкнут за keep
+        Assert.False(File.Exists(Path.Combine(_tempDir, "proxy.log.3"))); // the old .2 ("two") is pushed beyond keep
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class LogStoreTests : IDisposable
     {
         var path = Path.Combine(_tempDir, "app.log");
         File.WriteAllText(path, "held");
-        using var holder = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read); // как живой FileLog
+        using var holder = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read); // like a live FileLog
 
         var result = new LogStore(_tempDir).Rotate("app.log", keep: 2);
 
@@ -79,7 +79,7 @@ public class LogStoreTests : IDisposable
         Assert.Contains("locked", result.Detail);
         using var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var text = new StreamReader(reader);
-        Assert.Equal("held", text.ReadToEnd()); // файл не тронут
+        Assert.Equal("held", text.ReadToEnd()); // the file is untouched
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class LogStoreTests : IDisposable
         Assert.Equal("unknown log name", result.Detail);
     }
 
-    // ----- FileLog: ручная и стартовая ротация -----
+    // ----- FileLog: manual and startup rotation -----
 
     [Fact]
     public void FileLogRotateNowMovesCurrentToAgeFileAndKeepsWriting()
@@ -120,8 +120,8 @@ public class LogStoreTests : IDisposable
             log.Info("fresh");
         }
 
-        Assert.Contains("fresh", File.ReadAllText(path)); // новый файл с нуля
-        Assert.Contains(new string('a', 100), File.ReadAllText(path + ".1")); // переросший порог ушёл в .1
+        Assert.Contains("fresh", File.ReadAllText(path)); // a new file from scratch
+        Assert.Contains(new string('a', 100), File.ReadAllText(path + ".1")); // the one over the threshold moved to .1
         Assert.Contains("previous", File.ReadAllText(path + ".2"));
 
         var small = Path.Combine(_tempDir, "small.log");
@@ -131,7 +131,7 @@ public class LogStoreTests : IDisposable
             log.Info("appended");
         }
 
-        var text = File.ReadAllText(small); // ниже порога: файл не сдвигался, запись продолжена
+        var text = File.ReadAllText(small); // below the threshold: the file was not shifted, writing continued
         Assert.Contains("tiny", text);
         Assert.Contains("appended", text);
         Assert.False(File.Exists(small + ".1"));
@@ -149,13 +149,13 @@ public class LogStoreTests : IDisposable
 
         Assert.Equal(path, first.FilePath);
         Assert.NotEqual(path, second.FilePath);
-        Assert.EndsWith($".{Environment.ProcessId}.log", second.FilePath); // GUI в трее + pnr из терминала
+        Assert.EndsWith($".{Environment.ProcessId}.log", second.FilePath); // GUI in the tray + pnr from a terminal
         Assert.Contains("from first", ReadShared(path));
         Assert.Contains("from second", ReadShared(second.FilePath));
         Assert.Contains("held by another process", ReadShared(second.FilePath));
     }
 
-    /// <summary>Чтение файла, открытого писателем (FileLog даёт только FileShare.Read).</summary>
+    /// <summary>Read a file opened by a writer (FileLog grants only FileShare.Read).</summary>
     private static string ReadShared(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

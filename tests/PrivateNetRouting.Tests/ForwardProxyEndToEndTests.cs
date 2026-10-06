@@ -13,8 +13,8 @@ using PrivateNetRouting.Core.Runtime;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Сквозной прогон forward-прокси: клиент → прокси → фейковый SOCKS5 → echo-сервер.
-/// Проверяет 200 на CONNECT, туннель в обе стороны, 400 на не-CONNECT и health-check.
+/// End-to-end run of the forward proxy: client → proxy → fake SOCKS5 → echo server.
+/// Verifies 200 on CONNECT, a two-way tunnel, 400 on non-CONNECT and the health check.
 /// </summary>
 public class ForwardProxyEndToEndTests : IAsyncDisposable
 {
@@ -76,7 +76,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => throw new IOException("doh: все эндпоинты не ответили"));
+            host => throw new IOException("doh: no endpoint responded"));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -105,12 +105,12 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// Регрессия GUI-дедлока на выходе: OnExit синхронно ждёт DisposeAsync под
-    /// SynchronizationContext, чей поток заблокирован этим же ожиданием (Dispatcher).
-    /// Продолжения await'ов останова обязаны уходить в пул, а не в захваченный контекст.
+    /// Regression of the GUI deadlock on exit: OnExit synchronously waits for DisposeAsync under a
+    /// SynchronizationContext whose thread is blocked by that same wait (Dispatcher).
+    /// Stop await continuations must go to the pool, not to the captured context.
     /// </summary>
     [Fact]
-#pragma warning disable xUnit1031 // блокирующее ожидание здесь и есть проверяемый сценарий
+#pragma warning disable xUnit1031 // the blocking wait here is exactly the scenario under test
     public void StopCompletesUnderBlockedSynchronizationContext()
     {
         var previous = SynchronizationContext.Current;
@@ -149,7 +149,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 #pragma warning restore xUnit1031
 
-    /// <summary>Контекст «заблокированного диспетчера»: Post кладёт в очередь и не выполняет.</summary>
+    /// <summary>"Blocked dispatcher" context: Post enqueues and never executes.</summary>
     private sealed class TrappedPostContext : SynchronizationContext
     {
         private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _posts = new();
@@ -198,7 +198,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return new IPEndPoint(IPAddress.Parse(parts[0]), int.Parse(parts[1]));
     }
 
-    /// <summary>Echo-сервер: отвечает «pong» на «ping», остальное эхом.</summary>
+    /// <summary>Echo server: answers "pong" to "ping", echoes everything else.</summary>
     private async Task<TcpListener> StartEchoServerAsync()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -252,7 +252,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return listener;
     }
 
-    /// <summary>SOCKS5-апстрим, который честно подключается к запрошенному IP:порту и релеит байты.</summary>
+    /// <summary>SOCKS5 upstream that really connects to the requested IP:port and relays bytes.</summary>
     private async Task<string> StartRelaySocksAsync()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -368,7 +368,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             listener.Stop();
         }
 
-        await Task.Delay(TimeSpan.FromMilliseconds(100)); // дать принять закрытие слушателей
+        await Task.Delay(TimeSpan.FromMilliseconds(100)); // let the listener closures settle
         Directory.Delete(_tempDir, recursive: true);
     }
 }

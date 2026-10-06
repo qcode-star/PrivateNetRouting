@@ -46,7 +46,7 @@ public class Socks5ClientTests
         _ = Task.Run(async () =>
         {
             using var silent = await listener.AcceptTcpClientAsync();
-            await Task.Delay(TimeSpan.FromSeconds(10)); // молчим: клиент должен уйти по таймауту
+            await Task.Delay(TimeSpan.FromSeconds(10)); // stay silent: the client should time out
         });
 
         var client = new Socks5Client(endpoint);
@@ -74,7 +74,7 @@ public class Socks5ClientTests
         Assert.Throws<FormatException>(() => Socks5Client.ParseEndPoint(value));
     }
 
-    /// <summary>Фейковый SOCKS5-апстрим: отвечает на handshake и отвечает «pong» на «ping».</summary>
+    /// <summary>Fake SOCKS5 upstream: answers the handshake and replies "pong" to "ping".</summary>
     private static async Task<(IPEndPoint endpoint, Task<(string Ip, int Port)> seen)> StartFakeUpstreamAsync(bool refuseAuth)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -102,7 +102,7 @@ public class Socks5ClientTests
             var port = BinaryPrimitives.ReadUInt16BigEndian(request.AsSpan(8, 2));
             tcs.SetResult((ip, port));
 
-            await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 }); // REP=0, ATYP=IPv4, нули
+            await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 }); // REP=0, ATYP=IPv4, zeros
 
             var buffer = new byte[64];
             var read = await stream.ReadAsync(buffer);
@@ -123,7 +123,7 @@ public class Socks5ClientTests
             var chunk = await stream.ReadAsync(buffer.AsMemory(read));
             if (chunk == 0)
             {
-                throw new IOException("фейковый апстрим закрыт досрочно");
+                throw new IOException("fake upstream closed prematurely");
             }
 
             read += chunk;

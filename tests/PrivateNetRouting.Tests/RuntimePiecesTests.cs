@@ -13,8 +13,8 @@ public class RuntimePiecesTests : IDisposable
     [Fact]
     public void CmdArgumentsWrapQuotedCommandLineOnce()
     {
-        // каноническая форма ""cmd" args 1>out 2>err"": cmd срывает первую и последнюю
-        // кавычки; двойная оборачивка ломала пути с пробелами ("""C:\Program …")
+        // canonical form ""cmd" args 1>out 2>err"": cmd strips the first and last
+        // quotes; double wrapping broke paths with spaces ("""C:\Program …")
         var arguments = ProcessOps.BuildCmdArguments(
             "\"C:\\Program Files\\Tailscale\\tailscaled.exe\" --port=0",
             @"C:\logs\out.log",
@@ -45,10 +45,10 @@ public class RuntimePiecesTests : IDisposable
         time.Advance(TimeSpan.FromSeconds(30));
         var second = await resolver.ResolveAsync("short.example", CancellationToken.None);
 
-        Assert.Equal(1, inner.Calls); // 30с < зажатого TTL 60с — из кэша
+        Assert.Equal(1, inner.Calls); // 30s < the clamped TTL of 60s, so from cache
         Assert.Equal(first.Ip, second.Ip);
 
-        time.Advance(TimeSpan.FromSeconds(31)); // суммарно 61с > 60с
+        time.Advance(TimeSpan.FromSeconds(31)); // 61s total > 60s
         await resolver.ResolveAsync("short.example", CancellationToken.None);
         Assert.Equal(2, inner.Calls);
     }
@@ -62,10 +62,10 @@ public class RuntimePiecesTests : IDisposable
             inner, ttlMin: TimeSpan.FromSeconds(60), ttlMax: TimeSpan.FromSeconds(3600), time: time);
 
         await resolver.ResolveAsync("long.example", CancellationToken.None);
-        time.Advance(TimeSpan.FromSeconds(3601)); // чуть больше максимума
+        time.Advance(TimeSpan.FromSeconds(3601)); // just over the maximum
         await resolver.ResolveAsync("long.example", CancellationToken.None);
 
-        Assert.Equal(2, inner.Calls); // долгий TTL тоже зажат
+        Assert.Equal(2, inner.Calls); // the long TTL is clamped too
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class RuntimePiecesTests : IDisposable
 
         time.Advance(TimeSpan.FromSeconds(10));
         marker.Touch();
-        Assert.Equal(first, File.GetLastWriteTimeUtc(markerPath)); // троттлинг
+        Assert.Equal(first, File.GetLastWriteTimeUtc(markerPath)); // throttling
 
         time.Advance(TimeSpan.FromSeconds(51));
         marker.Touch();
@@ -92,15 +92,15 @@ public class RuntimePiecesTests : IDisposable
     public void FileLogRotatesAtStartup()
     {
         var logPath = Path.Combine(_tempDir, "app.log");
-        File.WriteAllBytes(logPath, new byte[2_000_000]); // больше максимума
+        File.WriteAllBytes(logPath, new byte[2_000_000]); // larger than the maximum
 
         using (var log = new FileLog(logPath, maxBytes: 1_000_000, keep: 2))
         {
-            log.Info("после ротации");
+            log.Info("after rotation");
         }
 
         Assert.True(File.Exists($"{logPath}.1"));
-        Assert.Contains("после ротации", File.ReadAllText(logPath));
+        Assert.Contains("after rotation", File.ReadAllText(logPath));
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class RuntimePiecesTests : IDisposable
     [InlineData("", LogLevel.Info)]
     [InlineData("warning", LogLevel.Warn)]
     [InlineData("error", LogLevel.Error)]
-    [InlineData("nonsense", LogLevel.Info)] // незнакомое значение — дефолт
+    [InlineData("nonsense", LogLevel.Info)] // unknown value falls back to the default
     public void LogLevelParsesWithInfoFallback(string? raw, LogLevel expected)
     {
         Assert.Equal(expected, LogLevelParser.Parse(raw));

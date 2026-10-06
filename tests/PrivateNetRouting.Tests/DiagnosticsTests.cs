@@ -12,7 +12,7 @@ using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Tests;
 
-// ----- фейки звеньев диагностики -----
+// ----- diagnostics chain-link fakes -----
 
 internal sealed class FakeTcpTable : ITcpConnectionTable
 {
@@ -35,7 +35,7 @@ internal sealed class FakeProxyStats : IProxyStatistics
     public long FailedConnections { get; set; }
 }
 
-/// <summary>Поиск процессов по имени: запрограммированные ответы (cmdline не фильтрует).</summary>
+/// <summary>Process lookup by name: canned answers (does not filter by cmdline).</summary>
 internal sealed class FakeFinderByName : IProcessFinder
 {
     public Dictionary<string, List<FoundProcess>> ByName { get; } = [];
@@ -60,14 +60,14 @@ public class DiagnosticsTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-diag-").FullName;
 
-    // ----- сводка: краевой случай остановленной цепочки -----
+    // ----- summary: stopped-chain edge case -----
 
     [Fact]
     public async Task StoppedChainIsAShortNotice()
     {
         var service = MakeService(out _, out var proxy, out var table, out _, out _, out _);
         proxy.IsRunning = false;
-        table.Listeners.Clear(); // ни демона, ни слушателя forward-прокси — как в proxy-status.ps1
+        table.Listeners.Clear(); // neither daemon nor forward-proxy listener, as in proxy-status.ps1
 
         var summary = await service.GetSummaryAsync(CancellationToken.None);
 
@@ -91,7 +91,7 @@ public class DiagnosticsTests : IDisposable
         Assert.Contains("another process", line.Value);
     }
 
-    // ----- сводка: полная цепочка -----
+    // ----- summary: full chain -----
 
     [Fact]
     public async Task FullChainShowsOwnersKeeperNodeMarkerAndGuards()
@@ -187,7 +187,7 @@ public class DiagnosticsTests : IDisposable
         Assert.Equal("skipped: proxy is not listening", Section(summary, "health").Single().Value);
     }
 
-    // ----- ядро гардов для диагностики: без settings.json и WSL -----
+    // ----- guard core for diagnostics: without settings.json and WSL -----
 
     [Fact]
     public async Task GuardCoreStatusSkipsSettingsAndWsl()
@@ -229,7 +229,7 @@ public class DiagnosticsTests : IDisposable
         Assert.Equal("status", Assert.Single(banOps.Calls));
     }
 
-    // ----- детальная проба CONNECT-roundtrip -----
+    // ----- detailed CONNECT-roundtrip probe -----
 
     [Fact]
     public async Task ProbeReturnsTimingAndStatusLine()
@@ -283,7 +283,7 @@ public class DiagnosticsTests : IDisposable
             using var client = await listener.AcceptTcpClientAsync();
             using var stream = client.GetStream();
             await stream.WriteAsync(Encoding.ASCII.GetBytes(response));
-            await Task.Delay(100); // даём клиенту прочитать ответ до закрытия
+            await Task.Delay(100); // give the client time to read the response before closing
         });
         return (port, server);
     }

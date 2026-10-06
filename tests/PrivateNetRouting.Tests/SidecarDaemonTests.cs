@@ -4,8 +4,8 @@ using PrivateNetRouting.Core.Chain;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Живость демона по отзывчивости именованного пайпа (WMI cmdline элевейтнутого процесса
-/// не видна неэлевейтнутому читателю — Windows 11 24H2+).
+/// Daemon liveness via named-pipe responsiveness (WMI cmdline of an elevated process
+/// is invisible to a non-elevated reader — Windows 11 24H2+).
 /// </summary>
 public class SidecarDaemonTests
 {
