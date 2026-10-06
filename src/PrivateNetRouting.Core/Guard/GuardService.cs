@@ -6,7 +6,7 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Guard;
 
-/// <summary>Live ban checks (port of Get-LiveChecks from ban-ai-hosts.ps1): read-only, requires no rights.</summary>
+/// <summary>Live ban checks: read-only, requires no rights.</summary>
 public sealed record BanLiveChecks(
     bool DnsBlocked,
     string DnsDetail,
@@ -34,7 +34,7 @@ public sealed record GuardSnapshot(
 /// Orchestration of direct-access guards: status is read-only (registry, hosts, NRPT/firewall
 /// via cmdlets, settings.json, WSL), enabling the ban/policy goes through the elevated helper,
 /// settings.json/WSL/system proxy need no elevation. After applying the ban, live checks run
-/// (rule #7 of AGENTS.md: not "it should work", but a check on live traffic).
+/// (rule #6 of AGENTS.md: not "it should work", but a check on live traffic).
 /// </summary>
 public sealed class GuardService(
     AppConfig config,
@@ -235,9 +235,9 @@ public sealed class GuardService(
         }, ct);
 
     /// <summary>
-    /// Live checks (port of Get-LiveChecks): the probe name must not resolve and must not
+    /// Live checks: the probe name must not resolve and must not
     /// answer a direct connection; the proxied path is checked with a CONNECT roundtrip
-    /// (chain not up — the check is skipped, as in the legacy scheme).
+    /// (chain not up — the check is skipped).
     /// </summary>
     public async Task<BanLiveChecks> LiveChecksAsync(CancellationToken ct)
     {

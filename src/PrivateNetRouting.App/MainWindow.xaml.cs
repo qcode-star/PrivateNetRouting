@@ -393,7 +393,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Idle auto-stop watchdog (a port of ts-sidecar-watch-claude.ps1): the loop lives while
+    /// Idle auto-stop watchdog: the loop lives while
     /// the process that started it is open — here it is the application window. Enabling/disabling
     /// is an explicit user action; on idle the watchdog itself shuts down the WSL host and the chain
     /// (UAC confirmation for the daemon shutdown) and clears the checkbox.
@@ -444,7 +444,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Launching Claude (a port of claude-launcher.ps1): first a live CONNECT roundtrip; if the chain
+    /// Launching Claude: first a live CONNECT roundtrip; if the chain
     /// responds — Claude starts immediately, without a splash screen. Otherwise the bring-up splash is
     /// shown and the launcher idempotently brings up the chain; a failure is drawn by the splash
     /// (log/close, auto-close in a minute), success — "Done" and a short fade.
@@ -518,7 +518,7 @@ public partial class MainWindow : Window
             if (splash is not null)
             {
                 splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Launcher.Log.FilePath));
-                await splash.ClosedAsync; // buttons/auto-close after 60 s — like Wait-SplashClose in the legacy scheme
+                await splash.ClosedAsync; // buttons/auto-close after 60 s
             }
 
             _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
@@ -532,7 +532,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Launching a browser with an isolated profile and the app's proxy (a port of browser-proxy.ps1):
+    /// Launching a browser with an isolated profile and the app's proxy:
     /// the same scheme as the Claude launch — a live CONNECT roundtrip, the splash only on
     /// a real wait for the chain bring-up. An already running instance of ours is not duplicated
     /// (Firefox on the same profile hits a lock) — a note in the result line.
@@ -640,7 +640,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Diagnostics window (a port of proxy-status.ps1), read-only: state summary and log
+    /// Diagnostics window, read-only: state summary and log
     /// viewing; one per application, a repeated click activates the open one.
     /// </summary>
     private void OnDiagnostics(object sender, RoutedEventArgs e)

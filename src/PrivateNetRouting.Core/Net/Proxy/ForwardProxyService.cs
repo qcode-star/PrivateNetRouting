@@ -33,7 +33,7 @@ public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
 }
 
 /// <summary>
-/// Local CONNECT proxy (port ts-fwd). It resolves names via DoH through the SOCKS5 upstream —
+/// Local CONNECT proxy. It resolves names via DoH through the SOCKS5 upstream —
 /// system resolution is not used (it is overridden by the bans), dialing goes by IP over the same
 /// SOCKS5. It binds to the primary address from the config and once on the WSL NAT gateway when the
 /// adapter appears. Normal mode — silence in the log: start/stop, warnings, errors; per-request

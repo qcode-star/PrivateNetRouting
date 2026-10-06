@@ -40,8 +40,7 @@ public sealed record WslDistroSyncResult(
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
 /// <summary>
-/// WSL layer of the guard (port of the startup script /etc/wsl.d/startup/10-claude-proxy.sh and the
-/// WSL part of sync-claude-noproxy.ps1). The layer is entirely optional: guard.wsl.mode = on | off | auto
+/// WSL layer of the guard. The layer is entirely optional: guard.wsl.mode = on | off | auto
 /// (auto — on only if WSL is present and at least one configured distro is installed).
 /// Per distro from guard.wsl.distros there is a separate choice of whether to sync into it:
 /// sync=true — startup script (proxy address = IP of the Windows side of WSL NAT + application port;
@@ -340,7 +339,7 @@ public sealed class WslConfigGuard(
         return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root);
     }
 
-    /// <summary>Startup script text (same actions as the script of the legacy scheme, but the application port).</summary>
+    /// <summary>Startup script text (proxy address and port come from the application config).</summary>
     internal static string BuildStartupScript(string user, int port) => $$"""
         #!/bin/bash
         # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy

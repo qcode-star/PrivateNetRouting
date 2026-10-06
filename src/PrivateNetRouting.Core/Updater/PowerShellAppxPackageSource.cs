@@ -17,7 +17,7 @@ public interface IAppxPackageSource
 
 /// <summary>
 /// Get-AppxPackage (version/Publisher of the installed package; with several, the highest is taken)
-/// and Add-AppxPackage -ForceApplicationShutdown — as in the legacy update scheme.
+/// and Add-AppxPackage -ForceApplicationShutdown.
 /// </summary>
 public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, FileLog log) : IAppxPackageSource
 {

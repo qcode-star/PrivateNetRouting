@@ -30,7 +30,7 @@ public static class ProxyHealthCheck
 
     /// <summary>
     /// The same probe with details for diagnostics: the roundtrip time and the first response line
-    /// from the proxy (like "CONNECT tunnel in N ms" / "proxy responded: …" in the legacy scheme).
+    /// from the proxy (like "CONNECT tunnel in N ms" / "proxy responded: …").
     /// </summary>
     public static async Task<HealthProbeResult> ProbeAsync(
         string proxyHost,

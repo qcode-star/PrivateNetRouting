@@ -5,14 +5,14 @@ using PrivateNetRouting.Core.Logging;
 namespace PrivateNetRouting.Core.Watchdog;
 
 /// <summary>
-/// Idle auto-stop supervisor (port of ts-sidecar-watch-claude.ps1): every checkSeconds
+/// Idle auto-stop supervisor: every checkSeconds
 /// it checks whether Claude is busy; when idle it first shuts down the WSL host (its processes
 /// are not visible as Windows processes and would otherwise linger in the distro until the next
 /// Desktop start), then stops the chain and exits — the next launcher start brings everything back up.
 /// The first poll happens one interval after startup; every timer firing is logged at Debug,
 /// at Info — only a change of the busy reason and the auto-stop itself. The chain stop goes through
 /// the existing orchestrator (killing the daemon raises UAC if needed). It is started only by an explicit
-/// action (CLI/application toggle); it is never registered for autostart (rule #5 of AGENTS.md).
+/// action (CLI/application toggle); it is never registered for autostart (rule #4 of AGENTS.md).
 /// </summary>
 public sealed class WatchdogService(
     WatchdogConfig config,

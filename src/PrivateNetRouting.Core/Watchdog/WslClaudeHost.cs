@@ -18,7 +18,7 @@ public enum WslHostState
 public sealed record WslHostStopResult(WslHostState State, string Detail);
 
 /// <summary>
-/// Graceful stop of the WSL host of Claude Desktop (port of claude-wsl-stop.ps1): the daemon
+/// Graceful stop of the WSL host of Claude Desktop: the daemon
 /// remote/srv/&lt;hash&gt;/server is stopped by its own binary (RPC server.shutdown),
 /// ccd-cli sessions are shut down by the same; for orphaned processes — SIGTERM → SIGKILL escalation.
 /// The rest of the distro and a manually started Claude Code CLI are left alone; the distro
@@ -70,9 +70,8 @@ public sealed class WslProcessRunner : IWslProcessRunner
 }
 
 /// <summary>
-/// Stopper via `wsl.exe -d &lt;distro&gt; -- bash -s`: the bash script is identical to the body of
-/// claude-wsl-stop.ps1 (only the message text is English and the remaining processes are counted
-/// after escalation). It first checks that the distro is running (`--list --running`,
+/// Stopper via `wsl.exe -d &lt;distro&gt; -- bash -s`: the bash script (only the message text is English
+/// and the remaining processes are counted after escalation). It first checks that the distro is running (`--list --running`,
 /// wsl.exe output is UTF-16LE with possible NULs), otherwise the step is skipped without starting the distro.
 /// </summary>
 public sealed class WslClaudeHostStopper(string distro, IWslProcessRunner wsl) : IWslClaudeHost

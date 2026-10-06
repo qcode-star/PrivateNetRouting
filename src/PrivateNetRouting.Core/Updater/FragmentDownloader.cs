@@ -22,7 +22,7 @@ public interface IMsixDownloader
 }
 
 /// <summary>
-/// Multithreaded chunked download (port of Get-PackageFile from the legacy scheme): a single thread via the
+/// Multithreaded chunked download: a single thread via the
 /// chain hits the DoH+sidecar latency, several threads yield a few MB/s. A fragment with
 /// retries, then a size check and concatenation.
 /// </summary>

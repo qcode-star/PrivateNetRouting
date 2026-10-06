@@ -180,7 +180,7 @@
     <s:String x:Key="Main.Language">Язык</s:String>
     <s:String x:Key="Main.Language.Auto">Как в системе</s:String>
 
-    <!-- Diagnostics window (read-only state summary + log viewer, port of proxy-status.ps1) -->
+    <!-- Diagnostics window (read-only state summary + log viewer) -->
     <s:String x:Key="Diag.Title">Диагностика</s:String>
     <s:String x:Key="Diag.Header">Сводка состояния (только чтение)</s:String>
     <s:String x:Key="Diag.Button.Refresh">Обновить</s:String>

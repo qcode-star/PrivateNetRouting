@@ -47,7 +47,7 @@ internal static class LogRotation
 
 /// <summary>
 /// Simple thread-safe file log with levels (logging.level of the config, default
-/// Info). Policy of the legacy set: Info — one-off events (start/stop/warnings/errors),
+/// Info). Logging policy: Info — one-off events (start/stop/warnings/errors),
 /// periodic and per-request details (timers, connects, resolves) — Debug and silent in normal
 /// operation; size-based rotation is performed once at process start, manual —
 /// on a diagnostics request (at that moment the file belongs only to this process).

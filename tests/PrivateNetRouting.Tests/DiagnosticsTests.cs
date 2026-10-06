@@ -67,7 +67,7 @@ public class DiagnosticsTests : IDisposable
     {
         var service = MakeService(out _, out var proxy, out var table, out _, out _, out _);
         proxy.IsRunning = false;
-        table.Listeners.Clear(); // neither daemon nor forward-proxy listener, as in proxy-status.ps1
+        table.Listeners.Clear(); // neither daemon nor forward-proxy listener
 
         var summary = await service.GetSummaryAsync(CancellationToken.None);
 

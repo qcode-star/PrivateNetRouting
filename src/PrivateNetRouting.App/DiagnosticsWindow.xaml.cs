@@ -12,7 +12,7 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Diagnostics window (a port of proxy-status.ps1), read-only: state summary (chain processes
+/// Diagnostics window, read-only: state summary (chain processes
 /// and port owners, counters, activity marker, detailed CONNECT roundtrip, policy and ban,
 /// watchdog) and log viewing — a list of files with the selected one's tail, rotation of the
 /// live log by its owner (FileLog.RotateNow). The tail is refreshed by a timer, the summary by a button.

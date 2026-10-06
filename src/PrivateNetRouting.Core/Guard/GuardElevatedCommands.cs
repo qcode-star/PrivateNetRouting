@@ -57,7 +57,7 @@ public static class GuardElevatedCommands
     }
 
     /// <summary>
-    /// Three layers of the ban (port of ban-ai-hosts.ps1): the hosts block is rebuilt from the list,
+    /// Three layers of the ban: the hosts block is rebuilt from the list,
     /// the NRPT rule and the firewall group are removed and re-created (idempotent), the DNS cache is
     /// flushed; after applying, a probe subtree name must not resolve.
     /// </summary>

@@ -11,7 +11,7 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 
 /// <summary>
 /// A wrapper over ForwardProxyService that decides where the listener lives: in this process or
-/// in a separate detached worker (forwardProxy.detached — parity with ts-fwd of the legacy scheme,
+/// in a separate detached worker (forwardProxy.detached,
 /// the proxy outlives the exit of the command/GUI that started it). The port is a single resource:
 /// a busy port is never bound by a second instance (whosever it is), the shutdown kills only a
 /// worker identified by its command line, a foreign owner is not touched (warning in the log).

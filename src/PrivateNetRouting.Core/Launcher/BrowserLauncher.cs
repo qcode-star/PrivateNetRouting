@@ -9,7 +9,7 @@ namespace PrivateNetRouting.Core.Launcher;
 
 /// <summary>
 /// Launch modes: normal, "check/bring up the chain only", and "prepare the profile
-/// without opening the browser" (port of -PrepareOnly from browser-proxy.ps1). Url and the private window
+/// without opening the browser". Url and the private window
 /// override the config values (the CLI flag wins over browser.url/browser.private).
 /// </summary>
 public sealed record BrowserLauncherOptions(bool CheckOnly = false, bool PrepareOnly = false, bool Private = false, string? Url = null)
@@ -79,7 +79,7 @@ public static class BrowserBypassList
             .Where(tld => tld.Length > 0);
 }
 
-/// <summary>user.js of the Firefox isolated profile (port of browser-proxy.ps1): rewritten on every launch.</summary>
+/// <summary>user.js of the Firefox isolated profile: rewritten on every launch.</summary>
 public static class FirefoxUserJs
 {
     public static string Render(string proxyHost, int proxyPort, string noProxies) => $"""
@@ -99,7 +99,7 @@ public static class FirefoxUserJs
 }
 
 /// <summary>
-/// Browser launcher with an isolated profile (port of browser-proxy.ps1): checks the chain with a live
+/// Browser launcher with an isolated profile: checks the chain with a live
 /// CONNECT roundtrip, on failure brings it up idempotently (splash/progress — like the Claude
 /// launcher), then starts the browser with the application proxy and without system settings: Firefox —
 /// a separate profile with user.js and --new-instance (otherwise the URL goes to the everyday instance without
@@ -115,7 +115,7 @@ public sealed class BrowserLauncher(
     Func<string, bool>? fileExists = null,
     Func<ProcessStartInfo, Process?>? startProcess = null)
 {
-    /// <summary>Fallback if the configured path is not found: the second standard directory of the family (as in browser-proxy.ps1).</summary>
+    /// <summary>Fallback if the configured path is not found: the second standard directory of the family.</summary>
     private static readonly string FirefoxFallbackPath = @"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe";
 
     private static readonly string ChromiumFallbackPath = @"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe";

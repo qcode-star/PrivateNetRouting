@@ -120,7 +120,7 @@ public class WatchdogTests : IDisposable
         Assert.Contains("no STATE", result.Detail);
     }
 
-    /// <summary>The stop script ports claude-wsl-stop.ps1 semantics: identifying the daemon/sessions,
+    /// <summary>The stop script semantics: identifying the daemon/sessions,
     /// RPC shutdown with its own binary, SIGTERM → SIGKILL escalation with a wait.</summary>
     [Fact]
     public void StopScriptPortsSourceSemantics()

@@ -18,8 +18,7 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
 }
 
 /// <summary>
-/// A sign that Claude is busy, or null when idle (port of Test-ClaudeInUse from the supervisor of
-/// the legacy scheme). Checked in order: claude* processes -> established connections to the proxy ->
+/// A sign that Claude is busy, or null when idle. Checked in order: claude* processes -> established connections to the proxy ->
 /// freshness of the activity marker (covers Claude Code in WSL, which has no claude.exe).
 /// </summary>
 public interface IClaudeUsageProbe

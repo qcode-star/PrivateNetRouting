@@ -14,7 +14,7 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Claude Desktop update window (a port of the claude-update-gui spec): steps "Check versions →
+/// Claude Desktop update window: steps "Check versions →
 /// Proxy chain → Download → Install", version check before the chain bring-up (without
 /// an extra UAC), a progress bar with speed/ETA by samples, a pause before installation when
 /// Claude is running, deferred installation and "Retry". Installation is not interrupted:
@@ -472,7 +472,7 @@ public partial class UpdateWindow : Window
         BtnLaunch.IsEnabled = false;
         try
         {
-            // the launcher itself will check/bring up the chain and pass the proxy flags (like the legacy scheme's shortcut)
+            // the launcher itself will check/bring up the chain and pass the proxy flags
             await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
             SetHintKey("Update.Launch.Done");
         }

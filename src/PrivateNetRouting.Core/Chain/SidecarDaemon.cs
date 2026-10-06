@@ -82,7 +82,7 @@ public sealed class SidecarDaemon(
 
         if (IsHttpListening && !IsProcessAlive)
         {
-            // a foreign listener on our port (e.g. the legacy scheme): we must not start
+            // a foreign listener on our port: we must not start
             throw new IOException(
                 $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.daemonHttpListen");
         }

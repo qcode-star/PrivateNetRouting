@@ -5,7 +5,7 @@ namespace PrivateNetRouting.Core.Guard;
 public sealed record EgressPolicyValues(bool KeyExists, string? EgressProxyUrl, int? DisableWslSessions);
 
 /// <summary>
-/// Managed policy of Claude Desktop (port of set-egress-proxy.ps1): HKLM\SOFTWARE\Policies\Claude —
+/// Managed policy of Claude Desktop: HKLM\SOFTWARE\Policies\Claude —
 /// egressProxyUrl (proxied no matter how the app is started) and disableWslSessions=0 (the presence
 /// of any value under Policies puts Claude into managed mode, where WSL sessions are disabled by
 /// default; an explicit 0 at the machine level brings them back). Both names are documented by Anthropic.

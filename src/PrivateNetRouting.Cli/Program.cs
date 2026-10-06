@@ -11,9 +11,9 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.Cli;
 
 /// <summary>
-/// Headless mode (parity with the old scripts): proxy — runs the forward proxy in the console
+/// Headless mode: proxy — runs the forward proxy in the console
 /// (or brings up a detached worker), chain — chain control (status/up/down), check —
-/// CONNECT roundtrip, status — diagnostics summary (port of proxy-status.ps1), logs —
+/// CONNECT roundtrip, status — diagnostics summary, logs —
 /// viewing/rotation of logs, config — path/initialization. Elevated commands (--elevated-*)
 /// are executed by the internal helper and it exits; --proxy-worker — the body of the detached proxy worker.
 /// </summary>
@@ -70,7 +70,7 @@ internal static class Program
     /// <summary>
     /// Without flags — expert mode: the proxy runs in this process (Ctrl+C to stop),
     /// regardless of forwardProxy.detached. With --detached — bring up a detached worker
-    /// (it survives the command exit, parity with ts-fwd) and return.
+    /// (it survives the command exit) and return.
     /// </summary>
     private static async Task<int> RunProxyAsync(List<string> rest)
     {
@@ -174,7 +174,7 @@ internal static class Program
     }
 
     /// <summary>
-    /// State summary (port of proxy-status.ps1), read-only: chain processes and listener
+    /// State summary, read-only: chain processes and listener
     /// owners (PID), WSL bind, proxy counters, activity marker age, detailed
     /// CONNECT roundtrip, policy and ban, watchdog liveness. A fully stopped chain —
     /// a short message: this is normal while Claude is not needed.
@@ -437,8 +437,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// Manual update of Claude Desktop (MSIX) through the proxy chain: port of the keys of the legacy
-    /// update engine. Versions are checked before bringing up the chain — "nothing to install"
+    /// Manual update of Claude Desktop (MSIX) through the proxy chain. Versions are checked
+    /// before bringing up the chain — "nothing to install"
     /// brings up nothing and asks for no UAC.
     /// </summary>
     private static async Task<int> RunUpdateAsync(List<string> rest)
@@ -744,13 +744,13 @@ internal static class Program
             pnr proxy [--detached]
                                  run the forward proxy in this console (Ctrl+C to stop);
                                  --detached starts the detached worker instead and
-                                 returns — the worker survives this command (parity
-                                 with the old scheme, forwardProxy.detached)
+                                 returns — the worker survives this command
+                                 (forwardProxy.detached)
             pnr chain status     chain state (daemon/keeper/node/proxy/health)
             pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)
             pnr check            check the chain with a CONNECT-roundtrip
-            pnr status           read-only state summary (port of proxy-status.ps1):
+            pnr status           read-only state summary:
                                  chain processes and port owners (pid), WSL bind, proxy
                                  counters, activity age, CONNECT timing, policy and ban,
                                  idle supervisor; a stopped chain is a short notice

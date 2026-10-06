@@ -23,8 +23,8 @@ public sealed class TcpPortProbe : IPortProbe
 public sealed record FoundProcess(int Id, string CommandLine);
 
 /// <summary>
-/// Process search by name and command-line substring (WMI). This is how the legacy scheme
-/// identifies "our" chain processes — by a statedir/pipe pattern in the command line.
+/// Process search by name and command-line substring (WMI): "our" chain processes are identified
+/// by a statedir/pipe pattern in the command line.
 /// </summary>
 public interface IProcessFinder
 {
@@ -93,7 +93,7 @@ public static class ProcessOps
     /// <summary>
     /// Launches a command via cmd with file redirection: the file handles belong to cmd
     /// and survive the exit of our process — logs are written while the child is alive, and the chain does not depend
-    /// on the application's lifetime. The redirections in the legacy scheme are arranged the same way.
+    /// on the application's lifetime.
     /// </summary>
     public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath) =>
         Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))

@@ -10,7 +10,7 @@ public interface IClaudeProcessHandle
     void Kill();
 }
 
-/// <summary>Claude Desktop processes by exact name (like Get-Process -Name in the legacy scheme).</summary>
+/// <summary>Claude Desktop processes by exact name (like Get-Process -Name).</summary>
 public interface IClaudeProcessSource
 {
     IReadOnlyList<IClaudeProcessHandle> Find(string processName);

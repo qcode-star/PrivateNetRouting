@@ -12,8 +12,8 @@ public sealed record BanLayersState(int NrptRules, IReadOnlyList<string> NrptNam
 /// <summary>
 /// System layers of the ban: NRPT (one rule covering all subtrees at once, servers 127.0.0.1 —
 /// nobody listens on localhost:53, so subtree names are never resolved) and firewall
-/// (outbound Block by subnet). Managed via DnsClient/NetSecurity cmdlets, as in the
-/// legacy scheme; writing requires administrator rights (elevated helper), reading does not.
+/// (outbound Block by subnet). Managed via DnsClient/NetSecurity cmdlets;
+/// writing requires administrator rights (elevated helper), reading does not.
 /// </summary>
 public interface IBanSystemOps
 {

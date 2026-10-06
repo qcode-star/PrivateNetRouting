@@ -17,7 +17,7 @@ public static class ClaudeEnvValues
 
     /// <summary>
     /// NO_PROXY (curl style): base entries + each zone in two forms — "zone" and ".zone"
-    /// (subdomains). Zones come from launcher.bypassDomains, as in the legacy scheme from the NRPT list.
+    /// (subdomains). Zones come from launcher.bypassDomains.
     /// </summary>
     public static string BuildNoProxy(IEnumerable<string> bypassDomains) =>
         string.Join(",", NoProxyParts(bypassDomains));
@@ -41,7 +41,7 @@ public static class ClaudeEnvValues
 }
 
 /// <summary>
-/// env in settings.json of Claude Code, Windows (port of sync-claude-noproxy.ps1): the Claude Code
+/// env in settings.json of Claude Code, Windows: the Claude Code
 /// engine (CLI and the one built into Desktop) applies env both to sessions and to commands inside
 /// them. Existing keys (env and root) are preserved; a timestamped backup is made before writing.
 /// Requires no special rights.

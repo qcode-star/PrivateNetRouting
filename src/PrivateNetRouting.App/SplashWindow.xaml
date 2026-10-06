@@ -8,7 +8,7 @@
         TextOptions.TextFormattingMode="Display"
         FontFamily="Segoe UI" Foreground="#EDEDF2">
     <Window.Resources>
-        <!-- Palette and frame of the splash screen — a port of claude-splash.ps1 (dark card, spinner, steps). -->
+        <!-- Palette and frame of the splash screen (dark card, spinner, steps). -->
         <SolidColorBrush x:Key="Splash.Pending" Color="#63636C"/>
         <SolidColorBrush x:Key="Splash.Active" Color="#D97757"/>
         <SolidColorBrush x:Key="Splash.Done" Color="#7BC47F"/>

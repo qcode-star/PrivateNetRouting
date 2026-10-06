@@ -26,7 +26,7 @@ public sealed record LaunchResult(LaunchOutcome Outcome, bool ChainRaised, TimeS
 
 /// <summary>
 /// Building --proxy-bypass-list: a fixed base list (localhost and private
-/// ranges — as in claude-launcher.ps1) plus config domains, each in two forms —
+/// ranges) plus config domains, each in two forms —
 /// in Chromium 'dom.com' matches only the domain itself, while '*.dom.com' matches only subdomains.
 /// </summary>
 public static class ClaudeBypassList
@@ -57,11 +57,11 @@ public static class ClaudeBypassList
 }
 
 /// <summary>
-/// Claude Desktop launcher (port of claude-launcher.ps1): checks the chain with a live
+/// Claude Desktop launcher: checks the chain with a live
 /// CONNECT roundtrip, on failure brings it up idempotently (the only UAC window is
 /// starting the daemon), then starts Claude with --proxy-server/--proxy-bypass-list.
 /// The managed egressProxyUrl policy and already running Claude copies are only monitored,
-/// with a warning in the log (they cannot stop the launch, as in the legacy scheme either).
+/// with a warning in the log (they cannot stop the launch).
 /// </summary>
 public sealed class ClaudeLauncher(
     AppConfig config,

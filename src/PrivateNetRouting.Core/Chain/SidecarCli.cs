@@ -22,8 +22,7 @@ public interface ISidecarCli
 }
 
 /// <summary>
-/// Wrapper around `tailscale --socket &lt;pipe&gt; …` (in the legacy scheme there was
-/// ts-sidecar-cli.ps1 for this — pipe paths broke from bash; here a direct launch).
+/// Wrapper around `tailscale --socket &lt;pipe&gt; …` (a direct launch).
 /// </summary>
 public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
 {
@@ -71,7 +70,7 @@ public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
 
     public async Task<CliResult> UpAsync(CancellationToken ct)
     {
-        // set-like flag set only: up overwrites the unspecified with defaults (legacy scheme rule)
+        // set-like flag set only: up overwrites the unspecified with defaults
         var arguments = new List<string>
         {
             "up",

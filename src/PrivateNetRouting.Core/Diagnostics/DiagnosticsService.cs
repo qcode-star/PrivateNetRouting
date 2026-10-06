@@ -24,14 +24,14 @@ public sealed record DiagLine(string Name, string Value, DiagMark Mark = DiagMar
 public sealed record DiagSection(string Key, IReadOnlyList<DiagLine> Lines);
 
 /// <summary>
-/// State summary. ChainStopped is the edge case of the legacy proxy-status.ps1: neither the daemon
+/// State summary. ChainStopped is the edge case where neither the daemon
 /// nor a forward proxy listener exists at all — that is normal while Claude is not needed (a short
 /// message instead of the full picture).
 /// </summary>
 public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSection> Sections);
 
 /// <summary>
-/// Diagnostics (port of proxy-status.ps1), read-only: chain processes and listener
+/// Diagnostics, read-only: chain processes and listener
 /// owners (PID via the TCP table, like Get-NetTCPConnection), WSL bind of the proxy, counters,
 /// activity marker age, detailed CONNECT roundtrip (time and first response line),
 /// the core of the guards (policy + ban) and watchdog liveness. It starts and stops nothing.
@@ -172,7 +172,7 @@ public sealed class DiagnosticsService(
         }
     }
 
-    /// <summary>CONNECT roundtrip through the whole chain: time and first response line (the health-check port of the legacy scheme).</summary>
+    /// <summary>CONNECT roundtrip through the whole chain: time and first response line (the chain health check).</summary>
     private async Task<DiagSection> HealthSectionAsync(bool proxyListening, CancellationToken ct)
     {
         if (!proxyListening)

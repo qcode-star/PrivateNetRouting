@@ -3,9 +3,8 @@
 A personal Windows toolkit (WPF, .NET 10 LTS) that runs Claude Desktop through a private proxy
 chain: a local forward proxy with DoH resolution, a chain supervisor, launchers for Claude Desktop
 and for an isolated browser profile, idle auto-stop, an MSIX package updater, direct-access guards,
-and read-only diagnostics. It is the port of the earlier PowerShell/Python script set
-(`C:\ovpn-script`) into a single application with a GUI and a headless CLI. Development rules are
-in [AGENTS.md](AGENTS.md).
+and read-only diagnostics. It provides a GUI and a headless CLI. Development rules are in
+[AGENTS.md](AGENTS.md).
 
 ## Modules
 

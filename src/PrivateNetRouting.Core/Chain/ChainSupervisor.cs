@@ -56,8 +56,8 @@ public interface IChainSupervisor
 
 /// <summary>
 /// Chain orchestrator: idempotent bring-up (daemon → keeper → node → proxy → health)
-/// and full shutdown (down → daemon → keeper → proxy). Order and liveness signals — as in
-/// the legacy scheme: daemon HTTP listener, watch-ipn process, BackendState=Running,
+/// and full shutdown (down → daemon → keeper → proxy). Order and liveness signals:
+/// daemon HTTP listener, watch-ipn process, BackendState=Running,
 /// proxy listener, live CONNECT-roundtrip.
 /// </summary>
 public sealed class ChainSupervisor(
@@ -153,7 +153,7 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 4. forward proxy (our ts-fwd port)
+        // 4. forward proxy
         if (proxy.IsRunning)
         {
             Report(progress, "Proxy", ChainStepStatus.Skipped, "already running");

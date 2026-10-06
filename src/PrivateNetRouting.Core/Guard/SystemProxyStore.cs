@@ -4,7 +4,7 @@ using Microsoft.Win32;
 namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
-/// WinINET system proxy (port of proxy-on/off.ps1): HKCU Internet Settings + InternetSetOption
+/// WinINET system proxy: HKCU Internet Settings + InternetSetOption
 /// (SETTINGS_CHANGED/REFRESH — otherwise applications pick up the setting only after a restart).
 /// Requires no administrator rights; the address is the address of the application's forward proxy,
 /// exceptions are local addresses, private ranges (masks like 10.*, WinINET does not understand CIDR),

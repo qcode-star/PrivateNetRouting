@@ -347,7 +347,7 @@ public class GuardTests : IDisposable
 
         var script = ops.BuildFirewallScript(apply: true);
         Assert.Contains("Remove-NetFirewallRule", script);
-        Assert.Contains("-DisplayName 'ai-direct-ban: IPv4' -Group 'ai-direct-ban (ban-ai-hosts.ps1)'", script);
+        Assert.Contains("-DisplayName 'ai-direct-ban: IPv4' -Group 'ai-direct-ban'", script);
         Assert.Contains("-RemoteAddress @('160.79.104.0/21')", script);
         Assert.Contains("-DisplayName 'ai-direct-ban: IPv6'", script);
         Assert.Contains("-RemoteAddress @('2607:6bc0::/48','2607:6bc0:11::/48')", script);
@@ -439,7 +439,7 @@ public class GuardTests : IDisposable
             Installed = ["d1", "d3"],
             Running = ["d1", "d3"],
             ProbeOutput = distro => distro == "d1"
-                ? "SCRIPT=present\nPORT=8082\nSETTINGS=missing\n" // port of the old scheme
+                ? "SCRIPT=present\nPORT=8082\nSETTINGS=missing\n"
                 : "SCRIPT=missing\nSETTINGS=missing\n",
         };
         var guard = new WslConfigGuard(
@@ -491,7 +491,7 @@ public class GuardTests : IDisposable
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
         Assert.Contains("USER_NAME='u1'", script);
         Assert.Contains("PORT=18082", script);
-        Assert.Contains("env['HTTPS_PROXY'] = proxy", script); // the python part of the old scheme
+        Assert.Contains("env['HTTPS_PROXY'] = proxy", script);
         Assert.DoesNotContain("env['NO_PROXY']", script); // the startup script does not touch NO_PROXY (mentioned only in a comment)
     }
 
@@ -606,7 +606,7 @@ public class GuardTests : IDisposable
         var result = await service.BanAsync(enable: true, CancellationToken.None);
 
         Assert.Equal(GuardElevatedCommands.BanOn, Assert.Single(elevated.Commands));
-        Assert.Equal(1, healthCalls); // live check after applying (rule #7)
+        Assert.Equal(1, healthCalls); // live check after applying (rule #6)
         Assert.True(result.Live.DnsBlocked);
         Assert.True(result.Live.DirectBlocked);
         Assert.Contains("skipped", result.Live.ProxiedDetail); // the chain does not answer, so skipped

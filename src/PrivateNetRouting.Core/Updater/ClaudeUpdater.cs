@@ -59,7 +59,7 @@ public sealed record UpdateRunResult(
     string? PackageUrl);
 
 /// <summary>
-/// Manual update of Claude Desktop (port of the claude-desktop-update scheme): version check
+/// Manual update of Claude Desktop: version check
 /// BEFORE bringing up the chain ("nothing to install" brings up nothing and asks for no UAC), then the chain
 /// if needed, chunked download via its own proxy, Publisher verification,
 /// closing Claude and Add-AppxPackage. The pause before install is a UI decision; the core exposes
@@ -79,7 +79,7 @@ public sealed class ClaudeUpdater(
     FileLog log,
     Func<string, long>? freeSpaceProvider = null)
 {
-    /// <summary>Headroom of free space above the package size (spec of the legacy scheme).</summary>
+    /// <summary>Headroom of free space above the package size.</summary>
     private const long InstallHeadroomBytes = 300L * 1024 * 1024;
 
     private readonly Func<string, long> _freeSpace = freeSpaceProvider ?? GetFreeSpace;
@@ -254,7 +254,7 @@ public sealed class ClaudeUpdater(
         return new UpdateRunResult(UpdateOutcome.Installed, check.Installed, after, file, check.PackageUrl);
     }
 
-    /// <summary>Closing Claude as in the legacy scheme: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>
+    /// <summary>Closing Claude: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>
     private async Task CloseClaudeAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         var processes = claudeProcesses.Find(config.Updater.ClaudeProcessName);

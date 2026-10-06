@@ -39,7 +39,7 @@ public sealed class UiConfig
 }
 
 /// <summary>
-/// Launching Claude Desktop through the proxy (port of claude-launcher.ps1): chain check/bring-up,
+/// Launching Claude Desktop through the proxy: chain check/bring-up,
 /// the --proxy-server/--proxy-bypass-list flags. Base bypass entries (localhost, private
 /// ranges) are fixed in code — only the zone domains are environment-dependent.
 /// </summary>
@@ -53,9 +53,8 @@ public sealed class LauncherConfig
 }
 
 /// <summary>
-/// Sidecar chain parameters (userspace-tailscaled + keeper + node). The defaults are chosen so as
-/// not to conflict with the legacy scheme running in parallel (rule #4 of AGENTS.md):
-/// own pipe, own ports, own statedir. Replacing the legacy chain is an explicit config edit.
+/// Sidecar chain parameters (userspace-tailscaled + keeper + node): own pipe, own ports,
+/// own statedir. They change only by explicitly editing the user config.
 /// </summary>
 public sealed class ChainConfig
 {
@@ -64,7 +63,7 @@ public sealed class ChainConfig
     public string TailscaleCliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
 
     /// <summary>Daemon statedir: the node key is there; separate from the system Tailscale.</summary>
-    public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\ts-sidecar";
+    public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\sidecar";
 
     /// <summary>Daemon named pipe (the CLI attaches to it).</summary>
     public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
@@ -72,7 +71,7 @@ public sealed class ChainConfig
     /// <summary>Daemon SOCKS5 listener (the forward proxy dials it).</summary>
     public string DaemonSocksListen { get; set; } = "127.0.0.1:18083";
 
-    /// <summary>Daemon HTTP listener: its appearance = the daemon is alive (same as in the legacy scheme).</summary>
+    /// <summary>Daemon HTTP listener: its appearance = the daemon is alive.</summary>
     public string DaemonHttpListen { get; set; } = "127.0.0.1:18081";
 
     /// <summary>Wait for the daemon listeners after start.</summary>
@@ -95,7 +94,7 @@ public sealed class ChainConfig
 }
 
 /// <summary>
-/// Browser launcher with an isolated profile and its own proxy (port of browser-proxy.ps1):
+/// Browser launcher with an isolated profile and its own proxy:
 /// Firefox — a separate profile with user.js (rewritten on every launch, the bypass
 /// list is always fresh), Chromium-like — via command-line flags. The browser's system
 /// settings are not touched. Bypass domains are shared with the Claude launcher (launcher.bypassDomains).
@@ -115,7 +114,7 @@ public sealed class BrowserConfig
     public bool Private { get; set; }
 
     /// <summary>
-    /// Top-level domains that go around the proxy (like *.ru, *.su in the legacy scheme):
+    /// Top-level domains that go around the proxy:
     /// local sites must not go out to a foreign exit. Without the dot, added as *.tld.
     /// </summary>
     public List<string> DirectTlds { get; set; } = ["ru", "su", "by", "kz"];
@@ -162,7 +161,7 @@ public static class BrowserKindParser
 
 /// <summary>
 /// The watchdog starts on an explicit user action (a CLI command, an application toggle)
-/// and lives as long as the process that started it — it is not written to autostart (rule #5).
+/// and lives as long as the process that started it — it is not written to autostart (rule #4).
 /// </summary>
 public sealed class WatchdogConfig
 {
@@ -176,7 +175,7 @@ public sealed class WatchdogConfig
 /// <summary>
 /// Manual Claude Desktop update (MSIX): installed version, package URL from the AppX journal
 /// (or manual), multithreaded chunked download through the proxy chain, Publisher
-/// verification, closing Claude and Add-AppxPackage (port of the claude-desktop-update scheme).
+/// verification, closing Claude and Add-AppxPackage.
 /// </summary>
 public sealed class UpdaterConfig
 {
@@ -210,7 +209,7 @@ public sealed class UpdaterConfig
     /// <summary>Pause between chunk attempts, sec.</summary>
     public int RetryDelaySeconds { get; set; } = 5;
 
-    /// <summary>Timeout of a single chunk attempt, sec (like curl --max-time in the legacy scheme).</summary>
+    /// <summary>Timeout of a single chunk attempt, sec.</summary>
     public int ChunkTimeoutSeconds { get; set; } = 1800;
 
     /// <summary>How many seconds to wait for Claude to close on its own before killing the process.</summary>
@@ -221,27 +220,25 @@ public sealed class UpdaterConfig
 }
 
 /// <summary>
-/// Direct-access guards (port of set-egress-proxy.ps1, ban-ai-hosts.ps1, proxy-on/off.ps1,
-/// sync-claude-noproxy.ps1 and the WSL startup script): the managed policy egressProxyUrl,
-/// three layers of the local ban (hosts/NRPT/firewall), env in Claude Code settings.json
-/// (Windows and WSL), the WinINET system proxy. The default ban rule identifiers
-/// match the legacy scheme — the application picks up and maintains the ban already in place
-/// rather than creating a parallel one (they can also be removed by the old scripts).
+/// Direct-access guards: the managed policy egressProxyUrl, three layers of the local ban
+/// (hosts/NRPT/firewall), env in Claude Code settings.json (Windows and WSL), the WinINET
+/// system proxy. The ban rule identifiers are configurable: the application looks up and
+/// maintains a ban with these identifiers rather than creating a parallel one.
 /// </summary>
 public sealed class GuardConfig
 {
-    // --- local ban: hosts + NRPT + firewall (port of ban-ai-hosts.ps1) ---
+    // --- local ban: hosts + NRPT + firewall ---
 
     /// <summary>hosts file; environment variables are expanded.</summary>
     public string HostsFile { get; set; } = @"%SystemRoot%\System32\drivers\etc\hosts";
 
     /// <summary>Start/end marker of the managed block in hosts (exact line match).</summary>
-    public string HostsBeginMarker { get; set; } = "# >>> ai-direct-ban (ban-ai-hosts.ps1, C:\\ovpn-script)";
+    public string HostsBeginMarker { get; set; } = "# >>> ai-direct-ban";
 
     public string HostsEndMarker { get; set; } = "# <<< ai-direct-ban";
 
     /// <summary>Comment line inside the block (human-readable, not tied to anything).</summary>
-    public string HostsComment { get; set; } = "# AI services (Claude/OpenAI) blocked from direct access; Claude: local ts-fwd proxy 127.0.0.1:8082 only";
+    public string HostsComment { get; set; } = "# AI services (Claude/OpenAI) are blocked from direct access; Claude: only through the local forward proxy";
 
     /// <summary>
     /// Exact names in hosts (subtree apexes plus hosts that applications actually call,
@@ -276,18 +273,18 @@ public sealed class GuardConfig
     public string NrptRuleName { get; set; } = "ai-direct-ban";
 
     /// <summary>Comment of the NRPT rule (human-readable text, not tied to anything).</summary>
-    public string NrptComment { get; set; } = "Claude/OpenAI: direct access blocked; Claude — only through the local forward proxy (ban-ai-hosts.ps1)";
+    public string NrptComment { get; set; } = "Claude/OpenAI: direct access blocked; Claude — only through the local forward proxy";
 
     /// <summary>Anthropic subnets for firewall outbound Block (public constants; shared clouds are not banned by IP).</summary>
     public List<string> FirewallSubnets { get; set; } = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
 
     /// <summary>Group of the firewall rules — by it the rules are identified and removed.</summary>
-    public string FirewallGroup { get; set; } = "ai-direct-ban (ban-ai-hosts.ps1)";
+    public string FirewallGroup { get; set; } = "ai-direct-ban";
 
     /// <summary>Probe name of the anthropic.com subtree: absent from hosts, resolves before the ban — a clean NRPT check.</summary>
     public string BanProbeName { get; set; } = "www.anthropic.com";
 
-    // --- env in Claude Code settings.json (port of sync-claude-noproxy.ps1) ---
+    // --- env in Claude Code settings.json ---
 
     /// <summary>Claude Code settings.json on Windows; environment variables are expanded.</summary>
     public string ClaudeSettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
@@ -300,7 +297,7 @@ public sealed class GuardConfig
     /// <summary>WSL startup script that refreshes the proxy address (NAT gateway) when the distro starts; the path is the same in all distros.</summary>
     public string WslStartupScript { get; set; } = "/etc/wsl.d/startup/10-claude-proxy.sh";
 
-    // --- WinINET system proxy (port of proxy-on/off.ps1) ---
+    // --- WinINET system proxy ---
 
     /// <summary>Additional system proxy bypass entries (local addresses and private ranges are fixed in code).</summary>
     public List<string> SystemProxyExtraBypass { get; set; } = ["*.ru", "*.su", "*.by", "*.kz"];
@@ -366,8 +363,8 @@ public sealed class ForwardProxyConfig
 
     /// <summary>
     /// The proxy in a separate detached worker (its own exe with the --proxy-worker marker) that survives
-    /// the exit of the command/GUI (parity with ts-fwd of the legacy scheme): chain up brings the worker up, chain down
-    /// stops it. Disabled — the proxy lives in the GUI/command process, as before.
+    /// the exit of the command/GUI: chain up brings the worker up, chain down
+    /// stops it. Disabled — the proxy lives in the GUI/command process.
     /// </summary>
     public bool Detached { get; set; }
 
@@ -427,7 +424,7 @@ public sealed class DohDiscoveryConfig
     public string CliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
 
     /// <summary>Named pipe of the sidecar daemon.</summary>
-    public string Socket { get; set; } = @"\\.\pipe\ts-sidecar";
+    public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
 
     [JsonIgnore]
     public TimeSpan NetmapTimeout => TimeSpan.FromSeconds(40);

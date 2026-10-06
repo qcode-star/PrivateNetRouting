@@ -90,7 +90,7 @@
                 </StackPanel>
                 <TextBlock Text="{Binding ChainDetails}" FontSize="12" LineHeight="20"
                            Foreground="{StaticResource Brush.Text}"/>
-                <!-- Idle auto-stop watchdog: explicit enable (rule #5), lives while the app is open -->
+                <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
                 <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,12,0,0"
                           Checked="OnWatchdogToggled" Unchecked="OnWatchdogToggled"/>
             </StackPanel>

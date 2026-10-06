@@ -15,7 +15,7 @@ public static class ElevatedChainCommands
     /// <summary>
     /// Runs in an already elevated process (App or pnr). Returns the exit code;
     /// the result is written to a file with a nonce so the non-elevated parent waits for
-    /// exactly its own launch (like start-result.txt in the legacy scheme, but guarded against a stale one).
+    /// exactly its own launch, guarded against a stale one).
     /// </summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
     {

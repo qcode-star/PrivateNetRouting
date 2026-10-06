@@ -2,19 +2,19 @@ namespace PrivateNetRouting.Core.Guard;
 
 public enum GuardKind
 {
-    /// <summary>Local direct-access ban: hosts + NRPT + firewall (port of ban-ai-hosts.ps1).</summary>
+    /// <summary>Local direct-access ban: hosts + NRPT + firewall.</summary>
     LocalBan,
 
-    /// <summary>Managed policy of Claude egressProxyUrl + disableWslSessions=0 (port of set-egress-proxy.ps1).</summary>
+    /// <summary>Managed policy of Claude egressProxyUrl + disableWslSessions=0.</summary>
     EgressPolicy,
 
-    /// <summary>env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) in settings.json of Claude Code, Windows (port of sync-claude-noproxy.ps1).</summary>
+    /// <summary>env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) in settings.json of Claude Code, Windows.</summary>
     ClaudeSettings,
 
     /// <summary>WSL: startup script with the proxy address + settings.json in the distro.</summary>
     WslConfig,
 
-    /// <summary>WinINET system proxy (port of proxy-on/off.ps1).</summary>
+    /// <summary>WinINET system proxy.</summary>
     SystemProxy,
 }
 

@@ -5,7 +5,7 @@ namespace PrivateNetRouting.Core.Guard;
 public sealed record HostsBlockState(bool Present, int EntryCount, bool Current);
 
 /// <summary>
-/// Managed block in hosts (port of ban-ai-hosts.ps1): the block is rebuilt from the list,
+/// Managed block in hosts: the block is rebuilt from the list,
 /// so re-applying updates it; foreign lines are left alone. Writing to the system hosts
 /// file requires administrator rights (performed in the elevated helper).
 /// </summary>
@@ -13,7 +13,7 @@ public static class HostsFileBlock
 {
     /// <summary>
     /// Reads the state of the block: whether the markers are present, how many "0.0.0.0 name"
-    /// entries are inside (counting as in the legacy scheme: only lines starting with "0.0.0.0 "),
+    /// entries are inside (counting only lines starting with "0.0.0.0 "),
     /// and whether the content matches the desired list. Read rights suffice for any user.
     /// </summary>
     public static HostsBlockState Read(string path, string begin, string end, string comment, IReadOnlyList<string> domains)
@@ -139,7 +139,7 @@ public static class HostsFileBlock
         return lines;
     }
 
-    /// <summary>ASCII encoding and CRLF — same as Set-Content in the legacy scheme (hosts dislikes anything else).</summary>
+    /// <summary>ASCII encoding and CRLF (hosts dislikes anything else).</summary>
     private static void WriteAll(string path, List<string> lines) =>
         File.WriteAllText(path, string.Join("\r\n", lines) + "\r\n", Encoding.ASCII);
 }

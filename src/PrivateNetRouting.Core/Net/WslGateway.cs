@@ -6,7 +6,7 @@ namespace PrivateNetRouting.Core.Net;
 /// <summary>
 /// WSL NAT gateway: the IPv4 of the "vEthernet (WSL...)" adapter on the Windows side. The address
 /// is stable for the lifetime of the WSL instance, so it is read once at startup (with retries
-/// until the adapter appears) and is not tracked further — as in the legacy scheme.
+/// until the adapter appears) and is not tracked further.
 /// </summary>
 public static class WslGateway
 {

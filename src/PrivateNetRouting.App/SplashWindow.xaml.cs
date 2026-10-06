@@ -11,7 +11,7 @@ using PrivateNetRouting.Core.Chain;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Chain bring-up splash screen when launching Claude (a port of claude-splash.ps1): a card in the
+/// Chain bring-up splash screen when launching Claude: a card in the
 /// bottom-right corner of the work area, steps daemon→keeper→node→proxy→health, an elapsed counter,
 /// a hint about UAC; at the end "Done" or an error text with "Open log"/"Close" buttons
 /// (auto-close in a minute). Shown only where there is a real wait:
