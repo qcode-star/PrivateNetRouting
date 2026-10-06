@@ -1,16 +1,16 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:s="clr-namespace:System;assembly=mscorlib">
-    <!-- Русские строки UI. Ключи и набор плейсхолдеров ({0}, ...) должны совпадать
-         во всех словарях Strings.*.xaml; список языков — AppLanguage.Supported. -->
+    <!-- Russian UI strings. Keys and placeholder sets ({0}, ...) must match across
+         all Strings.*.xaml dictionaries; the language list is AppLanguage.Supported. -->
 
-    <!-- Заголовок и статус -->
+    <!-- Header and status -->
     <s:String x:Key="Main.Header">Forward-прокси</s:String>
     <s:String x:Key="Main.State.Unknown">неизвестно</s:String>
     <s:String x:Key="Main.State.Running">работает</s:String>
     <s:String x:Key="Main.State.Stopped">остановлен</s:String>
 
-    <!-- Карточка статуса -->
+    <!-- Status card -->
     <s:String x:Key="Main.Listeners">Слушатели</s:String>
     <s:String x:Key="Main.ActiveConnections">Активные соединения</s:String>
     <s:String x:Key="Main.TotalErrors">Всего / ошибок</s:String>
@@ -18,7 +18,7 @@
     <s:String x:Key="Main.Config">Конфиг</s:String>
     <s:String x:Key="Main.Log">Лог</s:String>
 
-    <!-- Цепочка -->
+    <!-- Chain -->
     <s:String x:Key="Main.Chain">Цепочка</s:String>
     <s:String x:Key="Main.Chain.FullUp">полностью поднята</s:String>
     <s:String x:Key="Main.Chain.Partial">не полностью</s:String>
@@ -34,13 +34,13 @@
     <s:String x:Key="Main.Chain.Health.Fail">не прошло</s:String>
     <s:String x:Key="Main.Chain.DetailsFmt">демон: {0}    кипер: {1}    узел: {2}&#10;прокси: {3}    здоровье: {4}</s:String>
 
-    <!-- Сторож автостопа -->
+    <!-- Idle watchdog -->
     <s:String x:Key="Main.Watchdog">Автостоп по простою (гасит WSL-хост и цепочку, когда Claude не используется)</s:String>
     <s:String x:Key="Main.Watchdog.StartedFmt">сторож запущен: проверка каждые {0} с</s:String>
     <s:String x:Key="Main.Watchdog.StoppedIdle">сторож: простой — WSL-хост и цепочка остановлены</s:String>
     <s:String x:Key="Main.Watchdog.StoppedManual">сторож остановлен</s:String>
 
-    <!-- Кнопки -->
+    <!-- Buttons -->
     <s:String x:Key="Main.Button.Start">Запустить</s:String>
     <s:String x:Key="Main.Button.Stop">Остановить</s:String>
     <s:String x:Key="Main.Button.CheckChain">Проверить цепочку</s:String>
@@ -51,7 +51,7 @@
     <s:String x:Key="Main.Button.LaunchBrowser">Браузер</s:String>
     <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude…</s:String>
 
-    <!-- Результаты операций -->
+    <!-- Operation results -->
     <s:String x:Key="Main.Check.Running">проверяю (CONNECT-roundtrip)...</s:String>
     <s:String x:Key="Main.Check.AliveFmt">цепочка жива: CONNECT через {0} прошёл</s:String>
     <s:String x:Key="Main.Check.DeadFmt">цепочка не отвечает: CONNECT через {0} не прошёл</s:String>
@@ -62,20 +62,20 @@
     <s:String x:Key="Main.ErrorFmt">ошибка: {0}</s:String>
     <s:String x:Key="Main.LanguageSavedFmt">язык сохранён в конфиге: {0}</s:String>
 
-    <!-- Запуск Claude -->
+    <!-- Claude launch -->
     <s:String x:Key="Main.Launch.Busy">запуск (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
 
-    <!-- Запуск браузера (изолированный профиль) -->
+    <!-- Browser launch (isolated profile) -->
     <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
 
-    <!-- Обновление Claude: сигнал проверки на старте -->
+    <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Доступно обновление Claude: {0} → {1}</s:String>
     <s:String x:Key="Main.Update.Available">Доступно обновление Claude</s:String>
 
-    <!-- Гарды: контроль прямого доступа (локальный бан, egress-политика, settings.json, WSL) -->
+    <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
     <s:String x:Key="Main.Guard">Гарды: контроль прямого доступа</s:String>
     <s:String x:Key="Main.Guard.Button.Refresh">Обновить</s:String>
     <s:String x:Key="Main.Guard.Button.On">Вкл</s:String>
@@ -117,11 +117,11 @@
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: пропущен — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: записан прокси {1}</s:String>
 
-    <!-- Трей -->
+    <!-- Tray -->
     <s:String x:Key="Tray.Open">Открыть</s:String>
     <s:String x:Key="Tray.Exit">Выход</s:String>
 
-    <!-- Заставка (подъём цепочки при запуске Claude) -->
+    <!-- Splash (chain rise while launching Claude) -->
     <s:String x:Key="Splash.Title">Запуск Claude</s:String>
     <s:String x:Key="Splash.Browser.Title">Запуск браузера</s:String>
     <s:String x:Key="Splash.Subtitle">поднимаю прокси-цепочку</s:String>
@@ -138,7 +138,7 @@
     <s:String x:Key="Splash.Button.OpenLog">Открыть лог</s:String>
     <s:String x:Key="Splash.Button.Close">Закрыть</s:String>
 
-    <!-- Окно обновления (ручное обновление Claude Desktop, MSIX) -->
+    <!-- Update window (manual Claude Desktop MSIX update) -->
     <s:String x:Key="Update.Title">Обновление Claude Desktop</s:String>
     <s:String x:Key="Update.Header">Claude Desktop</s:String>
     <s:String x:Key="Update.SubHeader">Ручное обновление (MSIX)</s:String>
@@ -176,11 +176,11 @@
     <s:String x:Key="Update.Button.ContinueWithUrl">Продолжить с этим URL</s:String>
     <s:String x:Key="Update.ConfirmClose">Остановить обновление и закрыть?</s:String>
 
-    <!-- Настройки -->
+    <!-- Settings -->
     <s:String x:Key="Main.Language">Язык</s:String>
     <s:String x:Key="Main.Language.Auto">Как в системе</s:String>
 
-    <!-- Окно диагностики (сводка состояния только чтением + просмотр логов, порт proxy-status.ps1) -->
+    <!-- Diagnostics window (read-only state summary + log viewer, port of proxy-status.ps1) -->
     <s:String x:Key="Diag.Title">Диагностика</s:String>
     <s:String x:Key="Diag.Header">Сводка состояния (только чтение)</s:String>
     <s:String x:Key="Diag.Button.Refresh">Обновить</s:String>
