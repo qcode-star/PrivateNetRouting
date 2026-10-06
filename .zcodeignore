@@ -1,4 +1,4 @@
-# Результаты сборки
+# Build results
 [Dd]ebug/
 [Rr]elease/
 x64/
@@ -18,23 +18,23 @@ x86/
 *.sln.docstates
 *.rsuser
 
-# Тесты и покрытие
+# Tests and coverage
 TestResults/
 coverage*
 *.trx
 *.cobertura.xml
 .playwright/
 
-# NuGet / пакеты
+# NuGet / packages
 *.nupkg
 *.snupkg
 packages/
 
-# Публикация
+# Publishing
 publish/
 *.pubxml.user
 
-# ЛОКАЛЬНЫЕ КОНФИГИ И СЕКРЕТЫ — никогда не коммитить (правило №1 AGENTS.md)
+# LOCAL CONFIG AND SECRETS — never commit (rule #1 in AGENTS.md)
 # appsettings.*.local.json
 # *.local.json
 # config/local/
@@ -45,13 +45,13 @@ publish/
 # *.pem
 # *.key
 
-# Служебное
+# Miscellaneous
 *.tmp
 ~$*
 Thumbs.db
 .DS_Store
 
-# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+# ===== ↑ everything above is synced from .gitignore ("Sync from .gitignore" rewrites only that part) =====
 .git/
 .hg/
 .svn/
@@ -80,5 +80,5 @@ cdk.out/
 eggs/
 pip-wheel-metadata/
 wheels/
-# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
-# 自定义规则写在下方（本行提示可删除）
+# ----- ↑ the rules above are ZCode defaults (write custom rules below this line; they are not touched by sync/restore) -----
+# Write custom rules below (this hint line can be deleted)

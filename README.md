@@ -1,27 +1,27 @@
 # PrivateNetRouting
 
-Личный Windows-инструментарий (WPF, .NET 10 LTS) для сопровождения работы Claude Desktop через
-частную прокси-цепочку: локальный forward-прокси с DoH-резолвом, супервизор цепочки, лончер,
-автостоп по простою, обновлятор MSIX-пакета, запрет прямого доступа, диагностика. Консолидирует
-прежний набор PowerShell/Python-скриптов в одно приложение.
+A personal Windows toolkit (WPF, .NET 10 LTS) that keeps Claude Desktop running through a private
+proxy chain: a local forward proxy with DoH resolution, a chain supervisor, a launcher, idle
+auto-stop, an MSIX package updater, direct-access blocking, and diagnostics. It consolidates the
+previous set of PowerShell/Python scripts into a single application.
 
-## Статус
+## Status
 
-Проект в начале разработки. Действующая (боевая) схема пока живёт в старом скриптовом наборе —
-приложение замещает её модуль за модулем. Правила разработки — в [AGENTS.md](AGENTS.md).
+The project is in early development. The working (production) setup still lives in the old script
+set — the application replaces it module by module. Development rules are in [AGENTS.md](AGENTS.md).
 
-## Сборка
+## Build
 
 ```bash
-dotnet build              # или полный путь, если PATH в сессии устарел:
+dotnet build              # or the full path if PATH is stale in the session:
                           # "/c/Program Files/dotnet/dotnet.exe" build
 dotnet test
 dotnet run --project src/PrivateNetRouting.App
 ```
 
-## Конфигурация
+## Configuration
 
-Всё окружение-зависимое (адреса endpoint'ов, порты, списки доменов обхода, пути, таймауты)
-живёт в пользовательском конфиге приложения и в git не попадает. В репозитории — только
-шаблоны с плейсхолдерами в `config/*.example.json`. Репозиторий приватный и анонимный:
-без реальных адресов, доменов, имён и секретов (правило №1 в AGENTS.md).
+Everything environment-specific (endpoint addresses, ports, bypass domain lists, paths, timeouts)
+lives in the application's user config and never reaches git. The repository holds only templates
+with placeholders in `config/*.example.json`. The repository is private and anonymous: no real
+addresses, domains, names, or secrets (rule #1 in AGENTS.md).

@@ -1,309 +1,318 @@
 # AGENTS.md
 
-Приватный личный проект: WPF-приложение на .NET 10 LTS (Windows Desktop), которое собирает под
-одним окном весь ранее скриптовый функционал сопровождения Claude Desktop на этой машине:
-локальный прокси с DoH-резолвом, супервизор прокси-цепочки, лончер, автостоп по простою,
-обновлятор MSIX, запрет прямого доступа, диагностика. Ниже — правила, которые нельзя нарушать,
-и план, по которому строим.
+Private personal project: a WPF application on .NET 10 LTS (Windows Desktop) that brings under a
+single window all the previously scripted functionality for maintaining Claude Desktop on this
+machine: a local proxy with DoH resolution, a proxy chain supervisor, a launcher, idle auto-stop,
+an MSIX updater, direct-access blocking, and diagnostics. Below are the rules that must not be
+broken and the plan we build by.
 
-## Правило №0: неоднозначности — уточнять у владельца
+## Rule #0: ambiguities — ask the owner
 
-При любых неоднозначностях, неточностях и «непонятках» в требованиях — как должен вести
-себя код, какие дефолты, что считать ошибкой — не додумывать молча, а уточнять желаемое
-поведение у пользователя. Один короткий вопрос до кода дешевле переделки после.
+For any ambiguity, imprecision or "unclear point" in the requirements — how the code should behave,
+what the defaults are, what counts as an error — do not silently invent an answer; clarify the
+desired behavior with the user. One short question before the code is cheaper than reworking it
+after.
 
-## Правило №1: анонимность репозитория — проверять каждый коммит
+## Rule #1: repository anonymity — check every commit
 
-Репозиторий приватный и должен оставаться **максимально анонимным**: в нём нет и не должно
-попасть моих настроек, секретов и чего-либо, что связывает машину или автора с работодателем,
-корпоративной сетью и инфраструктурой. Запрещено коммитить:
+The repository is private and must stay **as anonymous as possible**: it does not contain and must
+never receive my settings, secrets, or anything that links the machine or the author to the
+employer, the corporate network, or its infrastructure. It is forbidden to commit:
 
-- реальные адреса и порты endpoint'ов: tailnet-IP узлов, публичные IP выходов, DoH-эндпоинты,
-  адреса DNS-серверов, адрес координационного сервера tailnet;
-- корпоративные домены и списки зон (в т.ч. список обхода прокси — он есть только в конфиге);
-- имена компьютеров и узлов сети, имя пользователя Windows, имена WSL-дистрибутивов и их
-  пользователей, пути, содержащие имя пользователя (пишем `%USERPROFILE%\…` или `~`);
-- ключи узлов, токены, пароли, содержимое `settings.json` Claude/CLI-инструментов;
-- логи и фрагменты конфигов со всем перечисленным, скриншоты с ними.
+- real endpoint addresses and ports: tailnet IPs of nodes, public exit IPs, DoH endpoints,
+  DNS server addresses, the tailnet coordination server address;
+- corporate domains and zone lists (including the proxy bypass list — it exists only in the config);
+- computer and network node names, the Windows user name, WSL distro names and their users,
+  paths containing the user name (write `%USERPROFILE%\…` or `~`);
+- node keys, tokens, passwords, the contents of `settings.json` of Claude/CLI tools;
+- logs and config fragments containing any of the above, and screenshots with them.
 
-Всё окружение-зависимое — в пользовательском конфиге приложения (`%APPDATA%`, в git не попадает,
-см. правило №2). В репозитории — только шаблоны с плейсхолдерами (`config/*.example.json`).
-Git-идентичность задана локально в репозитории: логин GitHub + noreply-адрес; глобальную
-не трогать.
+Everything environment-specific lives in the application's user config (`%APPDATA%`, not committed,
+see rule #2). The repository holds only templates with placeholders (`config/*.example.json`).
+The git identity is set locally in the repository: GitHub login + noreply address; do not touch the
+global one.
 
-Перед каждым коммитом смотреть диф: IP-адреса (допустимы только `127.0.0.1`, `0.0.0.0`,
-примеры `*.example`, документированные публичные константы вроде API-хостов в шаблонах),
-незнакомые домены, имена узлов, строки-секреты. Сомневаешься — не коммитить, спросить.
+Before every commit, review the diff: IP addresses (only `127.0.0.1`, `0.0.0.0`, `*.example`
+samples, and documented public constants such as API hosts in templates are allowed), unfamiliar
+domains, node names, secret-like strings. In doubt — do not commit, ask.
 
-**Документы-первоисточники вне репозитория** (старый проект `%USERPROFILE%\ZCodeProject`,
-скрипты `C:\ovpn-script`, логи машины) содержат реальные адреса и идентификаторы — их нельзя
-копировать в репозиторий дословно. Переносим только санированную суть: механику, протоколы,
-порядок действий — без адресов, имён и доменов.
+**Source documents outside the repository** (the old project `%USERPROFILE%\ZCodeProject`, the
+scripts in `C:\ovpn-script`, machine logs) contain real addresses and identifiers — they must not be
+copied into the repository verbatim. Carry over only the sanitized essence: mechanics, protocols,
+sequence of actions — without addresses, names, or domains.
 
-**Дополнительные инструкции по конкретной машине** (реальные адреса, имена, конфигурации,
-ссылки на первоисточники) живут в локальном файле `.secret.agents.md` в корне репозитория:
-он исключён `.gitignore`-ом и в коммиты попадать не должен никогда — это осознанное
-единственное исключение из запрета окружение-зависимых значений, всё остальное — как выше.
+**Machine-specific additional instructions** (real addresses, names, configurations, references to
+sources) live in the local file `.secret.agents.md` in the repository root: it is excluded by
+`.gitignore` and must never end up in a commit — this is the deliberate single exception to the ban
+on environment-specific values; everything else is as above.
 
-## Правило №2: секреты и конфигурация
+## Rule #2: secrets and configuration
 
-- Приложение читает пользовательский конфиг из `%APPDATA%\<Приложение>\` (создаётся при первом
-  запуске из шаблона). Пример в репозитории — `config/appsettings.example.json` с плейсхолдерами.
-- Ничего окружение-зависимого не хардкодится в коде: адреса, порты, пути к бинарникам
-  (tailscale, wsl, браузеры), имя WSL-дистрибутива и пользователя, цель health-check,
-  списки доменов обхода, таймауты, пороги простоя.
-- Секреты в конфиге не хранить вовсе (схема без аутентификации); если появятся — только
-  Windows Credential Manager / DPAPI, не файл в открытом виде.
+- The application reads the user config from `%APPDATA%\<Application>\` (created on first launch
+  from the template). The repository example is `config/appsettings.example.json` with placeholders.
+- Nothing environment-specific is hardcoded in the code: addresses, ports, paths to binaries
+  (tailscale, wsl, browsers), the WSL distro and user name, the health-check target, bypass domain
+  lists, timeouts, idle thresholds.
+- Do not store secrets in the config at all (the scheme has no authentication); if they ever appear —
+  only Windows Credential Manager / DPAPI, never a plaintext file.
 
-## Правило №3: старая скриптовая схема — боевой контур до паритета
+## Rule #3: the old script scheme — the production setup until parity
 
-Действующая рабочая схема — PowerShell/Python-набор в `C:\ovpn-script` (лончер, супервизор,
-прокси ts-fwd, boot/stop sidecar-цепочки, бан, синхронизация NO_PROXY, статус). Пока приложение
-не заменит функционал полностью:
+The working setup is the PowerShell/Python set in `C:\ovpn-script` (launcher, supervisor, ts-fwd
+proxy, sidecar chain boot/stop, ban, NO_PROXY sync, status). Until the application replaces the
+functionality completely:
 
-- **не ломать работающий набор**: правки старых скриптов — только по явной просьбе;
-- новый функционал сначала живёт в приложении параллельно (свои порты/пути из конфига —
-  или переключение по конфигу), замещение звена старой схемы — осознанное решение владельца,
-  а не побочный эффект;
-- детали устройства прежней схемы — в docs старого проекта (`%USERPROFILE%\ZCodeProject\docs`);
-  помнить про правило №1 при переносе оттуда знаний.
+- **do not break the working set**: edits to the old scripts only on an explicit request;
+- new functionality first lives in the application in parallel (its own ports/paths from the config —
+  or a config switch); replacing a link of the old scheme is a deliberate decision by the owner,
+  not a side effect;
+- the details of how the legacy scheme works are in the old project's docs
+  (`%USERPROFILE%\ZCodeProject\docs`); remember rule #1 when carrying knowledge over from there.
 
-## Правило №4: ничего в автозапуск без явного подтверждения
+## Rule #4: nothing in autostart without explicit confirmation
 
-Ничего самовольно не регистрировать и не прописывать в автозапуск (задачи планировщика,
-службы, ключи автозагрузки, фоновые процессы, переживающие сессию) — даже если фича готова и
-польза очевидна. Сначала показать, что именно будет создано и где, дождаться «да». То же с
-удалением существующего автозапуска. Это наследие боевой машины, распространяется и на
-приложение: фоновые режимы (трей, сторож) — по явному действию пользователя.
+Do not register or add anything to autostart on your own initiative (scheduled tasks, services,
+autostart keys, background processes that outlive the session) — even if the feature is ready and
+the benefit is obvious. First show what exactly will be created and where, wait for a "yes". The
+same applies to removing existing autostart entries. This is a legacy of the production machine and
+extends to the application: background modes (tray, watchdog) — only on an explicit user action.
 
-## Правило №5: без драйверов и инъекций
+## Rule #5: no drivers and no injection
 
-Не использовать и не предлагать инструменты с драйверами и инъекцией в процессы
-(Proxifier-подобные, WFP-перехват, DLL-инъекция). Вся маршрутизация решается прокси и
-политиками приложения. Это принципиальное ограничение схемы, а не недоработка.
+Do not use and do not propose tools with drivers or process injection (Proxifier-like tools, WFP
+interception, DLL injection). All routing is solved by the proxy and the application's policies.
+This is a fundamental limitation of the scheme, not a shortcoming.
 
-## Правило №6: маршруты, DNS, hosts, firewall — состояние до, живая проверка после
+## Rule #6: routes, DNS, hosts, firewall — state before, live check after
 
-Перед изменениями маршрутов/DNS/hosts/NRPT/firewall сначала смотреть текущее состояние, после —
-проверять результат на живом трафике, а не «должно работать». Отдельно помнить: у приложения
-есть слои защиты от прямого доступа (managed-политика, hosts, NRPT, firewall) — менять их
-только через модули приложения с прозрачным статусом того, что сделано.
+Before changes to routes/DNS/hosts/NRPT/firewall, look at the current state first; afterwards, verify
+the result on live traffic, not "it should work". Separately remember: the application has layers of
+protection against direct access (managed policy, hosts, NRPT, firewall) — change them only through
+the application's modules, with a transparent status of what was done.
 
-## Правило №7: проектные md — только актуальное состояние
+## Rule #7: project md files — current state only
 
-Во всех md репозитория фиксируем только текущее актуальное состояние: без истории
-«было так, потом поменяли», дат проверок и ссылок на сессии. Факт перестал быть верным —
-переписывается или удаляется. AGENTS.md — живой документ: реализовали модуль — обновили
-строку, а не дописали заметку.
+In all md files of the repository we record only the current actual state: no history of "it was
+like this, then we changed it", no check dates, no session references. When a fact stops being true
+it is rewritten or deleted. AGENTS.md is a living document: a module is implemented — update the
+row, don't append a note.
 
-## Целевая архитектура
+## Target architecture
 
-Одно WPF-приложение (одиночный экземпляр, трей + окна) + headless-режим для CLI-паритета со
-старыми скриптами. Модули ядра не зависят от UI (тестируемость), UI — тонкая обёртка.
-Режимы работы приложения (решение владельца):
+A single WPF application (single instance, tray + windows) plus a headless mode for CLI parity with
+the old scripts. Core modules do not depend on the UI (testability); the UI is a thin wrapper.
+Application modes (the owner's decision):
 
-- **GUI обычный** (`PrivateNetRouting.App` без аргументов): окно статуса/управления; значок
-  в трее живёт, пока работает приложение; минимизация и закрытие окна прячут его в трей
-  (прокси и включённый сторож продолжают работать), настоящий выход — «Выход» в меню трея
-  или завершение сеанса Windows; повторный запуск показывает свёрнутое окно;
-- **GUI ярлыковый** (`--launch`): так работает ярлык Claude на рабочем столе — если Claude
-  уже запущен, просто показывается окно приложения; если не запущен — окно с процессом
-  запуска (заставка подъёма: туннель, проверки) и стартом Claude с флагами прокси;
-- **консольный** (`pnr`, отдельный exe): все команды headless-паритета со старыми скриптами.
+- **normal GUI** (`PrivateNetRouting.App` with no arguments): the status/control window; the tray
+  icon lives as long as the application runs; minimizing and closing the window hide it to the tray
+  (the proxy and an enabled watchdog keep working); the real exit is "Exit" in the tray menu or
+  ending the Windows session; a second launch shows the hidden window;
+- **shortcut GUI** (`--launch`): this is how the Claude desktop shortcut works — if Claude is
+  already running, the application window is simply shown; if not, a window with the launch process
+  (bring-up splash screen: tunnel, checks) and the start of Claude with proxy flags;
+- **console** (`pnr`, a separate exe): all headless-parity commands with the old scripts.
 
-Порты по решению владельца: **18081** (HTTP демона), **18082** (forward-прокси, адрес для
-клиента), **18083** (SOCKS5 демона); дефолты не конфликтуют с прежней схемой — замещение её
-только явной правкой пользовательского конфига (правило №3).
-Портирование идёт по модулю за модулем из боевого набора; каждый модуль в приложении
-воспроизводит семантику источника (включая краевые случаи), но адреса/порты/имена берёт из
-конфига.
+Ports per the owner's decision: **18081** (daemon HTTP), **18082** (forward proxy, the address for
+the client), **18083** (daemon SOCKS5); the defaults do not conflict with the legacy scheme —
+replacing it only by explicitly editing the user config (rule #3).
+Porting proceeds module by module from the production set; every module in the application
+reproduces the semantics of its source (including edge cases), but takes addresses/ports/names from
+the config.
 
-| Модуль | Что делает | Статус | Источник портирования (`C:\ovpn-script`) |
+| Module | What it does | Status | Porting source (`C:\ovpn-script`) |
 |---|---|---|---|
-| ForwardProxy | локальный CONNECT-прокси: DoH-резолв имён через резолверы из конфига, дозвон через SOCKS5-апстрим userspace-sidecar, бинд на localhost и шлюз WSL, маркер активности (mtime) для сторожа; режим размещения слушателя решает ForwardProxySupervisor: in-process (по умолчанию) или detached-воркер (`forwardProxy.detached`, свой exe с маркером `--proxy-worker`, спавн через cmd с редиректом) — порт единый ресурс: занятый не биндится никем, останов добивает только опознанного по cmdline воркера, чужой владелец не трогается (предупреждение в лог) | **готов** (`PrivateNetRouting.Core.Net.*`; detached-режим живьём проверен: подъём воркера, слушатели localhost+шлюз WSL, опознание по маркеру, CONNECT-roundtrip, килл с освобождением порта, откат воркера на персональный лог) | `ts-fwd.py` |
-| ChainSupervisor | идемпотентный подъём/останов цепочки (демон userspace-tailscaled → кипер watch-ipn → up → forward-прокси → health-check), элевация старта демона через runas-копию себя (единственный UAC), «свои» процессы опознаются по statedir/пайпу в командной строке; логи демона/кипера — файловые ручки через cmd, переживают выход приложения. Живость демона — отзывчивостью его именованного пайпа: WMI прячет CommandLine элевейтнутого процесса от неэлевейтнутого читателя (Windows 11 24H2+), элевейтнутый останов по-прежнему добивает процессы поиском по cmdline. **Проверен живьём с новым statedir**: UAC-старт демона → кипер → вход узла по login-server (блокирующийся `tailscale login`, URL аутентификации владельцем) → health CONNECT-roundtrip; повторные подъёмы идемпотентны, узел входит молча по ключу; полный цикл «подъём → автостоп → подъём» прошёл без повторного входа | **готов** (`PrivateNetRouting.Core.Chain`) | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs`, `ts-sidecar-login.ps1` |
-| Launcher | запуск Claude Desktop с `--proxy-server`/`--proxy-bypass-list` (список обхода собирается из доменов конфига, обе формы записи каждой зоны; базовые записи — localhost/приватные диапазоны — фиксированы в коде), проверка и подъём цепочки (живой CONNECT, затем идемпотентный chain up), заставка с шагами подъёма (на живой цепочке окна нет), контрольные предупреждения в лог про managed-политику `egressProxyUrl` и уже запущенный без флагов Claude, флаги режимов (только-проверка/без-заставки); ярлыковый режим GUI `--launch`: Claude уже запущен (точное имя процесса) — только окно приложения, не запущен — полный запуск с заставкой | **готов** (`PrivateNetRouting.Core.Launcher` + `SplashWindow` в App; CLI `pnr launch [--check-only] [--no-splash]`; заставка — GUI-only; ярлык рабочего стола Claude → `PrivateNetRouting.App --launch`). Живой запуск Claude не проверялся. Прокси по умолчанию живёт в процессе команды — пережить её выход может только detached-режим (`forwardProxy.detached`, по умолчанию выключен) | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
-| Watchdog | автостоп по простою: периодическая проверка занятости (процессы claude*, коннекты к прокси, свежесть маркера активности; первый опрос — через интервал, каждое срабатывание таймера — Debug, в Info только смена причины и сам автостоп), при простое — штатная остановка WSL-хоста Claude (RPC server.shutdown своим бинарником, эскалация SIGTERM→SIGKILL на осиротевших, дистрибутив ради проверки не поднимается), затем останов цепочки существующим оркестратором; запуск — только явный (`pnr watchdog` / галка в окне приложения), живёт, пока жив запустивший процесс, в автозапуск не пишется; ручной сторож WSL-хоста по mtime (`claude-wsl-watch.ps1`) не переносился | **готов** (`PrivateNetRouting.Core.Watchdog`; интервал и дистрибутив WSL — в конфиге `watchdog.*`). Живой автостоп проверен: простой → WSL-хост (no-op при отсутствии хоста) → down → UAC-останов демона → кипер → выход | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
-| Updater | ручное обновление MSIX: проверка версий ДО подъёма цепочки («нечего ставить» — без UAC), адрес пакета из журнала AppX (или ввод вручную), многопоточная докачка фрагментами через собственный forward-прокси, сверка Publisher, закрытие Claude, `Add-AppxPackage`; GUI с шагами/прогрессом/стоп-кнопкой, паузой перед установкой и отложенной установкой (`--install-from`); во время скачивания держится свежим маркер активности (автостоп не гасит цепочку под загрузкой); на старте GUI — фоновая проверка обновления (только чтение версий и журнала AppX, без цепочки и UAC; `ui.checkUpdatesOnStart`): при наличии — строка возле кнопок запуска и балун трея | **реализован** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; окно `UpdateWindow` — часть GUI-приложения). Живьём проверен только `--check` (версия и журнал читаются, отсутствие URL отрабатывается); скачивание и установка живьём не выполнялись | ТЗ `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + скилл `claude-desktop-update` |
-| Guard | контроль прямого доступа: managed-политика `egressProxyUrl` (+`disableWslSessions=0`); локальный бан тремя слоями — hosts-блок, одно NRPT-правило на все поддеревья, firewall outbound Block по подсетям (идентификаторы по умолчанию совпадают с прежней схемой — приложение ведёт уже стоящий бан, а не создаёт параллельный); env в settings.json Claude Code (Windows и WSL: прокси приложения + NO_PROXY из доменов конфига; в WSL — ещё стартовый скрипт с адресом шлюза NAT, слой целиком опционален: `guard.wsl.mode` = on/off/auto и выбор синхронизации по каждому дистрибутиву); системный прокси WinINET on/off. Статус всех гардов — только чтением (карточка GUI, `pnr guard status [--live]`); бан и политика — элевейтнутым helper'ом, после бана — живые пробы (DNS/прямое/проксируемое) | **реализован** (`PrivateNetRouting.Core.Guard`; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off`; карточка «Гарды» в главном окне). Живьём проверены статус и живые пробы (чтение: бан прежней схемы виден, WSL-конфиг читается); изменяющие операции (бан/политика/синк) живьём не выполнялись | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1`, `sync-claude-noproxy.ps1` + стартовый скрипт `/etc/wsl.d/startup/10-claude-proxy.sh` |
-| BrowserLauncher | запуск браузера с изолированным профилем и прокси приложения, без системных настроек: Firefox — отдельный профиль с user.js, перезаписываемым при каждом запуске (адрес прокси из `forwardProxy.listen`, `no_proxies_on` — домены `launcher.bypassDomains` в двух формах + `*.tld` из `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), старт с `--new-instance` (иначе URL уйдёт в повседневный экземпляр без прокси); хромоподобные — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (отдельный каталог обязателен: запущенный экземпляр игнорирует флаги); цепочка — как у лончера Claude (живой CONNECT, при отказе идемпотентный подъём, заставка при ожидании); браузер выбирает `browser.type` (firefox/chromium, незнакомое — firefox), приватное окно — `browser.private` или флаг; запущенный наш экземпляр (cmdline с нашим профилем) не дублируется — пометка в окне приложения | **готов** (`PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; кнопка «Браузер» в главном окне; ярлыковый режим GUI `--launch-browser`). Живьём проверено: `--check-only`/`--prepare-only` (user.js корректен), запуск `--launch-browser` с профилем прежней схемы — claude.ai открывается через прокси, cmdline живого экземпляра хранит профиль (детекция «уже запущен» работает); ярлыки «Claude (браузер)» переведены на приложение. Прокси живёт в процессе команды/GUI, если не включён detached-режим (`forwardProxy.detached`) | `browser-proxy.ps1` |
-| Diagnostics | сводка состояния только чтением (порт `proxy-status.ps1`): владельцы слушателей цепочки с PID (таблица TCP через iphlpapi, без PowerShell), кипер/узел, WSL-бинд прокси, счётчики и возраст маркера активности, детальный CONNECT-roundtrip (время + первая строка ответа), ядро гардов (политика + бан, без WSL), живость сторожа (`pnr watchdog` виден извне по cmdline, сторож внутри GUI — только из его окна); полностью остановленная цепочка — короткое сообщение-норма вместо полной картины; просмотр логов (список с размерами, хвост по имени `--tail N`) и ротация: живой лог процесса — на месте (`FileLog.RotateNow`), свободный файл — сдвигом age-цепочки, занятое другим процессом — честно «locked» | **готов** (`PrivateNetRouting.Core.Diagnostics`; CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]`; окно `DiagnosticsWindow` — кнопка «Диагностика…»: сводка с подсветкой, список логов с хвостом, ротация, открытие папки). Живьём проверены status и logs list/show/rotate (в т.ч. порт 18082 виден как занятый работающим GUI, WSL-бинд и частичная политика прежней схемы) | `proxy-status.ps1` |
-| Localization | мультиязычность UI: строки — в словарях `Strings.<код>.xaml` (`{DynamicResource}` в XAML, `Loc.S`/`Loc.F` в коде), подмена словаря на лету; язык — `ui.language` конфига: `auto` (язык системы) или код, неподержанный — английский; новый язык = словарь + код в `AppLanguage.Supported` | **готов** (en/ru; `PrivateNetRouting.App/Localization`, селектор в шапке окна) | — |
+| ForwardProxy | local CONNECT proxy: DoH resolution of names through the resolvers from the config, dialing through the SOCKS5 upstream of the userspace sidecar, bind on localhost and the WSL gateway, activity marker (mtime) for the watchdog; the listener placement mode is decided by ForwardProxySupervisor: in-process (default) or a detached worker (`forwardProxy.detached`, its own exe with the `--proxy-worker` marker, spawned through cmd with redirection) — the port is a single resource: a busy one is not bound by anyone, stop kills only the worker identified by cmdline, a foreign owner is left alone (warning to the log) | **ready** (`PrivateNetRouting.Core.Net.*`; the detached mode has been checked live: worker bring-up, localhost + WSL gateway listeners, identification by the marker, CONNECT roundtrip, kill with port release, worker fallback to a per-process log) | `ts-fwd.py` |
+| ChainSupervisor | idempotent chain bring-up/shutdown (userspace tailscaled daemon → watch-ipn keeper → up → forward proxy → health check), elevation of the daemon start through a runas copy of itself (the only UAC), "our" processes are identified by the statedir/pipe in the command line; daemon/keeper logs are file handles through cmd, surviving application exit. Daemon liveness is determined by the responsiveness of its named pipe: WMI hides the CommandLine of an elevated process from a non-elevated reader (Windows 11 24H2+), while an elevated stop still kills processes by cmdline search. **Checked live with a new statedir**: UAC start of the daemon → keeper → node login through the login server (a blocking `tailscale login`, authentication URL by the owner) → health CONNECT roundtrip; repeated bring-ups are idempotent, the node logs in silently by key; the full cycle "bring-up → auto-stop → bring-up" passed without a second login | **ready** (`PrivateNetRouting.Core.Chain`) | `ts-sidecar-boot/start/stop/cli.ps1`, `ts-sidecar-elevate.vbs`, `ts-sidecar-login.ps1` |
+| Launcher | starting Claude Desktop with `--proxy-server`/`--proxy-bypass-list` (the bypass list is built from the config domains, both spellings of each zone; the base entries — localhost/private ranges — are fixed in the code), checking and bringing up the chain (live CONNECT, then an idempotent chain up), a splash screen with the bring-up steps (on a live chain there is no window), control warnings to the log about the `egressProxyUrl` managed policy and an already running Claude without flags, mode flags (check-only/no-splash); the GUI shortcut mode `--launch`: Claude already running (exact process name) — only the application window, not running — a full launch with the splash screen | **ready** (`PrivateNetRouting.Core.Launcher` + `SplashWindow` in App; CLI `pnr launch [--check-only] [--no-splash]`; the splash screen is GUI-only; the Claude desktop shortcut → `PrivateNetRouting.App --launch`). A live launch of Claude has not been checked. By default the proxy lives in the command process — only the detached mode can outlive its exit (`forwardProxy.detached`, disabled by default) | `claude-launcher.ps1`, `claude-splash.ps1`, `run-hidden.vbs`, `ps-host.ps1` |
+| Watchdog | idle auto-stop: periodic activity check (claude* processes, connections to the proxy, activity marker freshness; the first poll is after the interval, every timer tick is Debug, Info only carries a reason change and the auto-stop itself), when idle — graceful stop of the WSL Claude host (RPC server.shutdown with its own binary, SIGTERM→SIGKILL escalation on orphans, the distro is not brought up just for the check), then stopping the chain with the existing orchestrator; the start is only explicit (`pnr watchdog` / the checkbox in the application window), it lives as long as the process that started it, and is never written to autostart; the manual WSL host watchdog by mtime (`claude-wsl-watch.ps1`) was not ported | **ready** (`PrivateNetRouting.Core.Watchdog`; the interval and the WSL distro are in the config under `watchdog.*`). The live auto-stop has been checked: idle → WSL host (no-op when the host is absent) → down → UAC stop of the daemon → keeper → exit | `ts-sidecar-watch-claude.ps1`, `claude-wsl-stop.ps1`, `claude-wsl-watch.ps1` |
+| Updater | manual MSIX update: version check BEFORE the chain bring-up ("nothing to install" — no UAC), the package address from the AppX journal (or manual entry), multi-threaded chunked download through the application's own forward proxy, Publisher verification, closing Claude, `Add-AppxPackage`; a GUI with steps/progress/stop button, a pause before installation and a deferred installation (`--install-from`); during the download the activity marker is kept fresh (auto-stop does not shut the chain down under the download); on GUI start — a background update check (read-only on versions and the AppX journal, no chain and no UAC; `ui.checkUpdatesOnStart`): if there is one — a line next to the launch buttons and a tray balloon | **implemented** (`PrivateNetRouting.Core.Updater`; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]`; the `UpdateWindow` window is part of the GUI application). Only `--check` has been checked live (the version and the journal are read, a missing URL is handled); the download and installation have not been performed live | spec `%USERPROFILE%\ZCodeProject\claude-update-gui-tz.md` + the `claude-desktop-update` skill |
+| Guard | direct-access control: the managed policy `egressProxyUrl` (+`disableWslSessions=0`); a local ban in three layers — a hosts block, one NRPT rule for all subtrees, a firewall outbound Block by subnet (the identifiers by default match the legacy scheme — the application maintains the ban already in place instead of creating a parallel one); env in Claude Code settings.json (Windows and WSL: the application proxy + NO_PROXY from the config domains; in WSL also a startup script with the NAT gateway address; the layer is entirely optional: `guard.wsl.mode` = on/off/auto and a per-distro choice of syncing); the WinINET system proxy on/off. The status of all guards is read-only (a GUI card, `pnr guard status [--live]`); the ban and the policy go through an elevated helper, and after a ban — live probes (DNS/direct/proxied) | **implemented** (`PrivateNetRouting.Core.Guard`; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off`; the "Guards" card in the main window). The status and the live probes have been checked live (read-only: the legacy scheme's ban is visible, the WSL config is readable); the modifying operations (ban/policy/sync) have not been performed live | `set-egress-proxy.ps1`, `ban-ai-hosts.ps1`, `proxy-on/off.ps1`, `sync-claude-noproxy.ps1` + the startup script `/etc/wsl.d/startup/10-claude-proxy.sh` |
+| BrowserLauncher | launching a browser with an isolated profile and the application proxy, without touching system settings: Firefox — a separate profile with user.js, rewritten on every launch (the proxy address from `forwardProxy.listen`, `no_proxies_on` — the `launcher.bypassDomains` domains in both forms + `*.tld` from `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), started with `--new-instance` (otherwise the URL would go to the everyday instance without a proxy); Chromium-like — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (a separate directory is mandatory: a running instance ignores the flags); the chain is like the Claude launcher's (live CONNECT, on failure an idempotent bring-up, splash screen while waiting); the browser is chosen by `browser.type` (firefox/chromium, an unknown value — firefox), the private window — `browser.private` or a flag; an already running instance of ours (cmdline with our profile) is not duplicated — a note in the application window | **ready** (`PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; the "Browser" button in the main window; the GUI shortcut mode `--launch-browser`). Checked live: `--check-only`/`--prepare-only` (user.js is correct), `--launch-browser` with the legacy scheme's profile — claude.ai opens through the proxy, the cmdline of the live instance carries the profile (the "already running" detection works); the "Claude (browser)" shortcuts have been switched to the application. The proxy lives in the command/GUI process unless the detached mode is enabled (`forwardProxy.detached`) | `browser-proxy.ps1` |
+| Diagnostics | a read-only state summary (a port of `proxy-status.ps1`): owners of the chain listeners with PIDs (a TCP table through iphlpapi, no PowerShell), keeper/node, the proxy's WSL bind, counters and age of the activity marker, a detailed CONNECT roundtrip (time + first response line), the core of the guards (policy + ban, without WSL), watchdog liveness (`pnr watchdog` is visible from outside by cmdline, a watchdog inside the GUI — only from its window); a fully stopped chain — a short "normal" message instead of the full picture; log viewing (a list with sizes, tail by name `--tail N`) and rotation: the process's live log — in place (`FileLog.RotateNow`), a free file — by shifting the age chain, one held by another process — honestly "locked" | **ready** (`PrivateNetRouting.Core.Diagnostics`; CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]`; the `DiagnosticsWindow` window — the "Diagnostics…" button: a highlighted summary, a log list with tail, rotation, opening the folder). Checked live: status and logs list/show/rotate (including port 18082 visible as busy by the running GUI, the WSL bind, and the partial legacy-scheme policy) | `proxy-status.ps1` |
+| Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | **ready** (en/ru; `PrivateNetRouting.App/Localization`, a selector in the window header) | — |
 
-Замечания к архитектуре, которые нельзя потерять при портировании:
+Architecture notes that must not be lost during porting:
 
-- WPF: долгие ожидания — через async/await и очереди диспетчера, без блокировки UI-потока;
-  UI-поток STA; единый экземпляр через именованный mutex с активацией существующего окна.
-  Неминуемые синхронные ожидания асинхронного (старт/останов рантайма в OnStartup/OnExit) —
-  только через `Task.Run` (без Dispatcher-контекста), а пути старта/останова Core не захватывают
-  контекст (`ConfigureAwait(false)`): блокирующее ожидание на UI-потоке + продолжение await'а
-  в очередь диспетчера = дедлок и вечно живой процесс (регрессионный тест —
-  `StopCompletesUnderBlockedSynchronizationContext`).
-- Трей и время жизни GUI: `ShutdownMode=OnExplicitShutdown`, закрытие/минимизация главного
-  окна только прячут его (трей `TrayIcon` на WinForms NotifyIcon — WinForms подключён ради
-  него одного, глобальные юзинги убраны во избежание конфликтов имён с WPF); сторож в трее
-  продолжает работать. Ярлыки на рабочем столе: Claude → `--launch`, «Claude (браузер)» →
-  `--launch-browser`.
-- Элевация: отдельный helper-запуск (runas) с окном-0, не перезапуск всего приложения.
-- Время жизни звеньев: демон/кипер/узел переживают выход приложения (detached, файловые
-  ручки через cmd); forward-прокси по умолчанию живёт, пока жив его процесс (окно приложения
-  или `pnr proxy`), а при `forwardProxy.detached=true` — в отдельном воркере (свой exe
-  с `--proxy-worker`), переживающем выход команды/GUI: подъём/останов — через chain up/down
-  (выход GUI воркер не гасит), разовый подъём — `pnr proxy --detached`.
-- Логи: два писателя в один файл не допускаются (interleave ломает содержимое) — если
-  лог уже держит другой процесс (GUI в трее + `pnr` из терминала), второй пишет в
-  `<имя>.<pid>.log`; ротация — на старте по размеру, вручную — владельцем файла на месте.
-- Обновлятор: фаза проверки версий — до подъёма цепочки (лишний UAC не нужен); установка
-  не прерывается; во время длительных фаз держать маркер активности, чтобы автостоп не погасил
-  цепочку под загрузкой.
-- Гард: идентификаторы правил бана (маркеры hosts-блока, DisplayName NRPT-правила,
-  Group правил firewall) — в конфиге, дефолты совпадают с прежней схемой: приложение
-  и старые скрипты ведут один и тот же бан, а не два. Статус гарда — только чтение;
-  после применения/снятия бана — живые пробы, а не «должно работать».
-- Протоколы внешние, на которых держится семантика: CONNECT-roundtrip как health-check,
-  `server.shutdown` RPC WSL-хоста, журнал AppX как источник URL пакета, AppX Publisher-сверка.
+- WPF: long waits go through async/await and dispatcher queues, without blocking the UI thread;
+  the UI thread is STA; a single instance through a named mutex with activation of the existing
+  window. The unavoidable synchronous waits on asynchronous work (runtime start/stop in
+  OnStartup/OnExit) must go through `Task.Run` (without the Dispatcher context), and Core
+  start/stop paths do not capture the context (`ConfigureAwait(false)`): a blocking wait on the UI
+  thread + the await continuation posted to the dispatcher queue = a deadlock and an eternally
+  alive process (the regression test is `StopCompletesUnderBlockedSynchronizationContext`).
+- Tray and GUI lifetime: `ShutdownMode=OnExplicitShutdown`, closing/minimizing the main window only
+  hides it (the `TrayIcon` tray on WinForms NotifyIcon — WinForms is referenced for it alone, and
+  global usings are removed to avoid name conflicts with WPF); the watchdog in the tray keeps
+  working. Desktop shortcuts: Claude → `--launch`, "Claude (browser)" → `--launch-browser`.
+- Elevation: a separate helper launch (runas) with a window-0, not a restart of the whole
+  application.
+- Link lifetimes: the daemon/keeper/node outlive the application exit (detached, file handles
+  through cmd); the forward proxy by default lives as long as its process (the application window or
+  `pnr proxy`), and with `forwardProxy.detached=true` — in a separate worker (its own exe with
+  `--proxy-worker`) that outlives the command/GUI exit: bring-up/shutdown go through chain up/down
+  (a GUI exit does not kill the worker), a one-off bring-up — `pnr proxy --detached`.
+- Logs: two writers into one file are not allowed (interleaving corrupts the contents) — if the log
+  is already held by another process (the GUI in the tray + `pnr` from a terminal), the second one
+  writes to `<name>.<pid>.log`; rotation is by size at start, manually — by the file owner in place.
+- Updater: the version check phase runs before the chain bring-up (no extra UAC is needed);
+  installation is not interrupted; during long phases keep the activity marker fresh so that
+  auto-stop does not shut the chain down under the download.
+- Guard: the ban rule identifiers (hosts block markers, the NRPT rule DisplayName, the firewall
+  rule Group) are in the config, and the defaults match the legacy scheme: the application and the
+  old scripts maintain one and the same ban, not two. The guard status is read-only; after applying
+  or removing a ban — live probes, not "it should work".
+- The external protocols the semantics rest on: CONNECT roundtrip as a health check, the WSL host's
+  `server.shutdown` RPC, the AppX journal as the source of the package URL, AppX Publisher
+  verification.
 
-## Структура репозитория
+## Repository structure
 
 ```
 src/
-  PrivateNetRouting.App/     # WPF: окна, одиночный экземпляр (mutex+событие, активация
-                             # свёрнутого в трей), трей (TrayIcon: открыть/выход, балун),
-                             # статус прокси и цепочки, выбор языка, запуск Claude с заставкой
-                             # подъёма (SplashWindow), ярлыковый режим --launch (Claude
-                             # запущен → только окно), кнопка «Браузер» и ярлыковый режим
-                             # --launch-browser (изолированный профиль, пометка «уже запущен»),
-                             # стартовая проверка обновления Claude,
-                             # окно обновления (UpdateWindow), карточка «Гарды» (статус и
-                             # управление баном/политикой/settings.json/WSL), окно диагностики
-                             # (DiagnosticsWindow: сводка состояния только чтением с подсветкой,
-                             # список логов с хвостом, ротация, открытие папки);
-                             # общая иконка приложения
-                             # (AppIcons + Assets/app.ico, трей — WinForms NotifyIcon);
-                             # элевейтнутые helper-аргументы обрабатывает до UI
-    Localization/            # словари строк Strings.<код>.xaml + Loc: подмена словаря на лету
-                             # (DynamicResource в XAML, Loc.S/Loc.F в коде, Loc.LanguageChanged)
-  PrivateNetRouting.Core/    # логика без UI
-    Configuration/           # AppConfig (вкл. ui.language, ui.checkUpdatesOnStart),
-                             # AppLanguage (auto → система → en),
-                             # загрузка из %APPDATA% (шаблон — config/*.example.json)
-    Logging/                 # FileLog: уровни DEBUG..ERROR (logging.level, дефолт info) +
-                             # ротация по размеру один раз на старте и ручная RotateNow;
-                             # файл, занятый другим процессом, → откат на <имя>.<pid>.log
-    Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient, DohEndpointPool, кэш-резолвер,
-                             # TailscaleNetmapDohSource (автодополнение пула из конфига tailnet)
-    Net/Socks/               # Socks5Client (no-auth, дозвон по IPv4)
-    Net/WslGateway.cs        # адрес шлюза WSL NAT (vEthernet (WSL...)) для одноразового бинда прокси
-    Net/Proxy/               # ForwardProxyService (CONNECT-прокси), парсер, ProxyHealthCheck
-                             # (CheckAsync-bool + ProbeAsync с временем и статус-строкой),
-                             # ForwardProxySupervisor (место слушателя: in-process или detached-
-                             # воркер, порт — единый ресурс), ProxyWorker (тело --proxy-worker
-                             # для pnr и App)
-    Chain/                   # ChainSupervisor (оркестрация), SidecarDaemon (UAC-старт, stale-добивание),
-                             # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas-helper)
-    Launcher/                # ClaudeLauncher (bypass-list, подъём цепочки при отказе, запуск
-                             # с флагами прокси, предупреждения о политике/запущенном Claude);
-                             # BrowserLauncher (браузер с изолированным профилем: Firefox user.js /
-                             # хромоподобные флагами, «уже запущен» по профилю в cmdline)
-    Updater/                 # ClaudeUpdater (оркестрация MSIX-обновления: проверка → цепочка →
-                             # докачка → Publisher-сверка → установка), PowerShellRunner,
+  PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
+                             # window hidden to the tray), tray (TrayIcon: open/exit, balloon),
+                             # proxy and chain status, language selection, starting Claude with the
+                             # bring-up splash screen (SplashWindow), the --launch shortcut mode
+                             # (Claude running → window only), the "Browser" button and the
+                             # --launch-browser shortcut mode (isolated profile, "already running"
+                             # note), the startup Claude update check, the update window
+                             # (UpdateWindow), the "Guards" card (status and control of
+                             # ban/policy/settings.json/WSL), the diagnostics window
+                             # (DiagnosticsWindow: read-only state summary with highlighting,
+                             # a log list with tail, rotation, opening the folder);
+                             # the shared application icon
+                             # (AppIcons + Assets/app.ico, the tray is a WinForms NotifyIcon);
+                             # elevated helper arguments are handled before the UI
+    Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary
+                             # swap (DynamicResource in XAML, Loc.S/Loc.F in code,
+                             # Loc.LanguageChanged)
+  PrivateNetRouting.Core/    # logic without UI
+    Configuration/           # AppConfig (including ui.language, ui.checkUpdatesOnStart),
+                             # AppLanguage (auto → system → en),
+                             # loading from %APPDATA% (the template is config/*.example.json)
+    Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info) +
+                             # rotation by size once at start and manual RotateNow;
+                             # a file held by another process → fallback to <name>.<pid>.log
+    Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient, DohEndpointPool, cache resolver,
+                             # TailscaleNetmapDohSource (auto-filling the pool from the tailnet config)
+    Net/Socks/               # Socks5Client (no-auth, dial by IPv4)
+    Net/WslGateway.cs        # WSL NAT gateway address (vEthernet (WSL...)) for the one-shot proxy bind
+    Net/Proxy/               # ForwardProxyService (CONNECT proxy), parser, ProxyHealthCheck
+                             # (CheckAsync-bool + ProbeAsync with timing and a status line),
+                             # ForwardProxySupervisor (listener placement: in-process or a detached
+                             # worker, the port is a single resource), ProxyWorker (the body of
+                             # --proxy-worker for pnr and App)
+    Chain/                   # ChainSupervisor (orchestration), SidecarDaemon (UAC start, stale kill),
+                             # SidecarKeeper (watch-ipn), SidecarCli, ElevatedChain (runas helper)
+    Launcher/                # ClaudeLauncher (bypass list, chain bring-up on failure, launch with
+                             # proxy flags, warnings about the policy/running Claude);
+                             # BrowserLauncher (browser with an isolated profile: Firefox user.js /
+                             # Chromium-like via flags, "already running" by the profile in cmdline)
+    Updater/                 # ClaudeUpdater (MSIX update orchestration: check → chain →
+                             # download → Publisher verification → install), PowerShellRunner,
                              # PowerShellAppxPackageSource (Get-AppxPackage/Add-AppxPackage),
-                             # PowerShellJournalUrlFinder + PackageUrl (адрес из журнала AppX),
-                             # FragmentDownloader (фрагментная докачка с ретраями и возобновлением),
-                             # MsixPackage (Identity/Publisher из AppxManifest.xml)
-    Guard/                   # контроль прямого доступа: EgressPolicyStore (HKLM Policies\Claude),
-                             # HostsFileBlock (идемпотентный hosts-блок), PowerShellBanSystemOps
-                             # (NRPT+firewall командлетами), ClaudeSettingsGuard (env в settings.json),
-                             # WslConfigGuard (стартовый скрипт + settings.json дистрибутивов; слой
-                             # опционален: mode on/off/auto, синк по каждому дистрибутиву),
-                             # WinInetSystemProxyStore + обход системного прокси, GuardService
-                             # (статус/операции/живые пробы), GuardElevatedCommands (UAC-helper)
-    Watchdog/                # автостоп по простою: ClaudeUsageProbe (процессы/коннекты/маркер),
-                             # WslClaudeHostStopper (остановка WSL-хоста Claude через wsl.exe:
-                             # RPC + эскалация сигналов), WatchdogService (цикл, WSL → цепочка)
-    SystemOps/               # порты, WMI-поиск процессов, права, запуск через cmd с файловым
-                             # редиректом, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity),
-                             # TcpConnectionTable (слушатели порта с PID через GetExtendedTcpTable)
-    Runtime/                 # ActivityMarker (mtime-маркер для сторожа)
-    Diagnostics/             # DiagnosticsService (сводка состояния: владельцы портов, кипер/узел,
-                             # WSL-бинд, счётчики, маркер, детальный CONNECT, ядро гардов, сторож),
-                             # LogStore (список/хвост/внешняя ротация логов)
-    ProxyRuntime.cs          # композиция прокси+цепочки+лончера+сторожа+обновлятора+диагностики
-                             # из AppConfig (+ RotateLog: живой лог — на месте, свободный — сдвигом)
-  PrivateNetRouting.Cli/     # headless-режим `pnr` (proxy [--detached] | chain status|up|down |
+                             # PowerShellJournalUrlFinder + PackageUrl (address from the AppX journal),
+                             # FragmentDownloader (chunked download with retries and resume),
+                             # MsixPackage (Identity/Publisher from AppxManifest.xml)
+    Guard/                   # direct-access control: EgressPolicyStore (HKLM Policies\Claude),
+                             # HostsFileBlock (idempotent hosts block), PowerShellBanSystemOps
+                             # (NRPT + firewall via cmdlets), ClaudeSettingsGuard (env in settings.json),
+                             # WslConfigGuard (startup script + settings.json of the distros; the layer
+                             # is optional: mode on/off/auto, sync per distro),
+                             # WinInetSystemProxyStore + system proxy bypass, GuardService
+                             # (status/operations/live probes), GuardElevatedCommands (UAC helper)
+    Watchdog/                # idle auto-stop: ClaudeUsageProbe (processes/connections/marker),
+                             # WslClaudeHostStopper (stopping the WSL Claude host via wsl.exe:
+                             # RPC + signal escalation), WatchdogService (the loop, WSL → chain)
+    SystemOps/               # ports, WMI process lookup, privileges, launching through cmd with file
+                             # redirection, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity),
+                             # TcpConnectionTable (port listeners with PID via GetExtendedTcpTable)
+    Runtime/                 # ActivityMarker (the mtime marker for the watchdog)
+    Diagnostics/             # DiagnosticsService (state summary: port owners, keeper/node,
+                             # WSL bind, counters, marker, detailed CONNECT, the core of the guards,
+                             # the watchdog), LogStore (log list/tail/external rotation)
+    ProxyRuntime.cs          # composition of proxy + chain + launcher + watchdog + updater +
+                             # diagnostics from AppConfig (+ RotateLog: the live log — in place,
+                             # a free one — by shifting)
+  PrivateNetRouting.Cli/     # headless `pnr` mode (proxy [--detached] | chain status|up|down |
                              # check | status | logs list|show <name> [--tail N]|rotate [<name>...] |
                              # launch [--check-only] [--no-splash] | browser [--check-only]
                              # [--prepare-only] [--private] [--url <url>] | update [--check] ... |
                              # watchdog | guard status [--live] | ban/policy/settings/wsl/sysproxy |
-                             # config; скрытый `--proxy-worker` — тело detached-воркера)
+                             # config; the hidden `--proxy-worker` — the detached worker body)
 tests/
-  PrivateNetRouting.Tests/   # xUnit: wire-форматы, парсер, конфиг, пул DoH, SOCKS5,
-                             # сквозной прогон прокси на фейковом SOCKS5 + echo-сервере,
-                             # супервизор прокси на фейках (in-process/detached: спавн с маркером,
-                             # идемпотентность, занятый порт, килл опознанного воркера, чужой
-                             # владелец не трогается, таймауты старта/останова),
-                             # оркестрация цепочки на фейках (порядок/идемпотентность/отказы),
-                             # лончер Claude на фейках (bypass-list/порядок/режимы), лончер
-                             # браузера на фейках (списки обхода/user.js/командные строки/
-                             # режимы/откат пути/«уже запущен»), сторож на фейках
-                             # (порядок WSL→цепочка, парсер вывода остановщика, проба занятости),
-                             # гард на фейках (hosts-блок, env settings.json, скрипты NRPT/firewall,
-                             # WSL-слой: режимы/статус/синк, оркестрация: слои/элевация/живые пробы),
-                             # обновлятор на фейках (версии/URL из журнала, докачка фрагментами
-                             # на фейковом HTTP: возобновление/ретраи/отмена, Publisher,
-                             # закрытие Claude, полный цикл), диагностика на фейках (сводка:
-                             # остановленная цепочка/владельцы портов/WSL-бинд/health/гарды/
-                             # сторож, ядро гардов без WSL, ProbeAsync на живом TcpListener),
-                             # логи (список/хвост/ротация/занятый файл/откат на персональный
-                             # файл/RotateNow), форма аргументов cmd
+  PrivateNetRouting.Tests/   # xUnit: wire formats, parser, config, the DoH pool, SOCKS5,
+                             # an end-to-end proxy run on a fake SOCKS5 + echo server,
+                             # the proxy supervisor on fakes (in-process/detached: spawn with a
+                             # marker, idempotence, busy port, kill of the identified worker,
+                             # a foreign owner is left alone, start/stop timeouts),
+                             # chain orchestration on fakes (order/idempotence/failures),
+                             # the Claude launcher on fakes (bypass list/order/modes), the browser
+                             # launcher on fakes (bypass lists/user.js/command lines/modes/path
+                             # fallback/"already running"), the watchdog on fakes
+                             # (WSL→chain order, the stopper output parser, the activity probe),
+                             # the guard on fakes (hosts block, settings.json env, NRPT/firewall
+                             # scripts, the WSL layer: modes/status/sync, orchestration:
+                             # layers/elevation/live probes), the updater on fakes (versions/journal
+                             # URL, chunked download on a fake HTTP: resume/retries/cancellation,
+                             # Publisher, closing Claude, the full cycle), diagnostics on fakes
+                             # (summary: stopped chain/port owners/WSL bind/health/guards/watchdog,
+                             # the core of the guards without WSL, ProbeAsync on a live TcpListener),
+                             # logs (list/tail/rotation/busy file/fallback to a per-process
+                             # file/RotateNow), the cmd argument form
 config/
-  appsettings.example.json   # шаблон пользовательского конфига с плейсхолдерами
+  appsettings.example.json   # user config template with placeholders
 ```
 
-Пользовательский конфиг — `%APPDATA%\PrivateNetRouting\appsettings.json` (создаётся при первом
-запуске из значений по умолчанию); логи — `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
+The user config is `%APPDATA%\PrivateNetRouting\appsettings.json` (created on first launch from the
+default values); logs are in `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
 
-## Окружение и команды
+## Environment and commands
 
-| Инструмент | Версия | Примечание |
+| Tool | Version | Note |
 |---|---|---|
-| .NET SDK | 10.0.401 LTS (WindowsDesktop.App — WPF) | winget-пакет; в уже запущенных сессиях PATH может не видеть `dotnet` — полный путь `C:\Program Files\dotnet\dotnet.exe` |
-| git | 2.55 (Git for Windows) | идентичность задана локально в репозитории (noreply) |
-| gh | 2.102 | залогинен; приватный репозиторий на github.com |
+| .NET SDK | 10.0.401 LTS (WindowsDesktop.App — WPF) | a winget package; in already running sessions PATH may not see `dotnet` — use the full path `C:\Program Files\dotnet\dotnet.exe` |
+| git | 2.55 (Git for Windows) | the identity is set locally in the repository (noreply) |
+| gh | 2.102 | logged in; a private repository on github.com |
 
 ```bash
 dotnet build
 dotnet test
 dotnet run --project src/PrivateNetRouting.App
-dotnet format --verify-no-changes   # форматирование перед коммитом
+dotnet format --verify-no-changes   # formatting before a commit
 ```
 
-Коммиты: небольшими шагами, сообщение в инфинитиве («Add forward proxy core», «Fix splash focus»).
-Ветвение: `main` — собирающееся состояние; фичи — короткими ветками или прямо в `main`
-(репозиторий личный, главное — не ломать сборку).
+Commits: in small steps, the message in the infinitive ("Add forward proxy core", "Fix splash
+focus"). Branching: `main` is the buildable state; features go in short branches or straight into
+`main` (a personal repository, the main thing is not to break the build).
 
-## Соглашения по коду
+## Code conventions
 
-- C# 14 / .NET 10, `net10.0-windows` для WPF-проекта, `net10.0` для ядра и CLI.
-- Именование и стиль — по умолчанию `dotnet format` (editorconfig появится с первым проектом).
-- Взаимодействие с системой (процессы, реестр, AppX, WSL, firewall) — только за интерфейсами
-  в Core, реализации помечены документирующими комментариями о требуемых правах (UAC/админ).
-- Логирование: уровни DEBUG/INFO/WARN/ERROR, порог — `logging.level` конфига (по умолчанию
-  `info`, незнакомое значение = `info`); все записи — на английском. В Info — разовые события
-  (старт/стоп/автостоп, важное — Warn/Error); периодическое и per-request (таймеры сторожа
-  и DoH-пула, коннекты/резолвы прокси, шаги подъёма цепочки, фрагменты докачки) — только
-  в Debug. Ротация по размеру на старте — как в старом наборе; ручная — из диагностики
-  (владельцем файла, на месте).
-- Локализация UI: строки — в словарях `src/PrivateNetRouting.App/Localization/Strings.<код>.xaml`
-  (XAML — `{DynamicResource Ключ}`, код — `Loc.S`/`Loc.F`); язык — `ui.language` конфига: `auto`
-  (язык системы) или код, неподержанный — английский. Новый язык = словарь + код в
-  `AppLanguage.Supported`; тест сверяет наборы ключей и плейсхолдеров со словарём en.
-- CLI `pnr`, строки/исключения Core и записи лог-файлов — английские; код-комментарии — русские.
+- C# 14 / .NET 10, `net10.0-windows` for the WPF project, `net10.0` for the core and the CLI.
+- Naming and style follow `dotnet format` (`.editorconfig` is in place).
+- Interaction with the system (processes, registry, AppX, WSL, firewall) is only behind interfaces in
+  Core; implementations are marked with documenting comments about the required privileges
+  (UAC/admin).
+- Logging: DEBUG/INFO/WARN/ERROR levels, the threshold is `logging.level` in the config (default
+  `info`, an unknown value = `info`); all records are in English. Info carries one-off events
+  (start/stop/auto-stop, important things — Warn/Error); periodic and per-request records (watchdog
+  and DoH pool timers, proxy connects/resolves, chain bring-up steps, download fragments) are Debug
+  only. Rotation by size at start — as in the old set; manual rotation — from diagnostics (by the
+  file owner, in place).
+- UI localization: strings are in the `src/PrivateNetRouting.App/Localization/Strings.<code>.xaml`
+  dictionaries (XAML — `{DynamicResource Key}`, code — `Loc.S`/`Loc.F`); the language is
+  `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English.
+  A new language = a dictionary + a code in `AppLanguage.Supported`; a test compares the key and
+  placeholder sets against the en dictionary.
+- The `pnr` CLI, Core strings/exceptions and log file records are English; code comments are English
+  too (the only Russian text in the repo is the `Strings.ru.xaml` UI dictionary and the local
+  `.secret.agents.md`).
 
-## Работа в оболочке (наследие машины, кратко)
+## Working in the shell (machine legacy, briefly)
 
-Оболочка инструментов — Git Bash; PowerShell зовётся как `pwsh -NoProfile -File <script.ps1>`
-(длинное) или `pwsh -NoProfile -Command '…'` в одиночных кавычках bash (короткое; никогда в
-двойных — bash раскроет `$`). Кириллица в выводе PS/нативных утилит — первым делом
-`chcp 65001 >/dev/null`. PS-код не выполнять в bash и не парсить `.ps1` грепом — только запуск.
-Эти правила нужны, пока идёт сверка поведения со старыми скриптами; в самом приложении их нет.
+The tool shell is Git Bash; PowerShell is invoked as `pwsh -NoProfile -File <script.ps1>` (for long
+scripts) or `pwsh -NoProfile -Command '…'` in bash single quotes (for short ones; never in double
+quotes — bash would expand `$`). Cyrillic in the output of PS/native utilities — run
+`chcp 65001 >/dev/null` first. Do not execute PS code in bash and do not grep-parse `.ps1` — only
+run it. These rules are needed while behavior is being compared against the old scripts; the
+application itself does not have them.

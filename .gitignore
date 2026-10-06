@@ -1,4 +1,4 @@
-# Результаты сборки
+# Build results
 [Dd]ebug/
 [Rr]elease/
 x64/
@@ -18,23 +18,23 @@ x86/
 *.sln.docstates
 *.rsuser
 
-# Тесты и покрытие
+# Tests and coverage
 TestResults/
 coverage*
 *.trx
 *.cobertura.xml
 .playwright/
 
-# NuGet / пакеты
+# NuGet / packages
 *.nupkg
 *.snupkg
 packages/
 
-# Публикация
+# Publishing
 publish/
 *.pubxml.user
 
-# ЛОКАЛЬНЫЕ КОНФИГИ И СЕКРЕТЫ — никогда не коммитить (правило №1 AGENTS.md)
+# LOCAL CONFIG AND SECRETS — never commit (rule #1 in AGENTS.md)
 appsettings.*.local.json
 *.local.json
 config/local/
@@ -45,7 +45,7 @@ secrets.*
 *.pem
 *.key
 
-# Служебное
+# Miscellaneous
 *.tmp
 ~$*
 Thumbs.db
