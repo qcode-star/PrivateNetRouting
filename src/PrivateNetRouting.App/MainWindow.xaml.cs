@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
@@ -23,11 +25,18 @@ namespace PrivateNetRouting.App;
 /// </summary>
 public partial class MainWindow : Window
 {
+    /// <summary>The chain stages in bring-up order — the order the rail draws them in.</summary>
+    private static readonly string[] ChainComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
+
     private readonly ProxyRuntime _runtime;
     private readonly MainViewModel _viewModel;
+    private readonly ChainRail _rail;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
     private readonly DispatcherTimer _guardTimer;
+    private readonly DispatcherTimer _busyClock;
+    private readonly Stopwatch _busyWatch = new();
+    private ChainState? _lastChainState;
     private GuardSnapshot? _lastGuards;
     private bool _guardBusy;
     private bool _chainBusy;
@@ -42,11 +51,17 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
+        WindowTheme.UseDarkTitleBar(this);
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
+        _rail = new ChainRail(RailHost);
+        _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
         FillLanguages(languagePreference);
+
+        _busyClock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
+        _busyClock.Tick += (_, _) => BusyElapsed.Text = FormatElapsed(_busyWatch.Elapsed);
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _refreshTimer.Tick += (_, _) => _viewModel.Refresh();
@@ -62,7 +77,7 @@ public partial class MainWindow : Window
         _guardTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _guardTimer.Tick += async (_, _) => await RefreshGuardsAsync();
         _guardTimer.Start();
-        Loc.LanguageChanged += RenderGuardsFromCache;
+        Loc.LanguageChanged += OnLanguageChanged;
         _ = RefreshGuardsAsync();
     }
 
@@ -81,29 +96,132 @@ public partial class MainWindow : Window
         _refreshTimer.Stop();
         _chainTimer.Stop();
         _guardTimer.Stop();
-        Loc.LanguageChanged -= RenderGuardsFromCache;
+        _busyClock.Stop();
+        Loc.LanguageChanged -= OnLanguageChanged;
         _watchdogCts?.Cancel();
         _viewModel.Dispose();
         base.OnClosed(e);
     }
 
+    /// <summary>A language change redraws everything the window has already painted by hand.</summary>
+    private void OnLanguageChanged()
+    {
+        RenderGuards();
+        _rail.Relabel();
+        if (_lastChainState is not null)
+        {
+            RenderRail(_lastChainState);
+        }
+    }
+
     private async Task RefreshChainAsync()
     {
-        if (_chainBusy)
+        if (_chainBusy || _launchBusy)
         {
-            return;
+            return; // an operation in flight owns the rail — a poll must not overwrite its progress
         }
 
         try
         {
             var state = await _runtime.Chain.GetStateAsync(CancellationToken.None);
+            _lastChainState = state;
             _viewModel.UpdateChain(state);
+            RenderRail(state);
         }
         catch (Exception ex)
         {
             _viewModel.SetChainStateError(ex.Message);
         }
     }
+
+    /// <summary>
+    /// The chain rail from a snapshot. The colours stay calm on purpose: a chain that is down is the
+    /// normal resting state of this application, so it is neutral — amber means "present but not
+    /// usable", red is reserved for a real fault.
+    /// </summary>
+    private void RenderRail(ChainState state)
+    {
+        _rail.SetStage(0, state.DaemonProcessAlive
+            ? new RailStage(
+                state.DaemonHttpListening ? Loc.S("Main.Chain.Daemon.Listening") : Loc.S("Main.Chain.Daemon.NoListener"),
+                state.DaemonHttpListening ? Theme.Ok : Theme.Warn)
+            : new RailStage(Loc.S("Main.Chain.Daemon.Down"), Theme.Idle));
+
+        _rail.SetStage(1, new RailStage(
+            state.KeeperRunning ? Loc.S("Main.Chain.Keeper.Running") : Loc.S("Main.Chain.Keeper.Down"),
+            state.KeeperRunning ? Theme.Ok : Theme.Idle));
+
+        _rail.SetStage(2, state.BackendState is null
+            ? new RailStage(Loc.S("Main.Chain.Node.NoResponse"), Theme.Idle)
+            : new RailStage(state.BackendState, state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
+
+        _rail.SetStage(3, new RailStage(
+            state.ProxyRunning ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
+            state.ProxyRunning ? Theme.Ok : Theme.Idle));
+
+        _rail.SetStage(4, !state.ProxyRunning
+            ? new RailStage(Loc.S("Main.Chain.Health.Idle"), Theme.Idle)
+            : new RailStage(
+                state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"),
+                state.ProxyHealthy ? Theme.Ok : Theme.Bad));
+    }
+
+    /// <summary>
+    /// A bring-up step from the orchestrator: the rail runs live instead of waiting for the next
+    /// poll, the current step's detail sits under it, and the UAC hint appears with the daemon.
+    /// </summary>
+    private void OnChainStep(ChainStep step)
+    {
+        var stage = step.Status switch
+        {
+            ChainStepStatus.Active => new RailStage(Loc.S("Main.Rail.Starting"), Theme.Accent),
+            ChainStepStatus.Done => new RailStage(Loc.S("Main.Rail.Ready"), Theme.Ok, RailMark.Check),
+            ChainStepStatus.Skipped => new RailStage(Loc.S("Main.Chain.Skipped"), Theme.Ok, RailMark.Check),
+            ChainStepStatus.Failed => new RailStage(Loc.S("Main.Rail.Failed"), Theme.Bad, RailMark.Cross),
+            _ => new RailStage(Loc.S("Main.Rail.Waiting"), Theme.Idle),
+        };
+        _rail.SetStage(Array.IndexOf(ChainComponents, step.Component), stage);
+
+        if (step.Component == "Daemon" && step.Status == ChainStepStatus.Active)
+        {
+            ChainHint.Text = Loc.S("Main.Chain.Hint.Uac");
+            ChainHint.Visibility = Visibility.Visible;
+        }
+
+        if (!string.IsNullOrEmpty(step.Detail))
+        {
+            ChainDetail.Text = step.Detail;
+        }
+    }
+
+    /// <summary>The card shows a live operation: spinner, elapsed time and a line for the steps.</summary>
+    private void BeginOperation()
+    {
+        _busyWatch.Restart();
+        BusyElapsed.Text = FormatElapsed(TimeSpan.Zero);
+        BusySpinner.Visibility = Visibility.Visible;
+        BusyElapsed.Visibility = Visibility.Visible;
+        ChainDetail.Text = "";
+        ChainDetail.Visibility = Visibility.Visible;
+        ChainHint.Visibility = Visibility.Collapsed;
+        _rail.Reset(new RailStage(Loc.S("Main.Rail.Waiting"), Theme.Idle));
+        SpinnerArc.RenderTransform.BeginAnimation(
+            RotateTransform.AngleProperty,
+            new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.05)) { RepeatBehavior = RepeatBehavior.Forever });
+        _busyClock.Start();
+    }
+
+    private void EndOperation()
+    {
+        _busyClock.Stop();
+        BusySpinner.Visibility = Visibility.Collapsed;
+        BusyElapsed.Visibility = Visibility.Collapsed;
+        ChainDetail.Visibility = Visibility.Collapsed;
+        ChainHint.Visibility = Visibility.Collapsed;
+        SpinnerArc.RenderTransform.BeginAnimation(RotateTransform.AngleProperty, null);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) => $"{(int)elapsed.TotalMinutes}:{elapsed.Seconds:00}";
 
     /// <summary>
     /// Direct-access guards: statuses are read in full (registry, hosts, NRPT/firewall,
@@ -128,8 +246,6 @@ public partial class MainWindow : Window
             SetGuardDots(GuardState.Unknown, GuardState.Unknown, GuardState.Unknown, GuardState.Unknown);
         }
     }
-
-    private void RenderGuardsFromCache() => RenderGuards();
 
     private void RenderGuards()
     {
@@ -222,21 +338,24 @@ public partial class MainWindow : Window
         return reason;
     }
 
+    /// <summary>Marker, state word and detail of the four guard layers; the word repeats what the colour shows.</summary>
     private void SetGuardDots(GuardState ban, GuardState policy, GuardState settings, GuardState wsl)
     {
-        BanDot.Fill = BrushFor(ban);
-        PolicyDot.Fill = BrushFor(policy);
-        SettingsDot.Fill = BrushFor(settings);
-        WslDot.Fill = BrushFor(wsl);
-    }
+        RenderGuardRow(BanDot, BanState, ban);
+        RenderGuardRow(PolicyDot, PolicyState, policy);
+        RenderGuardRow(SettingsDot, SettingsState, settings);
+        RenderGuardRow(WslDot, WslState, wsl);
 
-    private static Brush BrushFor(GuardState state) => state switch
-    {
-        GuardState.On => new SolidColorBrush(Color.FromRgb(0x7C, 0xB9, 0x7C)),
-        GuardState.Partial => new SolidColorBrush(Color.FromRgb(0xE0, 0xA8, 0x3E)),
-        GuardState.Off => new SolidColorBrush(Color.FromRgb(0xD9, 0x6B, 0x6B)),
-        _ => Brushes.Gray,
-    };
+        static void RenderGuardRow(System.Windows.Shapes.Ellipse dot, TextBlock stateText, GuardState state)
+        {
+            var brush = Theme.GuardBrush(state);
+            dot.Fill = brush;
+            stateText.Text = Theme.GuardWord(state);
+
+            // the neutral grey of the marker is below AA as text, so an unknown state stays readable
+            stateText.Foreground = state == GuardState.Unknown ? Theme.TextMuted : brush;
+        }
+    }
 
     /// <summary>Ban and policy go through the elevated helper (UAC); live checks — right after.</summary>
     private async void OnGuardBanOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
@@ -346,7 +465,7 @@ public partial class MainWindow : Window
 
     private async void OnChainUp(object sender, RoutedEventArgs e)
     {
-        if (!await RunChainBusy(() => _runtime.Chain.EnsureRunningAsync(null, CancellationToken.None)))
+        if (!await RunChainBusy(() => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
         {
             return;
         }
@@ -357,7 +476,7 @@ public partial class MainWindow : Window
 
     private async void OnChainDown(object sender, RoutedEventArgs e)
     {
-        if (!await RunChainBusy(() => _runtime.Chain.StopAsync(null, CancellationToken.None)))
+        if (!await RunChainBusy(() => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
         {
             return;
         }
@@ -375,6 +494,7 @@ public partial class MainWindow : Window
 
         _chainBusy = true;
         _viewModel.SetChainBusy(true);
+        BeginOperation();
         try
         {
             await action();
@@ -389,6 +509,7 @@ public partial class MainWindow : Window
         {
             _chainBusy = false;
             _viewModel.SetChainBusy(false);
+            EndOperation();
         }
     }
 
@@ -445,16 +566,16 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Launching Claude: first a live CONNECT roundtrip; if the chain
-    /// responds — Claude starts immediately, without a splash screen. Otherwise the bring-up splash is
-    /// shown and the launcher idempotently brings up the chain; a failure is drawn by the splash
-    /// (log/close, auto-close in a minute), success — "Done" and a short fade.
+    /// responds — Claude starts immediately, without any wait. Otherwise the chain card takes over:
+    /// the rail runs the bring-up steps live, with the spinner, the elapsed time and the UAC hint,
+    /// and a failure is reported in the result line.
     /// </summary>
     private async void OnLaunchClaude(object sender, RoutedEventArgs e) => await RunLaunchAsync();
 
     /// <summary>
     /// Shortcut mode (App --launch instead of the Claude shortcut): Claude is already running — just
-    /// show the window, without a second instance; not running — a normal launch with the chain
-    /// bring-up splash (tunnel start, checks, then Claude with proxy flags).
+    /// show the window, without a second instance; not running — a normal launch whose bring-up is
+    /// drawn in the chain card (tunnel start, checks, then Claude with proxy flags).
     /// </summary>
     public async void LaunchFromShortcut()
     {
@@ -492,50 +613,36 @@ public partial class MainWindow : Window
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
-        SplashWindow? splash = null;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
             if (!healthy)
             {
-                splash = new SplashWindow(_runtime.Launcher.Log.FilePath) { Owner = this };
-                splash.Show();
+                BeginOperation();
             }
 
-            var progress = splash is null ? null : new Progress<ChainStep>(splash.Update);
+            var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
             var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, CancellationToken.None);
-            if (splash is not null)
-            {
-                splash.Complete(Loc.F("Splash.CompleteFmt", Math.Round(result.Elapsed.TotalSeconds, 1)));
-                await Task.Delay(1000);
-                splash.CloseSplash();
-            }
-
             _viewModel.SetCheckResult("Main.Launch.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
         }
         catch (Exception ex)
         {
-            if (splash is not null)
-            {
-                splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Launcher.Log.FilePath));
-                await splash.ClosedAsync; // buttons/auto-close after 60 s
-            }
-
             _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
         }
         finally
         {
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
+            EndOperation();
             await RefreshChainAsync();
         }
     }
 
     /// <summary>
-    /// Launching a browser with an isolated profile and the app's proxy:
-    /// the same scheme as the Claude launch — a live CONNECT roundtrip, the splash only on
-    /// a real wait for the chain bring-up. An already running instance of ours is not duplicated
-    /// (Firefox on the same profile hits a lock) — a note in the result line.
+    /// Browser launch: the chain is checked with a live CONNECT roundtrip and brought up
+    /// idempotently if it is down; the bring-up runs in the chain card, in the main window.
+    /// An already running instance of ours is not duplicated (Firefox on the same profile hits a
+    /// lock) — a note in the result line.
     /// </summary>
     private async void OnLaunchBrowser(object sender, RoutedEventArgs e) => await RunBrowserLaunchAsync();
 
@@ -571,41 +678,27 @@ public partial class MainWindow : Window
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
-        SplashWindow? splash = null;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
             if (!healthy)
             {
-                splash = new SplashWindow(_runtime.Browser.Log.FilePath, Loc.S("Splash.Browser.Title")) { Owner = this };
-                splash.Show();
+                BeginOperation();
             }
 
-            var progress = splash is null ? null : new Progress<ChainStep>(splash.Update);
+            var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
             var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, CancellationToken.None);
-            if (splash is not null)
-            {
-                splash.Complete(Loc.F("Splash.CompleteFmt", Math.Round(result.Elapsed.TotalSeconds, 1)));
-                await Task.Delay(1000);
-                splash.CloseSplash();
-            }
-
             _viewModel.SetCheckResult("Main.Browser.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
         }
         catch (Exception ex)
         {
-            if (splash is not null)
-            {
-                splash.Fail(ex.Message, Loc.F("Splash.Fail.HintFmt", _runtime.Browser.Log.FilePath));
-                await splash.ClosedAsync;
-            }
-
             _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
         }
         finally
         {
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
+            EndOperation();
             await RefreshChainAsync();
         }
     }
@@ -719,13 +812,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _activeConnections = "0";
     private long _totalConnections;
     private long _failedConnections;
+    private Brush _failedBrush = Brushes.Gray;
     private string _socksUpstream = "";
     private string _configPath = "";
     private string _logPath = "";
     private bool _canStart;
     private bool _canStop;
     private string _chainSummary = "…";
-    private string _chainDetails = "";
     private bool _chainOperationRunning;
     private bool _launchRunning;
     private string? _updateNoticeKey;
@@ -775,6 +868,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _failedConnections, value);
     }
 
+    /// <summary>The error counter only raises its voice when there is something to report.</summary>
+    public Brush FailedBrush
+    {
+        get => _failedBrush;
+        private set => SetField(ref _failedBrush, value);
+    }
+
     public string SocksUpstream
     {
         get => _socksUpstream;
@@ -796,12 +896,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Formatted from key+args on every read — survives a language change.</summary>
     public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
 
+    /// <summary>An error line is marked as one; every other result stays quiet.</summary>
+    public Brush CheckResultBrush => _checkResultKey == "Main.ErrorFmt" ? Theme.Bad : Theme.TextSecondary;
+
     /// <summary>Ready-made text without localization (composite results of guard operations).</summary>
     public void SetCheckText(string text)
     {
         _checkResultKey = null;
         _checkResultLiteral = text;
         OnPropertyChanged(nameof(CheckResult));
+        OnPropertyChanged(nameof(CheckResultBrush));
     }
 
     /// <summary>Signal about a Claude update found at startup; empty when there is no update.</summary>
@@ -835,16 +939,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _canStop, value);
     }
 
+    /// <summary>Summary word of the chain card; the rail itself is drawn by the window.</summary>
     public string ChainSummary
     {
         get => _chainSummary;
         private set => SetField(ref _chainSummary, value);
-    }
-
-    public string ChainDetails
-    {
-        get => _chainDetails;
-        private set => SetField(ref _chainDetails, value);
     }
 
     public bool CanChainUp => !_chainOperationRunning && !_launchRunning;
@@ -892,6 +991,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _checkResultKey = key;
         _checkResultArgs = args;
         OnPropertyChanged(nameof(CheckResult));
+        OnPropertyChanged(nameof(CheckResultBrush));
     }
 
     public void SetChainStateError(string message)
@@ -906,36 +1006,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var proxy = _runtime.ProxyControl;
         var running = proxy.IsRunning;
         StateText = running ? Loc.S("Main.State.Running") : Loc.S("Main.State.Stopped");
-        StateBrush = running
-            ? new SolidColorBrush(Color.FromRgb(0x7C, 0xB9, 0x7C))
-            : new SolidColorBrush(Color.FromRgb(0xD9, 0x6B, 0x6B));
+        StateBrush = running ? Theme.Ok : Theme.Idle;
         Endpoints = running && proxy.ListenerEndpoints.Count > 0
             ? string.Join(", ", proxy.ListenerEndpoints)
             : "—";
         ActiveConnections = proxy.ActiveConnections.ToString();
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;
+        FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
         SocksUpstream = _runtime.Config.ForwardProxy.Socks5Upstream;
         LogPath = _runtime.Log.FilePath;
         CanStart = !running;
         CanStop = running;
     }
 
+    /// <summary>Chain snapshot: the summary word and the last state kept for a language change.</summary>
     public void UpdateChain(ChainState state)
     {
         _lastChainState = state;
         _chainStateError = null;
         ChainSummary = state.IsFullyUp ? Loc.S("Main.Chain.FullUp") : Loc.S("Main.Chain.Partial");
-        var daemon = !state.DaemonProcessAlive
-            ? Loc.S("Main.Chain.Daemon.Down")
-            : state.DaemonHttpListening ? Loc.S("Main.Chain.Daemon.Listening") : Loc.S("Main.Chain.Daemon.NoListener");
-        ChainDetails = Loc.F(
-            "Main.Chain.DetailsFmt",
-            daemon,
-            state.KeeperRunning ? Loc.S("Main.Chain.Keeper.Running") : Loc.S("Main.Chain.Keeper.Down"),
-            state.BackendState ?? Loc.S("Main.Chain.Node.NoResponse"),
-            state.ProxyRunning ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
-            state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"));
     }
 
     private void OnLanguageChanged()

@@ -12,8 +12,9 @@
 
     <!-- Status card -->
     <s:String x:Key="Main.Listeners">Listeners</s:String>
-    <s:String x:Key="Main.ActiveConnections">Active connections</s:String>
-    <s:String x:Key="Main.TotalErrors">Total / errors</s:String>
+    <s:String x:Key="Main.Metric.Active">active</s:String>
+    <s:String x:Key="Main.Metric.Total">total</s:String>
+    <s:String x:Key="Main.Metric.Errors">errors</s:String>
     <s:String x:Key="Main.SocksUpstream">SOCKS5 upstream</s:String>
     <s:String x:Key="Main.Config">Config</s:String>
     <s:String x:Key="Main.Log">Log</s:String>
@@ -22,6 +23,18 @@
     <s:String x:Key="Main.Chain">Chain</s:String>
     <s:String x:Key="Main.Chain.FullUp">fully up</s:String>
     <s:String x:Key="Main.Chain.Partial">partial</s:String>
+    <s:String x:Key="Main.Rail.Daemon">Sidecar daemon</s:String>
+    <s:String x:Key="Main.Rail.Keeper">Keeper</s:String>
+    <s:String x:Key="Main.Rail.Node">Tailscale node</s:String>
+    <s:String x:Key="Main.Rail.Proxy">Forward proxy</s:String>
+    <s:String x:Key="Main.Rail.Health">CONNECT check</s:String>
+    <!-- Stage words while a bring-up runs in the chain card -->
+    <s:String x:Key="Main.Rail.Waiting">waiting</s:String>
+    <s:String x:Key="Main.Rail.Starting">starting</s:String>
+    <s:String x:Key="Main.Rail.Ready">ready</s:String>
+    <s:String x:Key="Main.Rail.Failed">failed</s:String>
+    <s:String x:Key="Main.Chain.Skipped">already up</s:String>
+    <s:String x:Key="Main.Chain.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">listening</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">no listener</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">down</s:String>
@@ -32,7 +45,7 @@
     <s:String x:Key="Main.Chain.Proxy.Stopped">stopped</s:String>
     <s:String x:Key="Main.Chain.Health.Ok">ok</s:String>
     <s:String x:Key="Main.Chain.Health.Fail">failed</s:String>
-    <s:String x:Key="Main.Chain.DetailsFmt">daemon: {0}    keeper: {1}    node: {2}&#10;proxy: {3}    health: {4}</s:String>
+    <s:String x:Key="Main.Chain.Health.Idle">not checked</s:String>
 
     <!-- Idle watchdog -->
     <s:String x:Key="Main.Watchdog">Idle auto-stop (stops the WSL host and the chain when Claude is not in use)</s:String>
@@ -77,6 +90,7 @@
 
     <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
     <s:String x:Key="Main.Guard">Guards: direct access control</s:String>
+    <s:String x:Key="Main.Guard.Note">Enable and Disable ask for administrator rights; settings.json and WSL are written without elevation.</s:String>
     <s:String x:Key="Main.Guard.Button.Refresh">Refresh</s:String>
     <s:String x:Key="Main.Guard.Button.On">Enable</s:String>
     <s:String x:Key="Main.Guard.Button.Off">Disable</s:String>
@@ -85,6 +99,7 @@
     <s:String x:Key="Main.Guard.State.On">on</s:String>
     <s:String x:Key="Main.Guard.State.Off">off</s:String>
     <s:String x:Key="Main.Guard.State.Partial">partial</s:String>
+    <s:String x:Key="Main.Guard.State.Unknown">unknown</s:String>
     <s:String x:Key="Main.Guard.Busy">guard operation in progress (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Guard.Ban">Local ban</s:String>
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} names · NRPT: {1} namespaces · firewall: {2} rules</s:String>
@@ -120,23 +135,6 @@
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Open</s:String>
     <s:String x:Key="Tray.Exit">Exit</s:String>
-
-    <!-- Splash (chain rise while launching Claude) -->
-    <s:String x:Key="Splash.Title">Launching Claude</s:String>
-    <s:String x:Key="Splash.Browser.Title">Launching browser</s:String>
-    <s:String x:Key="Splash.Subtitle">bringing up the proxy chain</s:String>
-    <s:String x:Key="Splash.Subtitle.Fail">failed to bring up the chain</s:String>
-    <s:String x:Key="Splash.Step.Daemon">Sidecar daemon (UAC)</s:String>
-    <s:String x:Key="Splash.Step.Keeper">Keeper watch-ipn</s:String>
-    <s:String x:Key="Splash.Step.Node">Tailscale node (up)</s:String>
-    <s:String x:Key="Splash.Step.Proxy">Forward proxy</s:String>
-    <s:String x:Key="Splash.Step.Health">Chain responds (CONNECT)</s:String>
-    <s:String x:Key="Splash.SkipNote">already up</s:String>
-    <s:String x:Key="Splash.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
-    <s:String x:Key="Splash.CompleteFmt">Ready in {0} s</s:String>
-    <s:String x:Key="Splash.Fail.HintFmt">Details: {0}</s:String>
-    <s:String x:Key="Splash.Button.OpenLog">Open log</s:String>
-    <s:String x:Key="Splash.Button.Close">Close</s:String>
 
     <!-- Update window (manual Claude Desktop MSIX update) -->
     <s:String x:Key="Update.Title">Update Claude Desktop</s:String>
@@ -194,4 +192,5 @@
     <s:String x:Key="Diag.Section.guards">Guards</s:String>
     <s:String x:Key="Diag.Section.watchdog">Idle supervisor</s:String>
     <s:String x:Key="Diag.Section.logs">Logs</s:String>
+    <s:String x:Key="Diag.Logs.Empty">No log files yet.</s:String>
 </ResourceDictionary>

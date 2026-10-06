@@ -12,8 +12,9 @@
 
     <!-- Status card -->
     <s:String x:Key="Main.Listeners">Слушатели</s:String>
-    <s:String x:Key="Main.ActiveConnections">Активные соединения</s:String>
-    <s:String x:Key="Main.TotalErrors">Всего / ошибок</s:String>
+    <s:String x:Key="Main.Metric.Active">активных</s:String>
+    <s:String x:Key="Main.Metric.Total">всего</s:String>
+    <s:String x:Key="Main.Metric.Errors">ошибок</s:String>
     <s:String x:Key="Main.SocksUpstream">Апстрим SOCKS5</s:String>
     <s:String x:Key="Main.Config">Конфиг</s:String>
     <s:String x:Key="Main.Log">Лог</s:String>
@@ -22,6 +23,18 @@
     <s:String x:Key="Main.Chain">Цепочка</s:String>
     <s:String x:Key="Main.Chain.FullUp">полностью поднята</s:String>
     <s:String x:Key="Main.Chain.Partial">не полностью</s:String>
+    <s:String x:Key="Main.Rail.Daemon">Демон sidecar</s:String>
+    <s:String x:Key="Main.Rail.Keeper">Кипер</s:String>
+    <s:String x:Key="Main.Rail.Node">Узел tailscale</s:String>
+    <s:String x:Key="Main.Rail.Proxy">Локальный прокси</s:String>
+    <s:String x:Key="Main.Rail.Health">Проверка CONNECT</s:String>
+    <!-- Stage words while a bring-up runs in the chain card -->
+    <s:String x:Key="Main.Rail.Waiting">ждёт</s:String>
+    <s:String x:Key="Main.Rail.Starting">запуск</s:String>
+    <s:String x:Key="Main.Rail.Ready">готово</s:String>
+    <s:String x:Key="Main.Rail.Failed">ошибка</s:String>
+    <s:String x:Key="Main.Chain.Skipped">уже работает</s:String>
+    <s:String x:Key="Main.Chain.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">слушает</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">без слушателя</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">нет</s:String>
@@ -32,7 +45,7 @@
     <s:String x:Key="Main.Chain.Proxy.Stopped">остановлен</s:String>
     <s:String x:Key="Main.Chain.Health.Ok">живо</s:String>
     <s:String x:Key="Main.Chain.Health.Fail">не прошло</s:String>
-    <s:String x:Key="Main.Chain.DetailsFmt">демон: {0}    кипер: {1}    узел: {2}&#10;прокси: {3}    здоровье: {4}</s:String>
+    <s:String x:Key="Main.Chain.Health.Idle">не проверялось</s:String>
 
     <!-- Idle watchdog -->
     <s:String x:Key="Main.Watchdog">Автостоп по простою (гасит WSL-хост и цепочку, когда Claude не используется)</s:String>
@@ -77,6 +90,7 @@
 
     <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
     <s:String x:Key="Main.Guard">Гарды: контроль прямого доступа</s:String>
+    <s:String x:Key="Main.Guard.Note">Вкл и Выкл требуют прав администратора; settings.json и WSL записываются без повышения.</s:String>
     <s:String x:Key="Main.Guard.Button.Refresh">Обновить</s:String>
     <s:String x:Key="Main.Guard.Button.On">Вкл</s:String>
     <s:String x:Key="Main.Guard.Button.Off">Выкл</s:String>
@@ -85,6 +99,7 @@
     <s:String x:Key="Main.Guard.State.On">вкл</s:String>
     <s:String x:Key="Main.Guard.State.Off">выкл</s:String>
     <s:String x:Key="Main.Guard.State.Partial">частично</s:String>
+    <s:String x:Key="Main.Guard.State.Unknown">неизвестно</s:String>
     <s:String x:Key="Main.Guard.Busy">операция гарда выполняется (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Guard.Ban">Локальный бан</s:String>
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} имён · NRPT: {1} зон · firewall: {2} правил</s:String>
@@ -120,23 +135,6 @@
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Открыть</s:String>
     <s:String x:Key="Tray.Exit">Выход</s:String>
-
-    <!-- Splash (chain rise while launching Claude) -->
-    <s:String x:Key="Splash.Title">Запуск Claude</s:String>
-    <s:String x:Key="Splash.Browser.Title">Запуск браузера</s:String>
-    <s:String x:Key="Splash.Subtitle">поднимаю прокси-цепочку</s:String>
-    <s:String x:Key="Splash.Subtitle.Fail">не удалось поднять цепочку</s:String>
-    <s:String x:Key="Splash.Step.Daemon">Демон sidecar (нужен UAC)</s:String>
-    <s:String x:Key="Splash.Step.Keeper">Кипер watch-ipn</s:String>
-    <s:String x:Key="Splash.Step.Node">Узел tailscale (up)</s:String>
-    <s:String x:Key="Splash.Step.Proxy">Локальный прокси</s:String>
-    <s:String x:Key="Splash.Step.Health">Цепочка отвечает (CONNECT)</s:String>
-    <s:String x:Key="Splash.SkipNote">уже работает</s:String>
-    <s:String x:Key="Splash.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>
-    <s:String x:Key="Splash.CompleteFmt">Готово за {0} с</s:String>
-    <s:String x:Key="Splash.Fail.HintFmt">Подробности: {0}</s:String>
-    <s:String x:Key="Splash.Button.OpenLog">Открыть лог</s:String>
-    <s:String x:Key="Splash.Button.Close">Закрыть</s:String>
 
     <!-- Update window (manual Claude Desktop MSIX update) -->
     <s:String x:Key="Update.Title">Обновление Claude Desktop</s:String>
@@ -194,4 +192,5 @@
     <s:String x:Key="Diag.Section.guards">Гарды</s:String>
     <s:String x:Key="Diag.Section.watchdog">Сторож автостопа</s:String>
     <s:String x:Key="Diag.Section.logs">Логи</s:String>
+    <s:String x:Key="Diag.Logs.Empty">Файлов логов пока нет.</s:String>
 </ResourceDictionary>

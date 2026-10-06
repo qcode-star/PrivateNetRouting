@@ -2,194 +2,305 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="PrivateNetRouting"
-        Width="620" Height="700" MinWidth="540" MinHeight="560"
+        Width="820" Height="900" MinWidth="700" MinHeight="660"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Window}"
         Foreground="{StaticResource Brush.Text}"
-        FontFamily="Segoe UI">
-    <Grid Margin="24">
+        FontFamily="{StaticResource Font.Ui}"
+        FontSize="{StaticResource Font.Body}"
+        SnapsToDevicePixels="True" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+    <!--
+        Reading order: header (subject + language) → proxy state and its counters with the
+        Start/Stop control → the chain (five stages in bring-up order) with chain control and
+        the watchdog → guards → footer with the machine paths → the launch actions → the
+        result line. The body scrolls; the actions and the result line stay put.
+    -->
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header, indicator and language selection -->
-        <Grid Grid.Row="0" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal">
-                <Ellipse Width="12" Height="12" Fill="{Binding StateBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <TextBlock Text="{DynamicResource Main.Header}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding StateText}" FontSize="14" Foreground="{StaticResource Brush.TextSecondary}"
-                           VerticalAlignment="Center" Margin="12,2,0,0"/>
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="{DynamicResource Main.Language}" Foreground="{StaticResource Brush.TextSecondary}"
-                           VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <ComboBox x:Name="LanguageBox" MinWidth="140" SelectionChanged="OnLanguageSelected"/>
-            </StackPanel>
-        </Grid>
-
-        <!-- Proxy status card -->
-        <Border Grid.Row="1" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
-                BorderThickness="1" CornerRadius="8" Padding="20">
-            <Grid>
+        <!-- Header: the subject of the window and the UI language -->
+        <Border Grid.Row="0" Background="{StaticResource Brush.Band}"
+                BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
+            <Grid Margin="24,14">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="{DynamicResource Main.Listeners}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,10"/>
-                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Endpoints}" Margin="0,0,0,10" TextTrimming="CharacterEllipsis"/>
-
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.ActiveConnections}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,10"/>
-                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ActiveConnections}" Margin="0,0,0,10"/>
-
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="{DynamicResource Main.TotalErrors}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,10"/>
-                <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,0,0,10">
-                    <Run Text="{Binding TotalConnections, Mode=OneWay}"/>
-                    <Run Text=" / "/>
-                    <Run Text="{Binding FailedConnections, Mode=OneWay}"/>
-                </TextBlock>
-
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.SocksUpstream}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,10"/>
-                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SocksUpstream}" Margin="0,0,0,10"/>
-
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="{DynamicResource Main.Config}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,10"/>
-                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding ConfigPath}" Margin="0,0,0,10" TextTrimming="CharacterEllipsis"
-                           ToolTip="{Binding ConfigPath}"/>
-
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="{DynamicResource Main.Log}" Foreground="{StaticResource Brush.TextSecondary}" Margin="0,0,24,0"/>
-                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding LogPath}" TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource Brush.Accent}"
+                            VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBlock Text="{DynamicResource Main.Header}" Style="{StaticResource Text.Title}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{DynamicResource Main.Language}" Style="{StaticResource Text.Caption}"
+                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <ComboBox x:Name="LanguageBox" MinWidth="150" SelectionChanged="OnLanguageSelected"
+                              AutomationProperties.Name="{DynamicResource Main.Language}"/>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Chain: state of the links and control -->
-        <Border Grid.Row="2" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
-                BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,12,0,0">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <TextBlock Text="{DynamicResource Main.Chain}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding ChainSummary}" Foreground="{StaticResource Brush.TextSecondary}"
-                               VerticalAlignment="Center" Margin="10,1,0,0"/>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="24,16,24,0">
+
+                <!-- Forward proxy: state, listeners, counters, lifecycle -->
+                <Border Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="12" Height="12" Fill="{Binding StateBrush}" VerticalAlignment="Center"
+                                     Margin="0,0,10,0" />
+                            <TextBlock Text="{Binding StateText}" Style="{StaticResource Text.Title}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="{DynamicResource Main.Button.Start}" MinWidth="96"
+                                    Click="OnStart" IsEnabled="{Binding CanStart}"/>
+                            <Button Content="{DynamicResource Main.Button.Stop}" MinWidth="96" Margin="8,0,0,0"
+                                    Style="{StaticResource SecondaryButton}" Click="OnStop" IsEnabled="{Binding CanStop}"/>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1" Grid.Column="0" Margin="22,6,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{DynamicResource Main.Listeners}" Style="{StaticResource Text.Note}"
+                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Endpoints}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Endpoints}"/>
+                        </Grid>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="16,8,0,0">
+                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
+                                       FontWeight="SemiBold" Text="{Binding ActiveConnections}"/>
+                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Active}"
+                                       Margin="6,0,14,0"/>
+                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
+                                       FontWeight="SemiBold" Text="{Binding TotalConnections}"/>
+                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Total}"
+                                       Margin="6,0,14,0"/>
+                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{Binding FailedBrush}"
+                                       FontWeight="SemiBold" Text="{Binding FailedConnections}"/>
+                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Errors}"
+                                       Margin="6,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Chain: the five stages in bring-up order with their control. A bring-up runs
+                     live in this card — spinner, elapsed time, the current step and the rail, no
+                     separate window. -->
+                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Card}">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{DynamicResource Main.Chain}" Style="{StaticResource Text.Section}"/>
+                                <TextBlock Text="{Binding ChainSummary}" Style="{StaticResource Text.Caption}"
+                                           VerticalAlignment="Center" Margin="10,2,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Canvas x:Name="BusySpinner" Width="16" Height="16" Margin="0,0,10,0"
+                                        VerticalAlignment="Center" Visibility="Collapsed">
+                                    <Ellipse Width="16" Height="16" Stroke="{StaticResource Brush.ControlHover}" StrokeThickness="2"/>
+                                    <Ellipse x:Name="SpinnerArc" Width="16" Height="16" Stroke="{StaticResource Brush.Accent}"
+                                             StrokeThickness="2" StrokeDashArray="5.7 16.3" StrokeDashCap="Round"
+                                             RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform>
+                                            <RotateTransform Angle="0"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                </Canvas>
+                                <TextBlock x:Name="BusyElapsed" Style="{StaticResource Text.Mono}" Margin="0,0,12,0"
+                                           VerticalAlignment="Center" Visibility="Collapsed"/>
+                                <Button Content="{DynamicResource Main.Button.ChainUp}" MinWidth="108"
+                                        Style="{StaticResource SecondaryButton}" Click="OnChainUp" IsEnabled="{Binding CanChainUp}"/>
+                                <Button Content="{DynamicResource Main.Button.ChainDown}" MinWidth="108" Margin="8,0,0,0"
+                                        Style="{StaticResource GhostButton}" Click="OnChainDown" IsEnabled="{Binding CanChainDown}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- The rail itself, built by ChainRail: markers on a link, a link carrying the
+                             colour of the stage it leads to -->
+                        <Grid x:Name="RailHost" Margin="0,14,0,0"/>
+
+                        <!-- What the bring-up is doing right now; empty outside of an operation -->
+                        <TextBlock x:Name="ChainDetail" Style="{StaticResource Text.Mono}" Margin="0,12,0,0"
+                                   TextWrapping="Wrap" Visibility="Collapsed"/>
+                        <TextBlock x:Name="ChainHint" Style="{StaticResource Text.Note}" Margin="0,6,0,0"
+                                   TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                        <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
+                        <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,14,0,0"
+                                  Checked="OnWatchdogToggled" Unchecked="OnWatchdogToggled"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Direct-access guards: state of each layer and its control.
+                     Ban and policy request UAC (elevated helper), settings.json and WSL — without it. -->
+                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Card}">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{DynamicResource Main.Guard}" Style="{StaticResource Text.Section}"/>
+                                <TextBlock Text="{DynamicResource Main.Guard.Note}" Style="{StaticResource Text.Note}"
+                                           Margin="0,4,16,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="{DynamicResource Main.Guard.Button.Refresh}"
+                                    Style="{StaticResource GhostButton}" MinWidth="100" VerticalAlignment="Top"
+                                    Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
+                        </Grid>
+
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Local ban (hosts + NRPT + firewall) -->
+                            <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="Gray"
+                                     VerticalAlignment="Center" Margin="0,0,6,10" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource Main.Guard.Ban}"
+                                       Style="{StaticResource Text.Body}" MinWidth="128" VerticalAlignment="Center" Margin="0,0,14,10"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BanState" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" MinWidth="68" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                            <TextBlock Grid.Row="0" Grid.Column="3" x:Name="BanDetail" Text="…" TextTrimming="CharacterEllipsis"
+                                       Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
+                            <StackPanel Grid.Row="0" Grid.Column="4" Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button x:Name="BanOnButton" Content="{DynamicResource Main.Guard.Button.On}" MinWidth="72"
+                                        Style="{StaticResource AccentGhostButton}" Click="OnGuardBanOn" IsEnabled="{Binding CanGuard}"/>
+                                <Button x:Name="BanOffButton" Content="{DynamicResource Main.Guard.Button.Off}" MinWidth="72"
+                                        Margin="6,0,0,0" Style="{StaticResource GhostButton}" Click="OnGuardBanOff"
+                                        IsEnabled="{Binding CanGuard}"/>
+                            </StackPanel>
+
+                            <!-- Managed policy egressProxyUrl -->
+                            <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="Gray"
+                                     VerticalAlignment="Center" Margin="0,0,6,10" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Main.Guard.Policy}"
+                                       Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PolicyState" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="PolicyDetail" Text="…" TextTrimming="CharacterEllipsis"
+                                       Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
+                            <StackPanel Grid.Row="1" Grid.Column="4" Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button x:Name="PolicyOnButton" Content="{DynamicResource Main.Guard.Button.On}" MinWidth="72"
+                                        Style="{StaticResource AccentGhostButton}" Click="OnGuardPolicyOn" IsEnabled="{Binding CanGuard}"/>
+                                <Button x:Name="PolicyOffButton" Content="{DynamicResource Main.Guard.Button.Off}" MinWidth="72"
+                                        Margin="6,0,0,0" Style="{StaticResource GhostButton}" Click="OnGuardPolicyOff"
+                                        IsEnabled="{Binding CanGuard}"/>
+                            </StackPanel>
+
+                            <!-- env in Claude Code settings.json (Windows) -->
+                            <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray"
+                                     VerticalAlignment="Center" Margin="0,0,6,10" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}"
+                                       Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" x:Name="SettingsState" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                            <TextBlock Grid.Row="2" Grid.Column="3" x:Name="SettingsDetail" Text="…" TextTrimming="CharacterEllipsis"
+                                       Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
+                            <Button Grid.Row="2" Grid.Column="4" x:Name="SettingsSyncButton" MinWidth="150" Margin="0,0,0,10"
+                                    Content="{DynamicResource Main.Guard.Button.Sync}" Style="{StaticResource AccentGhostButton}"
+                                    Click="OnGuardSettingsSync" IsEnabled="{Binding CanGuard}"/>
+
+                            <!-- WSL config: startup script + distro settings.json -->
+                            <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="Gray"
+                                     VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{DynamicResource Main.Guard.Wsl}"
+                                       Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2" x:Name="WslState" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="3" x:Name="WslDetail" Text="…" TextTrimming="CharacterEllipsis"
+                                       Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                            <Button Grid.Row="3" Grid.Column="4" x:Name="WslSyncButton" MinWidth="150"
+                                    Content="{DynamicResource Main.Guard.Button.Sync}" Style="{StaticResource AccentGhostButton}"
+                                    Click="OnGuardWslSync" IsEnabled="{Binding CanGuard}"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Machine paths: reference data, monospace, each value ellipsized with a full-value tooltip -->
+                <Grid Margin="2,14,2,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="0.8*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="1.1*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="1.1*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{DynamicResource Main.SocksUpstream}"
+                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Grid.Column="1" Text="{Binding SocksUpstream}" Style="{StaticResource Text.Mono}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding SocksUpstream}" Margin="0,0,20,0"/>
+                    <TextBlock Grid.Column="2" Text="{DynamicResource Main.Config}"
+                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Grid.Column="3" Text="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}" Margin="0,0,20,0"/>
+                    <TextBlock Grid.Column="4" Text="{DynamicResource Main.Log}"
+                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Grid.Column="5" Text="{Binding LogPath}" Style="{StaticResource Text.Mono}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"/>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Launch actions: the primary one, then the update; the note next to them is the signal
+             about an update found at startup. The read-only checks sit opposite. -->
+        <StackPanel Grid.Row="2" Margin="24,16,24,0">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="{DynamicResource Main.Button.LaunchClaude}" MinWidth="200" Click="OnLaunchClaude"
+                        IsEnabled="{Binding CanLaunch}"/>
+                <Button Content="{DynamicResource Main.Button.LaunchBrowser}" MinWidth="120" Margin="8,0,0,0"
+                        Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
+                <Button Content="{DynamicResource Main.Button.UpdateClaude}" MinWidth="160" Margin="8,0,0,0"
+                        Style="{StaticResource SecondaryButton}" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
+            </StackPanel>
+            <Grid Margin="0,10,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="{DynamicResource Main.Button.CheckChain}" MinWidth="130"
+                            Style="{StaticResource GhostButton}" Click="OnCheckChain"/>
+                    <Button Content="{DynamicResource Main.Button.Diagnostics}" MinWidth="130" Margin="8,0,0,0"
+                            Style="{StaticResource GhostButton}" Click="OnDiagnostics"/>
                 </StackPanel>
-                <TextBlock Text="{Binding ChainDetails}" FontSize="12" LineHeight="20"
-                           Foreground="{StaticResource Brush.Text}"/>
-                <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
-                <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,12,0,0"
-                          Checked="OnWatchdogToggled" Unchecked="OnWatchdogToggled"/>
-            </StackPanel>
-        </Border>
-
-        <!-- Direct-access guards: status of each layer (read-only) and control.
-             Ban and policy request UAC (elevated helper), settings.json and WSL — without it. -->
-        <Border Grid.Row="3" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
-                BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,12,0,0">
-            <StackPanel>
-                <Grid Margin="0,0,0,10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{DynamicResource Main.Guard}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="{DynamicResource Main.Guard.Button.Refresh}" MinWidth="100" Style="{StaticResource SecondaryButton}"
-                            Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
-                </Grid>
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="150"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <!-- Local ban (hosts + NRPT + firewall) -->
-                    <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
-                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource Main.Guard.Ban}" VerticalAlignment="Center" Margin="0,4,12,4"/>
-                    <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BanDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
-                    <StackPanel Grid.Row="0" Grid.Column="3" Orientation="Horizontal">
-                        <Button x:Name="BanOnButton" Content="{DynamicResource Main.Guard.Button.On}" Width="80" Click="OnGuardBanOn" IsEnabled="{Binding CanGuard}"/>
-                        <Button x:Name="BanOffButton" Content="{DynamicResource Main.Guard.Button.Off}" Width="80" Margin="6,0,0,0" Style="{StaticResource SecondaryButton}"
-                                Click="OnGuardBanOff" IsEnabled="{Binding CanGuard}"/>
-                    </StackPanel>
-
-                    <!-- Managed policy egressProxyUrl -->
-                    <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
-                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Main.Guard.Policy}" VerticalAlignment="Center" Margin="0,4,12,4"/>
-                    <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PolicyDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
-                    <StackPanel Grid.Row="1" Grid.Column="3" Orientation="Horizontal">
-                        <Button x:Name="PolicyOnButton" Content="{DynamicResource Main.Guard.Button.On}" Width="80" Click="OnGuardPolicyOn" IsEnabled="{Binding CanGuard}"/>
-                        <Button x:Name="PolicyOffButton" Content="{DynamicResource Main.Guard.Button.Off}" Width="80" Margin="6,0,0,0" Style="{StaticResource SecondaryButton}"
-                                Click="OnGuardPolicyOff" IsEnabled="{Binding CanGuard}"/>
-                    </StackPanel>
-
-                    <!-- env in Claude Code settings.json (Windows) -->
-                    <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
-                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}" VerticalAlignment="Center" Margin="0,4,12,4"/>
-                    <TextBlock Grid.Row="2" Grid.Column="2" x:Name="SettingsDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
-                    <Button Grid.Row="2" Grid.Column="3" x:Name="SettingsSyncButton" Content="{DynamicResource Main.Guard.Button.Sync}" Width="166"
-                            Click="OnGuardSettingsSync" IsEnabled="{Binding CanGuard}"/>
-
-                    <!-- WSL config: startup script + distro settings.json -->
-                    <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center" Margin="0,4,10,4"/>
-                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{DynamicResource Main.Guard.Wsl}" VerticalAlignment="Center" Margin="0,4,12,4"/>
-                    <TextBlock Grid.Row="3" Grid.Column="2" x:Name="WslDetail" Text="…" VerticalAlignment="Center" Margin="0,4,16,4" TextTrimming="CharacterEllipsis"/>
-                    <Button Grid.Row="3" Grid.Column="3" x:Name="WslSyncButton" Content="{DynamicResource Main.Guard.Button.Sync}" Width="166"
-                            Click="OnGuardWslSync" IsEnabled="{Binding CanGuard}"/>
-                </Grid>
-            </StackPanel>
-        </Border>
-
-        <!-- Launch Claude and a browser with an isolated profile: chain check/bring-up and start
-             with proxy flags (splash screen when waiting); next to it — a signal about an update found at startup -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,16,0,0">
-            <Button Content="{DynamicResource Main.Button.LaunchClaude}" Width="160" Click="OnLaunchClaude" IsEnabled="{Binding CanLaunch}"/>
-            <Button Content="{DynamicResource Main.Button.LaunchBrowser}" Width="140" Margin="8,0,0,0" Click="OnLaunchBrowser"
-                    IsEnabled="{Binding CanLaunch}"/>
-            <Button Content="{DynamicResource Main.Button.UpdateClaude}" Width="150" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
-                    Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
-            <TextBlock Text="{Binding UpdateNotice}" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold"
-                       VerticalAlignment="Center" Margin="20,0,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding UpdateNotice}" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="16,0,0,0"
+                           TextWrapping="Wrap" MaxWidth="300"/>
+            </Grid>
         </StackPanel>
 
-        <!-- Buttons -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button Content="{DynamicResource Main.Button.Start}" Width="120" Click="OnStart" IsEnabled="{Binding CanStart}"/>
-            <Button Content="{DynamicResource Main.Button.Stop}" Width="120" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
-                    Click="OnStop" IsEnabled="{Binding CanStop}"/>
-            <Button Content="{DynamicResource Main.Button.CheckChain}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
-                    Click="OnCheckChain"/>
-            <Button Content="{DynamicResource Main.Button.Diagnostics}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
-                    Click="OnDiagnostics"/>
-            <Button Content="{DynamicResource Main.Button.ChainUp}" Margin="24,0,0,0" Click="OnChainUp" IsEnabled="{Binding CanChainUp}"/>
-            <Button Content="{DynamicResource Main.Button.ChainDown}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}"
-                    Click="OnChainDown" IsEnabled="{Binding CanChainDown}"/>
-        </StackPanel>
-
-        <!-- Check result line -->
-        <TextBlock Grid.Row="6" Text="{Binding CheckResult}" Foreground="{StaticResource Brush.TextSecondary}"
-                   Margin="0,12,0,0" TextWrapping="Wrap"/>
+        <!-- Result line of the last operation -->
+        <TextBlock Grid.Row="3" Text="{Binding CheckResult}" Foreground="{Binding CheckResultBrush}"
+                   Margin="24,12,24,16" TextWrapping="Wrap"/>
     </Grid>
 </Window>
