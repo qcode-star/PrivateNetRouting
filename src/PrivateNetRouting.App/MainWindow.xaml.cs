@@ -13,6 +13,7 @@ using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
 
@@ -728,8 +729,28 @@ public partial class MainWindow : Window
         }
 
         _updateWindow = new UpdateWindow(_runtime) { Owner = this };
+        _updateWindow.VersionStateResolved += OnVersionStateResolved;
         _updateWindow.Closed += (_, _) => _updateWindow = null;
         _updateWindow.Show();
+    }
+
+    /// <summary>
+    /// The update window has resolved the version state (its own check, or a finished
+    /// installation): the line about an available update follows it — a stale one is dropped,
+    /// a still-valid one is reused.
+    /// </summary>
+    private void OnVersionStateResolved(UpdateCheckResult check)
+    {
+        if (check.Installed is null || check.UpToDate)
+        {
+            _viewModel.ClearUpdateNotice();
+            return;
+        }
+
+        if (check.OfferedVersion is not null)
+        {
+            SetUpdateNotice(check.Installed.Version, check.OfferedVersion);
+        }
     }
 
     /// <summary>
@@ -924,6 +945,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _updateNoticeArgs = [installedVersion, offeredVersion];
         }
 
+        OnPropertyChanged(nameof(UpdateNotice));
+    }
+
+    /// <summary>The reported state has stopped being true — the version is current, the line goes away.</summary>
+    public void ClearUpdateNotice()
+    {
+        _updateNoticeKey = null;
+        _updateNoticeArgs = [];
         OnPropertyChanged(nameof(UpdateNotice));
     }
 

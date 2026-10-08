@@ -158,6 +158,7 @@
     <s:String x:Key="Update.Install.NoClose">Идёт установка — не закрывайте окно.</s:String>
     <s:String x:Key="Update.Install.RightsHintFmt">Если жалуется на права — запусти из консоли администратора:&#10;Add-AppxPackage -Path "{0}" -ForceApplicationShutdown</s:String>
     <s:String x:Key="Update.Install.VersionWarn">ВНИМАНИЕ: версия после установки не сменилась — проверь журнал AppX.</s:String>
+    <s:String x:Key="Update.AutoCloseFmt">Окно само закроется через {0} с — щёлкни в любом месте, чтобы оставить его открытым.</s:String>
     <s:String x:Key="Update.Done.InstalledFmt">Установлено: {0} → {1}</s:String>
     <s:String x:Key="Update.Done.Stopped">Остановлено.</s:String>
     <s:String x:Key="Update.Done.StoppedFmt">Остановлено: докачано {0} из {1}; докачка сохранена в кэше.</s:String>

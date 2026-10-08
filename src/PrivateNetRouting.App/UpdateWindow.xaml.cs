@@ -23,6 +23,9 @@ namespace PrivateNetRouting.App;
 /// </summary>
 public partial class UpdateWindow : Window
 {
+    /// <summary>How long the window lives after a successful installation.</summary>
+    private const int AutoCloseSeconds = 30;
+
     private static readonly string[] StepOrder = ["Check", "Chain", "Download", "Install"];
 
     private readonly ProxyRuntime _runtime;
@@ -30,10 +33,12 @@ public partial class UpdateWindow : Window
     private readonly StepRailRow[] _rows;
     private readonly ChainStepStatus[] _states;
     private readonly DispatcherTimer _clock;
+    private readonly DispatcherTimer _autoClose;
     private readonly Stopwatch _watch = new();
     private readonly Queue<(DateTimeOffset At, long Bytes)> _samples = new();
     private readonly object _sampleGate = new();
 
+    private int _autoCloseLeft;
     private CancellationTokenSource? _cts;
     private TaskCompletionSource<bool>? _pauseDecision;
     private UpdatePhase _phase = UpdatePhase.Check;
@@ -73,10 +78,18 @@ public partial class UpdateWindow : Window
 
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
         _clock.Tick += (_, _) => OnClockTick();
+
+        // the countdown after a successful installation: any click or key press keeps the window open
+        _autoClose = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _autoClose.Tick += (_, _) => OnAutoCloseTick();
+        PreviewMouseDown += (_, _) => CancelAutoClose();
+        PreviewKeyDown += (_, _) => CancelAutoClose();
+
         Closed += (_, _) =>
         {
             Loc.LanguageChanged -= OnLanguageChanged;
             _clock.Stop();
+            _autoClose.Stop();
         };
         Loc.LanguageChanged += OnLanguageChanged;
         ApplyStrings();
@@ -88,6 +101,13 @@ public partial class UpdateWindow : Window
             }
         };
     }
+
+    /// <summary>
+    /// The version state the window has just resolved — by its own check or by a finished
+    /// installation. The caller keeps its "update available" line in sync with it: a check that
+    /// finds the version current, or an installation that replaced it, leaves that line stale.
+    /// </summary>
+    public event Action<UpdateCheckResult>? VersionStateResolved;
 
     /// <summary>Full cycle: check → chain → download → package verification → pause → install.</summary>
     private async Task StartAsync(string? manualUrl)
@@ -140,12 +160,14 @@ public partial class UpdateWindow : Window
             {
                 SetStep(0, ChainStepStatus.Failed);
                 SetDetailKey("Update.Check.NotInstalled");
+                VersionStateResolved?.Invoke(check);
                 Finish(success: false);
                 return;
             }
 
             _beforeVersion = check.Installed.Version;
             SetStep(0, ChainStepStatus.Done, check.Installed.Version);
+            VersionStateResolved?.Invoke(check);
 
             if (check.UpToDate)
             {
@@ -224,8 +246,14 @@ public partial class UpdateWindow : Window
             {
                 SetHintKey("Update.Install.VersionWarn");
             }
+            else
+            {
+                // the URL we downloaded from now offers what is installed — no "update available" is left
+                VersionStateResolved?.Invoke(new UpdateCheckResult(after, check.PackageUrl, after.Version, UpToDate: true));
+            }
 
             Finish(success: true, showLaunch: true, progressFull: true);
+            StartAutoClose();
         }
         catch (OperationCanceledException)
         {
@@ -419,6 +447,50 @@ public partial class UpdateWindow : Window
         BtnClose.IsEnabled = true;
     }
 
+    /// <summary>
+    /// After a real installation the window leaves on its own: the countdown is visible from the
+    /// first second, and any interaction means the user still wants it — see CancelAutoClose.
+    /// </summary>
+    private void StartAutoClose()
+    {
+        _autoCloseLeft = AutoCloseSeconds;
+        _autoClose.Start();
+        RefreshCountdown();
+    }
+
+    private void CancelAutoClose()
+    {
+        if (!_autoClose.IsEnabled)
+        {
+            return;
+        }
+
+        _autoClose.Stop();
+        RefreshCountdown();
+    }
+
+    private void OnAutoCloseTick()
+    {
+        _autoCloseLeft--;
+        if (_autoCloseLeft <= 0)
+        {
+            _autoClose.Stop();
+            Close();
+            return;
+        }
+
+        RefreshCountdown();
+    }
+
+    private void RefreshCountdown()
+    {
+        CountdownText.Visibility = _autoClose.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        if (_autoClose.IsEnabled)
+        {
+            CountdownText.Text = Loc.F("Update.AutoCloseFmt", _autoCloseLeft);
+        }
+    }
+
     private void OnStop(object sender, RoutedEventArgs e)
     {
         if (_pauseDecision is not null)
@@ -579,6 +651,7 @@ public partial class UpdateWindow : Window
         BtnContinueUrl.Content = Loc.S("Update.Button.ContinueWithUrl");
         RefreshDetail();
         RefreshHint();
+        RefreshCountdown();
     }
 
     private void OnLanguageChanged() => ApplyStrings();
