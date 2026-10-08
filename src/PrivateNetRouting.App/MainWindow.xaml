@@ -1,6 +1,7 @@
 <Window x:Class="PrivateNetRouting.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:PrivateNetRouting.App"
         Title="PrivateNetRouting"
         Width="820" Height="900" MinWidth="700" MinHeight="660"
         WindowStartupLocation="CenterScreen"
@@ -144,22 +145,24 @@
                                        Foreground="{Binding UpstreamStateBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
 
-                            <!-- User config of this installation -->
+                            <!-- User config of this installation; the path is cut in the middle
+                                 so the file name stays readable -->
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="{DynamicResource Main.Config}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}"
-                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <app:PathTextBlock Grid.Row="2" Grid.Column="1" Source="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}"
+                                               VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding ConfigState}"
                                        Style="{StaticResource Text.Caption}" Foreground="{StaticResource Brush.TextSecondary}"
                                        VerticalAlignment="Center" Margin="0,0,0,8"/>
 
-                            <!-- Live log of this process -->
+                            <!-- Live log of this process; the path is cut in the middle so the file
+                                 name stays readable -->
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.Log}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding LogPath}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"
-                                       VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <app:PathTextBlock Grid.Row="3" Grid.Column="1" Source="{Binding LogPath}" Style="{StaticResource Text.Mono}"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
                             <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding LogState}"
                                        Foreground="{Binding LogStateBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center"/>
