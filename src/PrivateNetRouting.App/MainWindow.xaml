@@ -11,10 +11,10 @@
         SnapsToDevicePixels="True" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
     <!--
-        Reading order: header (subject + language) → proxy state and its counters with the
-        Start/Stop control → the chain (five stages in bring-up order) with chain control and
-        the watchdog → guards → footer with the machine paths → the launch actions → the
-        result line. The body scrolls; the actions and the result line stay put.
+        Reading order: header (subject + language) → the chain (five stages in bring-up order,
+        its control and the watchdog, the status rows: proxy listeners with counters, the SOCKS5
+        upstream, the config, the log) → guards → the launch actions → the result line.
+        The body scrolls; the actions and the result line stay put.
     -->
     <Grid>
         <Grid.RowDefinitions>
@@ -49,61 +49,11 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="24,16,24,0">
 
-                <!-- Forward proxy: state, listeners, counters, lifecycle -->
+                <!-- Chain: the five stages in bring-up order with their control. The chain buttons
+                     are the single lifecycle control: bring-up is idempotent, so a partially up
+                     chain gets exactly its missing links. A bring-up runs live in this card —
+                     spinner, elapsed time, the current step and the rail, no separate window. -->
                 <Border Style="{StaticResource Card}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-
-                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="12" Height="12" Fill="{Binding StateBrush}" VerticalAlignment="Center"
-                                     Margin="0,0,10,0" />
-                            <TextBlock Text="{Binding StateText}" Style="{StaticResource Text.Title}"/>
-                        </StackPanel>
-                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="{DynamicResource Main.Button.Start}" MinWidth="96"
-                                    Click="OnStart" IsEnabled="{Binding CanStart}"/>
-                            <Button Content="{DynamicResource Main.Button.Stop}" MinWidth="96" Margin="8,0,0,0"
-                                    Style="{StaticResource SecondaryButton}" Click="OnStop" IsEnabled="{Binding CanStop}"/>
-                        </StackPanel>
-
-                        <Grid Grid.Row="1" Grid.Column="0" Margin="22,6,16,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="{DynamicResource Main.Listeners}" Style="{StaticResource Text.Note}"
-                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Endpoints}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Endpoints}"/>
-                        </Grid>
-                        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="16,8,0,0">
-                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
-                                       FontWeight="SemiBold" Text="{Binding ActiveConnections}"/>
-                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Active}"
-                                       Margin="6,0,14,0"/>
-                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
-                                       FontWeight="SemiBold" Text="{Binding TotalConnections}"/>
-                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Total}"
-                                       Margin="6,0,14,0"/>
-                            <TextBlock Style="{StaticResource Text.Mono}" Foreground="{Binding FailedBrush}"
-                                       FontWeight="SemiBold" Text="{Binding FailedConnections}"/>
-                            <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Errors}"
-                                       Margin="6,0,0,0"/>
-                        </StackPanel>
-                    </Grid>
-                </Border>
-
-                <!-- Chain: the five stages in bring-up order with their control. A bring-up runs
-                     live in this card — spinner, elapsed time, the current step and the rail, no
-                     separate window. -->
-                <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Card}">
                     <StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -145,6 +95,75 @@
                                    TextWrapping="Wrap" Visibility="Collapsed"/>
                         <TextBlock x:Name="ChainHint" Style="{StaticResource Text.Note}" Margin="0,6,0,0"
                                    TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                        <!-- The chain seen as data: the local proxy's listeners with traffic counters,
+                             the sidecar's SOCKS5 upstream, the config and the live log — each row
+                             carries its state word next to the colour -->
+                        <Grid Margin="0,16,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Listeners and counters of the local proxy stage -->
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{DynamicResource Main.Listeners}"
+                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Endpoints}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Endpoints}"
+                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                        Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
+                                           FontWeight="SemiBold" Text="{Binding ActiveConnections}"/>
+                                <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Active}"
+                                           Margin="5,0,12,0"/>
+                                <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
+                                           FontWeight="SemiBold" Text="{Binding TotalConnections}"/>
+                                <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Total}"
+                                           Margin="5,0,12,0"/>
+                                <TextBlock Style="{StaticResource Text.Mono}" Foreground="{Binding FailedBrush}"
+                                           FontWeight="SemiBold" Text="{Binding FailedConnections}"/>
+                                <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Errors}"
+                                           Margin="5,0,0,0"/>
+                            </StackPanel>
+
+                            <!-- SOCKS5 upstream of the sidecar daemon -->
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.SocksUpstream}"
+                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SocksUpstream}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding SocksUpstream}"
+                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding UpstreamState}"
+                                       Foreground="{Binding UpstreamStateBrush}" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
+
+                            <!-- User config of this installation -->
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="{DynamicResource Main.Config}"
+                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}"
+                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding ConfigState}"
+                                       Style="{StaticResource Text.Caption}" Foreground="{StaticResource Brush.TextSecondary}"
+                                       VerticalAlignment="Center" Margin="0,0,0,8"/>
+
+                            <!-- Live log of this process -->
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.Log}"
+                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding LogPath}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"
+                                       VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding LogState}"
+                                       Foreground="{Binding LogStateBrush}" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </Grid>
 
                         <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
                         <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,14,0,0"
@@ -249,29 +268,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Machine paths: reference data, monospace, each value ellipsized with a full-value tooltip -->
-                <Grid Margin="2,14,2,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="0.8*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="1.1*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="1.1*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{DynamicResource Main.SocksUpstream}"
-                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Grid.Column="1" Text="{Binding SocksUpstream}" Style="{StaticResource Text.Mono}"
-                               TextTrimming="CharacterEllipsis" ToolTip="{Binding SocksUpstream}" Margin="0,0,20,0"/>
-                    <TextBlock Grid.Column="2" Text="{DynamicResource Main.Config}"
-                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Grid.Column="3" Text="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
-                               TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}" Margin="0,0,20,0"/>
-                    <TextBlock Grid.Column="4" Text="{DynamicResource Main.Log}"
-                               Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Grid.Column="5" Text="{Binding LogPath}" Style="{StaticResource Text.Mono}"
-                               TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"/>
-                </Grid>
             </StackPanel>
         </ScrollViewer>
 

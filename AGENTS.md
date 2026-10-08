@@ -168,9 +168,11 @@ Architecture notes:
 src/
   PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
                              # window hidden to the tray), tray (TrayIcon: open/exit, balloon),
-                             # proxy and chain status, language selection, the chain card with the
-                             # animated rail that runs the bring-up live while launching Claude or
-                             # a browser, the --launch shortcut mode
+                             # language selection, the chain card — the single lifecycle control
+                             # (idempotent bring-up/stop of the whole chain, the animated rail
+                             # that runs the bring-up live while launching Claude or a browser,
+                             # status rows: proxy listeners with counters, the SOCKS5 upstream,
+                             # the config, the log), the --launch shortcut mode
                              # (Claude running → window only), the "Browser" button and the
                              # --launch-browser shortcut mode (isolated profile, "already running"
                              # note), the startup Claude update check, the update window

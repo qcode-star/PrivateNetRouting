@@ -5,19 +5,23 @@
          all Strings.*.xaml dictionaries; the language list is AppLanguage.Supported. -->
 
     <!-- Header and status -->
-    <s:String x:Key="Main.Header">Forward proxy</s:String>
+    <s:String x:Key="Main.Header">PrivateNetRouting</s:String>
     <s:String x:Key="Main.State.Unknown">unknown</s:String>
-    <s:String x:Key="Main.State.Running">running</s:String>
-    <s:String x:Key="Main.State.Stopped">stopped</s:String>
 
-    <!-- Status card -->
+    <!-- Chain card status rows -->
     <s:String x:Key="Main.Listeners">Listeners</s:String>
     <s:String x:Key="Main.Metric.Active">active</s:String>
     <s:String x:Key="Main.Metric.Total">total</s:String>
     <s:String x:Key="Main.Metric.Errors">errors</s:String>
     <s:String x:Key="Main.SocksUpstream">SOCKS5 upstream</s:String>
     <s:String x:Key="Main.Config">Config</s:String>
+    <s:String x:Key="Main.Config.Loaded">loaded</s:String>
+    <s:String x:Key="Main.Config.Missing">no file</s:String>
     <s:String x:Key="Main.Log">Log</s:String>
+    <s:String x:Key="Main.Log.WritingFmt">writing · {0}</s:String>
+    <s:String x:Key="Main.Log.Missing">no file</s:String>
+    <s:String x:Key="Main.Size.KbFmt">{0} KB</s:String>
+    <s:String x:Key="Main.Size.MbFmt">{0} MB</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Chain</s:String>
@@ -48,14 +52,12 @@
     <s:String x:Key="Main.Chain.Health.Idle">not checked</s:String>
 
     <!-- Idle watchdog -->
-    <s:String x:Key="Main.Watchdog">Idle auto-stop (stops the WSL host and the chain when Claude is not in use)</s:String>
+    <s:String x:Key="Main.Watchdog">Idle auto-stop (stops Claude in WSL and the chain when Claude is not in use)</s:String>
     <s:String x:Key="Main.Watchdog.StartedFmt">watchdog started: checking every {0}s</s:String>
-    <s:String x:Key="Main.Watchdog.StoppedIdle">watchdog: idle — the WSL host and the chain are stopped</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedIdle">watchdog: idle — Claude in WSL and the chain are stopped</s:String>
     <s:String x:Key="Main.Watchdog.StoppedManual">watchdog stopped</s:String>
 
     <!-- Buttons -->
-    <s:String x:Key="Main.Button.Start">Start</s:String>
-    <s:String x:Key="Main.Button.Stop">Stop</s:String>
     <s:String x:Key="Main.Button.CheckChain">Check chain</s:String>
     <s:String x:Key="Main.Button.Diagnostics">Diagnostics…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Start chain</s:String>

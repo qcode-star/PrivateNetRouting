@@ -5,19 +5,23 @@
          all Strings.*.xaml dictionaries; the language list is AppLanguage.Supported. -->
 
     <!-- Header and status -->
-    <s:String x:Key="Main.Header">Forward-прокси</s:String>
+    <s:String x:Key="Main.Header">PrivateNetRouting</s:String>
     <s:String x:Key="Main.State.Unknown">неизвестно</s:String>
-    <s:String x:Key="Main.State.Running">работает</s:String>
-    <s:String x:Key="Main.State.Stopped">остановлен</s:String>
 
-    <!-- Status card -->
+    <!-- Chain card status rows -->
     <s:String x:Key="Main.Listeners">Слушатели</s:String>
     <s:String x:Key="Main.Metric.Active">активных</s:String>
     <s:String x:Key="Main.Metric.Total">всего</s:String>
     <s:String x:Key="Main.Metric.Errors">ошибок</s:String>
     <s:String x:Key="Main.SocksUpstream">Апстрим SOCKS5</s:String>
     <s:String x:Key="Main.Config">Конфиг</s:String>
+    <s:String x:Key="Main.Config.Loaded">загружен</s:String>
+    <s:String x:Key="Main.Config.Missing">нет файла</s:String>
     <s:String x:Key="Main.Log">Лог</s:String>
+    <s:String x:Key="Main.Log.WritingFmt">пишется · {0}</s:String>
+    <s:String x:Key="Main.Log.Missing">нет файла</s:String>
+    <s:String x:Key="Main.Size.KbFmt">{0} КБ</s:String>
+    <s:String x:Key="Main.Size.MbFmt">{0} МБ</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Цепочка</s:String>
@@ -48,14 +52,12 @@
     <s:String x:Key="Main.Chain.Health.Idle">не проверялось</s:String>
 
     <!-- Idle watchdog -->
-    <s:String x:Key="Main.Watchdog">Автостоп по простою (гасит WSL-хост и цепочку, когда Claude не используется)</s:String>
+    <s:String x:Key="Main.Watchdog">Автостоп по простою (останавливает Claude в WSL и цепочку, когда Claude не используется)</s:String>
     <s:String x:Key="Main.Watchdog.StartedFmt">сторож запущен: проверка каждые {0} с</s:String>
-    <s:String x:Key="Main.Watchdog.StoppedIdle">сторож: простой — WSL-хост и цепочка остановлены</s:String>
+    <s:String x:Key="Main.Watchdog.StoppedIdle">сторож: простой — Claude в WSL и цепочка остановлены</s:String>
     <s:String x:Key="Main.Watchdog.StoppedManual">сторож остановлен</s:String>
 
     <!-- Buttons -->
-    <s:String x:Key="Main.Button.Start">Запустить</s:String>
-    <s:String x:Key="Main.Button.Stop">Остановить</s:String>
     <s:String x:Key="Main.Button.CheckChain">Проверить цепочку</s:String>
     <s:String x:Key="Main.Button.Diagnostics">Диагностика…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Поднять цепочку</s:String>

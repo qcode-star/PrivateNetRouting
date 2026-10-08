@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,16 +14,20 @@ using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Net.Socks;
+using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Main window: forward proxy and chain status, control, UI language selection.
-/// Chain state is polled less often than proxy counters: each poll is a
-/// CLI call and a CONNECT roundtrip. All strings come from the Localization/Strings.*.xaml
-/// dictionaries: XAML takes them via DynamicResource, code via Loc.S/Loc.F; a language change
-/// rebinds the dictionary on the fly (Loc.LanguageChanged), the view model redraws its strings.
+/// Main window: chain status and control, UI language selection.
+/// The chain is the single lifecycle object of the window: the chain buttons bring it up
+/// (idempotently — a partially up chain gets its missing links) and stop it. Chain state is polled
+/// less often than the status rows: each poll is a CLI call and a CONNECT roundtrip. All strings
+/// come from the Localization/Strings.*.xaml dictionaries: XAML takes them via DynamicResource,
+/// code via Loc.S/Loc.F; a language change rebinds the dictionary on the fly (Loc.LanguageChanged),
+/// the view model redraws its strings.
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -443,18 +448,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnStart(object sender, RoutedEventArgs e)
-    {
-        await _runtime.StartAsync(CancellationToken.None);
-        _viewModel.Refresh();
-    }
-
-    private async void OnStop(object sender, RoutedEventArgs e)
-    {
-        await _runtime.StopAsync();
-        _viewModel.Refresh();
-    }
-
     private async void OnCheckChain(object sender, RoutedEventArgs e)
     {
         _viewModel.SetCheckResult("Main.Check.Running");
@@ -517,8 +510,10 @@ public partial class MainWindow : Window
     /// <summary>
     /// Idle auto-stop watchdog: the loop lives while
     /// the process that started it is open — here it is the application window. Enabling/disabling
-    /// is an explicit user action; on idle the watchdog itself shuts down the WSL host and the chain
-    /// (UAC confirmation for the daemon shutdown) and clears the checkbox.
+    /// is an explicit user action; on idle the watchdog itself stops the Claude processes inside
+    /// the WSL distro (RPC, then a signal escalation for orphans — the distro is not shut down and
+    /// will exit on its own once nothing is left in it) and then the chain (UAC confirmation for
+    /// the daemon shutdown), and clears the checkbox.
     /// </summary>
     private void OnWatchdogToggled(object sender, RoutedEventArgs e)
     {
@@ -822,23 +817,25 @@ public partial class MainWindow : Window
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ProxyRuntime _runtime;
+    private readonly ITcpConnectionTable _tcpTable = new TcpConnectionTable();
     private ChainState? _lastChainState;
     private string? _chainStateError;
     private string? _checkResultKey;
     private object?[] _checkResultArgs = [];
     private string? _checkResultLiteral;
-    private string _stateText = "";
-    private Brush _stateBrush = Brushes.Gray;
     private string _endpoints = "—";
     private string _activeConnections = "0";
     private long _totalConnections;
     private long _failedConnections;
     private Brush _failedBrush = Brushes.Gray;
     private string _socksUpstream = "";
+    private string _upstreamState = "";
+    private Brush _upstreamStateBrush = Brushes.Gray;
     private string _configPath = "";
+    private string _configState = "";
     private string _logPath = "";
-    private bool _canStart;
-    private bool _canStop;
+    private string _logState = "";
+    private Brush _logStateBrush = Brushes.Gray;
     private string _chainSummary = "…";
     private bool _chainOperationRunning;
     private bool _launchRunning;
@@ -852,18 +849,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-
-    public string StateText
-    {
-        get => _stateText;
-        private set => SetField(ref _stateText, value);
-    }
-
-    public Brush StateBrush
-    {
-        get => _stateBrush;
-        private set => SetField(ref _stateBrush, value);
-    }
 
     public string Endpoints
     {
@@ -902,16 +887,48 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _socksUpstream, value);
     }
 
+    /// <summary>State word of the SOCKS5 upstream: listening / no listener / unknown.</summary>
+    public string UpstreamState
+    {
+        get => _upstreamState;
+        private set => SetField(ref _upstreamState, value);
+    }
+
+    public Brush UpstreamStateBrush
+    {
+        get => _upstreamStateBrush;
+        private set => SetField(ref _upstreamStateBrush, value);
+    }
+
     public string ConfigPath
     {
         get => _configPath;
         set => SetField(ref _configPath, value);
     }
 
+    public string ConfigState
+    {
+        get => _configState;
+        private set => SetField(ref _configState, value);
+    }
+
     public string LogPath
     {
         get => _logPath;
         private set => SetField(ref _logPath, value);
+    }
+
+    /// <summary>State word of the live log: writing with the current size, or no file yet.</summary>
+    public string LogState
+    {
+        get => _logState;
+        private set => SetField(ref _logState, value);
+    }
+
+    public Brush LogStateBrush
+    {
+        get => _logStateBrush;
+        private set => SetField(ref _logStateBrush, value);
     }
 
     /// <summary>Formatted from key+args on every read — survives a language change.</summary>
@@ -956,17 +973,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(UpdateNotice));
     }
 
-    public bool CanStart
-    {
-        get => _canStart;
-        private set => SetField(ref _canStart, value);
-    }
+    public bool CanChainUp => !_chainOperationRunning && !_launchRunning;
 
-    public bool CanStop
-    {
-        get => _canStop;
-        private set => SetField(ref _canStop, value);
-    }
+    public bool CanChainDown => !_chainOperationRunning && !_launchRunning;
 
     /// <summary>Summary word of the chain card; the rail itself is drawn by the window.</summary>
     public string ChainSummary
@@ -974,10 +983,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => _chainSummary;
         private set => SetField(ref _chainSummary, value);
     }
-
-    public bool CanChainUp => !_chainOperationRunning && !_launchRunning;
-
-    public bool CanChainDown => !_chainOperationRunning && !_launchRunning;
 
     public bool CanLaunch => !_chainOperationRunning && !_launchRunning;
 
@@ -1033,10 +1038,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         // the port is the truth: in detached mode the listener is held by the worker, the card shows it
         var proxy = _runtime.ProxyControl;
-        var running = proxy.IsRunning;
-        StateText = running ? Loc.S("Main.State.Running") : Loc.S("Main.State.Stopped");
-        StateBrush = running ? Theme.Ok : Theme.Idle;
-        Endpoints = running && proxy.ListenerEndpoints.Count > 0
+        Endpoints = proxy.IsRunning && proxy.ListenerEndpoints.Count > 0
             ? string.Join(", ", proxy.ListenerEndpoints)
             : "—";
         ActiveConnections = proxy.ActiveConnections.ToString();
@@ -1045,9 +1047,60 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
         SocksUpstream = _runtime.Config.ForwardProxy.Socks5Upstream;
         LogPath = _runtime.Log.FilePath;
-        CanStart = !running;
-        CanStop = running;
+        RefreshUpstreamState();
+        RefreshConfigState();
+        RefreshLogState();
     }
+
+    /// <summary>
+    /// The upstream lives in the sidecar daemon: the row just reports whether anything
+    /// listens on its port (a TCP table read, no connection is made). A silent upstream
+    /// is the normal resting state of a stopped chain, so it stays neutral.
+    /// </summary>
+    private void RefreshUpstreamState()
+    {
+        try
+        {
+            var port = Socks5Client.ParseEndPoint(_runtime.Config.ForwardProxy.Socks5Upstream).Port;
+            var listening = _tcpTable.GetListeners(port).Count > 0;
+            UpstreamState = Loc.S(listening ? "Main.Chain.Daemon.Listening" : "Main.Chain.Daemon.NoListener");
+            UpstreamStateBrush = listening ? Theme.Ok : Theme.Idle;
+        }
+        catch (Exception)
+        {
+            UpstreamState = Loc.S("Main.State.Unknown");
+            UpstreamStateBrush = Theme.TextMuted;
+        }
+    }
+
+    private void RefreshConfigState()
+    {
+        ConfigState = File.Exists(ConfigPath)
+            ? Loc.S("Main.Config.Loaded")
+            : Loc.S("Main.Config.Missing");
+    }
+
+    private void RefreshLogState()
+    {
+        try
+        {
+            var file = new FileInfo(_runtime.Log.FilePath);
+            LogState = file.Exists
+                ? Loc.F("Main.Log.WritingFmt", FormatSize(file.Length))
+                : Loc.S("Main.Log.Missing");
+            LogStateBrush = file.Exists ? Theme.TextSecondary : Theme.Warn;
+        }
+        catch (Exception)
+        {
+            LogState = Loc.S("Main.State.Unknown");
+            LogStateBrush = Theme.TextMuted;
+        }
+    }
+
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024
+            ? Loc.F("Main.Size.MbFmt", Math.Round(bytes / (1024.0 * 1024.0), 1))
+            : Loc.F("Main.Size.KbFmt", Math.Round(bytes / 1024.0));
 
     /// <summary>Chain snapshot: the summary word and the last state kept for a language change.</summary>
     public void UpdateChain(ChainState state)
