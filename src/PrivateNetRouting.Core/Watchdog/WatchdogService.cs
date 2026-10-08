@@ -31,7 +31,9 @@ public sealed class WatchdogService(
         string? previousReason = null;
         while (true)
         {
-            await _delay(idleWindow, ct);
+            // ConfigureAwait: the worker host blocks a thread on this call (App OnStartup) — the
+            // continuations must not land in its context (the Core start/stop rule)
+            await _delay(idleWindow, ct).ConfigureAwait(false);
             var reason = usage.GetInUseReason(idleWindow);
             if (reason is not null)
             {
@@ -54,7 +56,7 @@ public sealed class WatchdogService(
             {
                 try
                 {
-                    var result = await wslHost.StopAsync(ct);
+                    var result = await wslHost.StopAsync(ct).ConfigureAwait(false);
                     log.Info($"watchdog: wsl host: {result.State} {result.Detail}");
                 }
                 catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
@@ -63,7 +65,7 @@ public sealed class WatchdogService(
                 }
             }
 
-            await chain.StopAsync(progress, ct);
+            await chain.StopAsync(progress, ct).ConfigureAwait(false);
             log.Info("watchdog: chain stopped, exiting");
             return;
         }

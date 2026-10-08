@@ -172,8 +172,9 @@ public static class BrowserKindParser
 }
 
 /// <summary>
-/// The watchdog starts on an explicit user action (a CLI command, an application toggle)
-/// and lives as long as the process that started it — it is not written to autostart (rule #4).
+/// The idle stopper starts on an explicit user action (a CLI command, the chain card toggle):
+/// the GUI starts a detached worker (--watchdog-worker) that outlives the application and
+/// switches itself off after the idle stop — it is never registered for autostart (rule #4).
 /// </summary>
 public sealed class WatchdogConfig
 {
@@ -182,6 +183,12 @@ public sealed class WatchdogConfig
 
     /// <summary>WSL distro with the Claude Desktop host; empty — the WSL host is not touched on idle auto-stop.</summary>
     public string WslDistro { get; set; } = "";
+
+    /// <summary>How many seconds to wait for the detached worker to appear in the process list after its launch.</summary>
+    public int WorkerStartWaitSeconds { get; set; } = 15;
+
+    /// <summary>How many seconds to wait for the stopper to disappear after a kill.</summary>
+    public int WorkerStopWaitSeconds { get; set; } = 10;
 }
 
 /// <summary>

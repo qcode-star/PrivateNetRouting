@@ -78,6 +78,27 @@ public static class AppConfigStore
     private static AppConfig Deserialize(Stream stream, string path) =>
         JsonSerializer.Deserialize<AppConfig>(stream, JsonOptions)
         ?? throw new InvalidDataException($"config {path} is empty or corrupted");
+
+    /// <summary>
+    /// Re-reads the user file into an existing config object (the chain card "Reload" button):
+    /// the sections are replaced wholesale, so everything that holds the root AppConfig (the
+    /// launchers, the guard, the updater, the next idle stopper start) sees the fresh values.
+    /// Values already snapshotted by running components (the proxy and the chain listeners)
+    /// apply after the application restart.
+    /// </summary>
+    public static void ReloadInto(AppConfig target, string? path = null)
+    {
+        var fresh = LoadOrCreate(path);
+        target.Ui = fresh.Ui;
+        target.Logging = fresh.Logging;
+        target.ForwardProxy = fresh.ForwardProxy;
+        target.Chain = fresh.Chain;
+        target.Launcher = fresh.Launcher;
+        target.Browser = fresh.Browser;
+        target.Watchdog = fresh.Watchdog;
+        target.Updater = fresh.Updater;
+        target.Guard = fresh.Guard;
+    }
 }
 
 file static class AppConfigExtensions

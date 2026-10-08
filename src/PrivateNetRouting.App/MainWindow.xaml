@@ -13,9 +13,9 @@
         TextOptions.TextFormattingMode="Display">
     <!--
         Reading order: header (subject + language) → the chain (five stages in bring-up order,
-        its control and the watchdog, the status rows: proxy listeners with counters, the SOCKS5
-        upstream, the config, the log) → guards → the launch actions → the result line.
-        The body scrolls; the actions and the result line stay put.
+        its control, the status rows: the proxy listeners with connection counters, the sidecar
+        listeners, the config with its actions, the idle stopper) → guards → the launch actions
+        → the result line. The body scrolls; the actions and the result line stay put.
     -->
     <Grid>
         <Grid.RowDefinitions>
@@ -97,9 +97,10 @@
                         <TextBlock x:Name="ChainHint" Style="{StaticResource Text.Note}" Margin="0,6,0,0"
                                    TextWrapping="Wrap" Visibility="Collapsed"/>
 
-                        <!-- The chain seen as data: the local proxy's listeners with traffic counters,
-                             the sidecar daemon's listeners, the config and the live log — each row
-                             carries its state word next to the colour -->
+                        <!-- The chain seen as data: the local proxy's listeners with connection
+                             counters, the sidecar daemon's listeners, the config with its two
+                             actions, and the idle stopper — each row carries its state word
+                             next to the colour -->
                         <Grid Margin="0,16,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -113,7 +114,7 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Listeners and counters of the local proxy stage -->
+                            <!-- Listeners and connection counters of the local proxy stage -->
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="{DynamicResource Main.Listeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Endpoints}" Style="{StaticResource Text.Mono}"
@@ -121,6 +122,8 @@
                                        VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
                                         Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Connections}"
+                                           Margin="0,0,10,0"/>
                                 <TextBlock Style="{StaticResource Text.Mono}" Foreground="{StaticResource Brush.Text}"
                                            FontWeight="SemiBold" Text="{Binding ActiveConnections}"/>
                                 <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Active}"
@@ -146,31 +149,35 @@
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
 
                             <!-- User config of this installation; the path is cut in the middle
-                                 so the file name stays readable -->
+                                 so the file name stays readable. Open raises the folder (the user
+                                 edits the file in their own editor), Reload re-reads it. -->
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="{DynamicResource Main.Config}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <app:PathTextBlock Grid.Row="2" Grid.Column="1" Source="{Binding ConfigPath}" Style="{StaticResource Text.Mono}"
                                                TextTrimming="CharacterEllipsis" ToolTip="{Binding ConfigPath}"
                                                VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding ConfigState}"
-                                       Style="{StaticResource Text.Caption}" Foreground="{StaticResource Brush.TextSecondary}"
-                                       VerticalAlignment="Center" Margin="0,0,0,8"/>
+                            <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                        HorizontalAlignment="Right" Margin="0,0,0,8">
+                                <Button Content="{DynamicResource Main.Config.Button.Open}" MinWidth="72"
+                                        Style="{StaticResource GhostButton}" Click="OnConfigOpen"/>
+                                <Button Content="{DynamicResource Main.Config.Button.Reload}" MinWidth="72" Margin="6,0,0,0"
+                                        Style="{StaticResource GhostButton}" Click="OnConfigReload"/>
+                            </StackPanel>
 
-                            <!-- Live log of this process; the path is cut in the middle so the file
-                                 name stays readable -->
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.Log}"
-                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <app:PathTextBlock Grid.Row="3" Grid.Column="1" Source="{Binding LogPath}" Style="{StaticResource Text.Mono}"
-                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding LogPath}"
-                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding LogState}"
-                                       Foreground="{Binding LogStateBrush}" Style="{StaticResource Text.Caption}"
-                                       FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <!-- Idle auto-stop: a detached background worker — it keeps working after
+                                 the application is closed, stops the WSL Claude host and the chain on
+                                 idle, and switches itself off after firing -->
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.IdleStop}"
+                                       Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"
+                                       ToolTip="{DynamicResource Main.IdleStop.Note}"/>
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding IdleStopState}"
+                                       Foreground="{Binding IdleStopBrush}" Style="{StaticResource Text.Caption}"
+                                       FontWeight="SemiBold" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                       ToolTip="{DynamicResource Main.IdleStop.Note}"/>
+                            <Button Grid.Row="3" Grid.Column="2" Content="{Binding IdleStopAction}" MinWidth="86"
+                                    HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Click="OnIdleStopToggled"
+                                    IsEnabled="{Binding CanIdleStop}"/>
                         </Grid>
-
-                        <!-- Idle auto-stop watchdog: explicit enable (rule #4), lives while the app is open -->
-                        <CheckBox x:Name="WatchdogBox" Content="{DynamicResource Main.Watchdog}" Margin="0,14,0,0"
-                                  Checked="OnWatchdogToggled" Unchecked="OnWatchdogToggled"/>
                     </StackPanel>
                 </Border>
 

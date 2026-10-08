@@ -41,6 +41,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public WatchdogService Watchdog { get; }
 
+    /// <summary>Idle stopper lifecycle from the outside: the detached worker start/stop, liveness by command lines.</summary>
+    public WatchdogSupervisor WatchdogControl { get; }
+
     public ClaudeUpdater Updater { get; }
 
     public GuardService Guard { get; }
@@ -65,7 +68,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -80,6 +83,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _browserLog = browserLog;
         Watchdog = watchdog;
         _watchdogLog = watchdogLog;
+        WatchdogControl = watchdogControl;
         Updater = updater;
         _updaterLog = updaterLog;
         _updaterHttp = updaterHttp;
@@ -174,6 +178,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             Socks5Client.ParseEndPoint(fp.Listen).Port,
             fp.ActivityMarkerPath);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
+        var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
         // the download goes through its own forward proxy (DoH resolution, SOCKS5 dial);
@@ -222,7 +227,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guard.GetCoreStatusAsync,
             logs);
 
-        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
+        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
@@ -243,6 +248,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
     public Task StartAsync(CancellationToken ct = default) => ProxyControl.StartAsync(ct);
 
     public Task StopAsync() => ProxyControl.StopAsync();
+
+    /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
+    public void ReloadConfig() => AppConfigStore.ReloadInto(Config);
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {

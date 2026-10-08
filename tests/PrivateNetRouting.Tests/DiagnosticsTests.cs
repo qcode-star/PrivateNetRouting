@@ -35,21 +35,6 @@ internal sealed class FakeProxyStats : IProxyStatistics
     public long FailedConnections { get; set; }
 }
 
-/// <summary>Process lookup by name: canned answers (does not filter by cmdline).</summary>
-internal sealed class FakeFinderByName : IProcessFinder
-{
-    public Dictionary<string, List<FoundProcess>> ByName { get; } = [];
-
-    public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains) => Get(processName);
-
-    public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => [];
-
-    public FoundProcess? FindById(int processId) => null;
-
-    private IReadOnlyList<FoundProcess> Get(string name) =>
-        ByName.TryGetValue(name, out var found) ? found : [];
-}
-
 internal sealed class ThrowingWslRunner : IWslProcessRunner
 {
     public Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct) =>
@@ -148,7 +133,7 @@ public class DiagnosticsTests : IDisposable
         Assert.Contains("hosts: 38 names", guards.Single(l => l.Name == "local ban").Value);
         Assert.Equal(DiagMark.Good, guards.Single(l => l.Name == "local ban").Mark);
 
-        Assert.Equal("pid 202", Section(summary, "watchdog").Single(l => l.Name == "idle supervisor").Value);
+        Assert.Equal("running (pid 202)", Section(summary, "watchdog").Single(l => l.Name == "idle supervisor").Value);
         Assert.Contains(_tempDir, Section(summary, "logs").Single(l => l.Name == "logs").Value);
     }
 

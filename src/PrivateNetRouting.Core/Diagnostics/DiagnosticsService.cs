@@ -5,6 +5,7 @@ using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.SystemOps;
+using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Core.Diagnostics;
 
@@ -47,8 +48,6 @@ public sealed class DiagnosticsService(
     LogStore logs,
     TimeProvider? time = null)
 {
-    private const string WatchdogProcessName = "pnr.exe"; // CLI process of the `pnr watchdog` command
-
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
     public async Task<DiagnosticsSummary> GetSummaryAsync(CancellationToken ct)
@@ -222,18 +221,15 @@ public sealed class DiagnosticsService(
     }
 
     /// <summary>
-    /// The idle auto-stop watchdog is visible from outside only as a `pnr watchdog` process (in the GUI it
-    /// lives inside the application window and is indistinguishable by command line) — the line says so honestly.
+    /// The idle stopper is visible from the outside by its command line — the detached worker
+    /// (--watchdog-worker) and the foreground `pnr watchdog` are found by the same search.
     /// </summary>
     private DiagSection WatchdogSection()
     {
-        var watchdogs = processes.Find(WatchdogProcessName, "watchdog");
-        var line = watchdogs.Count > 0
-            ? new DiagLine("idle supervisor", $"pid {string.Join(", ", watchdogs.Select(w => w.Id))}", DiagMark.Good)
-            : new DiagLine(
-                "idle supervisor",
-                "not found - the chain will not stop on its own (an in-app watchdog is only visible inside the GUI)",
-                DiagMark.Warn);
+        var pids = WatchdogSupervisor.FindStopperPids(processes);
+        var line = pids.Count > 0
+            ? new DiagLine("idle supervisor", $"running (pid {string.Join(", ", pids)})", DiagMark.Good)
+            : new DiagLine("idle supervisor", "not running - the chain will not stop on its own", DiagMark.Warn);
         return new DiagSection("watchdog", [line]);
     }
 

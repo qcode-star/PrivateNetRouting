@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -50,8 +49,7 @@ public partial class MainWindow : Window
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
-    private CancellationTokenSource? _watchdogCts;
-    private bool _watchdogSyncing;
+    private bool _idleStopBusy;
 
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
@@ -74,9 +72,14 @@ public partial class MainWindow : Window
         _refreshTimer.Start();
 
         _chainTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-        _chainTimer.Tick += async (_, _) => await RefreshChainAsync();
+        _chainTimer.Tick += async (_, _) =>
+        {
+            await RefreshChainAsync();
+            await RefreshIdleStopAsync();
+        };
         _chainTimer.Start();
         _ = RefreshChainAsync();
+        _ = RefreshIdleStopAsync();
 
         // guard statuses — read-only (registry/hosts/NRPT/firewall/WSL), but NRPT and firewall
         // are read by PowerShell cmdlets — polled less often than chain state
@@ -104,7 +107,6 @@ public partial class MainWindow : Window
         _guardTimer.Stop();
         _busyClock.Stop();
         Loc.LanguageChanged -= OnLanguageChanged;
-        _watchdogCts?.Cancel();
         _viewModel.Dispose();
         base.OnClosed(e);
     }
@@ -516,42 +518,32 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Idle auto-stop watchdog: the loop lives while
-    /// the process that started it is open — here it is the application window. Enabling/disabling
-    /// is an explicit user action; on idle the watchdog itself stops the Claude processes inside
-    /// the WSL distro (RPC, then a signal escalation for orphans — the distro is not shut down and
-    /// will exit on its own once nothing is left in it) and then the chain (UAC confirmation for
-    /// the daemon shutdown), and clears the checkbox.
+    /// Idle auto-stop toggle: Start spawns the detached worker (it outlives the application and
+    /// switches itself off after the idle stop — rule #4: the background process exists only
+    /// after this explicit action), Stop kills the identified stoppers. The row status is read
+    /// back from the process list, not from our intention.
     /// </summary>
-    private void OnWatchdogToggled(object sender, RoutedEventArgs e)
+    private async void OnIdleStopToggled(object sender, RoutedEventArgs e)
     {
-        if (_watchdogSyncing)
+        if (_idleStopBusy)
         {
             return;
         }
 
-        if (WatchdogBox.IsChecked == true)
-        {
-            _watchdogCts = new CancellationTokenSource();
-            _viewModel.SetCheckResult("Main.Watchdog.StartedFmt", _runtime.Config.Watchdog.CheckSeconds);
-            _ = RunWatchdogAsync(_watchdogCts.Token);
-        }
-        else
-        {
-            _watchdogCts?.Cancel();
-        }
-    }
-
-    private async Task RunWatchdogAsync(CancellationToken ct)
-    {
+        _idleStopBusy = true;
+        _viewModel.SetIdleStopBusy(true);
         try
         {
-            await _runtime.Watchdog.RunAsync(null, ct);
-            _viewModel.SetCheckResult("Main.Watchdog.StoppedIdle");
-        }
-        catch (OperationCanceledException)
-        {
-            _viewModel.SetCheckResult("Main.Watchdog.StoppedManual");
+            if (_viewModel.IdleStopRunning)
+            {
+                await _runtime.WatchdogControl.StopAsync(CancellationToken.None);
+                _viewModel.SetCheckResult("Main.IdleStop.StoppedManual");
+            }
+            else
+            {
+                await _runtime.WatchdogControl.StartAsync(CancellationToken.None);
+                _viewModel.SetCheckResult("Main.IdleStop.StartedFmt", _runtime.Config.Watchdog.CheckSeconds);
+            }
         }
         catch (Exception ex)
         {
@@ -559,12 +551,62 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _watchdogCts?.Dispose();
-            _watchdogCts = null;
-            _watchdogSyncing = true;
-            WatchdogBox.IsChecked = false;
-            _watchdogSyncing = false;
-            await RefreshChainAsync();
+            _idleStopBusy = false;
+            _viewModel.SetIdleStopBusy(false);
+            await RefreshIdleStopAsync();
+        }
+    }
+
+    /// <summary>Liveness of the idle stopper: a process list search by the command line (worker marker / CLI form).</summary>
+    private async Task RefreshIdleStopAsync()
+    {
+        if (_idleStopBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            var running = await Task.Run(() => _runtime.WatchdogControl.IsRunning(), CancellationToken.None);
+            _viewModel.UpdateIdleStop(running);
+        }
+        catch (Exception)
+        {
+            _viewModel.SetIdleStopUnknown(); // a failed search is not worth the result line, the next poll retries
+        }
+    }
+
+    /// <summary>Opens the config folder in Explorer with the file selected — the user edits it in their own editor.</summary>
+    private void OnConfigOpen(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{_viewModel.ConfigPath}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Re-reads the edited config: the sections are swapped in the shared object, so the
+    /// launchers, guards, updater and the next idle stopper start see the fresh values; the
+    /// UI language re-applies immediately. Listener values apply after the application restart.
+    /// </summary>
+    private void OnConfigReload(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _runtime.ReloadConfig();
+            var preference = _runtime.Config.Ui.Language;
+            Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
+            FillLanguages(preference);
+            _viewModel.SetCheckResult("Main.Config.Reloaded");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
         }
     }
 
@@ -840,10 +882,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _tailscaleState = "";
     private Brush _tailscaleBrush = Brushes.Gray;
     private string _configPath = "";
-    private string _configState = "";
-    private string _logPath = "";
-    private string _logState = "";
-    private Brush _logStateBrush = Brushes.Gray;
+    private bool _idleStopRunning;
+    private bool _idleStopBusy;
+    private string _idleStopState = "…";
+    private string _idleStopAction = "";
+    private Brush _idleStopBrush = Brushes.Gray;
     private string _chainSummary = "…";
     private bool _chainOperationRunning;
     private bool _launchRunning;
@@ -854,6 +897,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _runtime = runtime;
         Loc.LanguageChanged += OnLanguageChanged;
+        // until the first liveness poll — the same word the not-running state uses
+        IdleStopAction = Loc.S("Main.IdleStop.Button.Start");
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -915,30 +960,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         set => SetField(ref _configPath, value);
     }
 
-    public string ConfigState
+    /// <summary>The idle stopper is running (a stopper process exists).</summary>
+    public bool IdleStopRunning => _idleStopRunning;
+
+    public string IdleStopState
     {
-        get => _configState;
-        private set => SetField(ref _configState, value);
+        get => _idleStopState;
+        private set => SetField(ref _idleStopState, value);
     }
 
-    public string LogPath
+    /// <summary>The toggle button word: Start when no stopper is running, Stop when one is.</summary>
+    public string IdleStopAction
     {
-        get => _logPath;
-        private set => SetField(ref _logPath, value);
+        get => _idleStopAction;
+        private set => SetField(ref _idleStopAction, value);
     }
 
-    /// <summary>State word of the live log: writing with the current size, or no file yet.</summary>
-    public string LogState
+    public Brush IdleStopBrush
     {
-        get => _logState;
-        private set => SetField(ref _logState, value);
+        get => _idleStopBrush;
+        private set => SetField(ref _idleStopBrush, value);
     }
 
-    public Brush LogStateBrush
-    {
-        get => _logStateBrush;
-        private set => SetField(ref _logStateBrush, value);
-    }
+    public bool CanIdleStop => !_idleStopBusy;
 
     /// <summary>Formatted from key+args on every read — survives a language change.</summary>
     public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
@@ -982,9 +1026,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(UpdateNotice));
     }
 
-    public bool CanChainUp => !_chainOperationRunning && !_launchRunning;
+    /// <summary>Bring-up is offered while something in the chain is not up; state unknown — enabled.</summary>
+    public bool CanChainUp =>
+        !_chainOperationRunning && !_launchRunning && (_lastChainState is null || !_lastChainState.IsFullyUp);
 
-    public bool CanChainDown => !_chainOperationRunning && !_launchRunning;
+    /// <summary>The stop is offered while any chain component is up; state unknown — enabled.</summary>
+    public bool CanChainDown =>
+        !_chainOperationRunning && !_launchRunning && (_lastChainState is null || HasAnythingUp(_lastChainState));
+
+    private static bool HasAnythingUp(ChainState state) =>
+        state.DaemonProcessAlive
+        || state.DaemonHttpListening
+        || state.KeeperRunning
+        || state.BackendState == "Running"
+        || state.ProxyRunning;
 
     /// <summary>Summary word of the chain card; the rail itself is drawn by the window.</summary>
     public string ChainSummary
@@ -1040,7 +1095,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public void SetChainStateError(string message)
     {
         _chainStateError = message;
+        _lastChainState = null; // the state is unknown — both chain buttons stay available
         ChainSummary = Loc.F("Main.Chain.StateUnknownFmt", message);
+        OnPropertyChanged(nameof(CanChainUp));
+        OnPropertyChanged(nameof(CanChainDown));
     }
 
     public void Refresh()
@@ -1055,10 +1113,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FailedConnections = proxy.FailedConnections;
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
         TailscaleListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.ForwardProxy.Socks5Upstream}";
-        LogPath = _runtime.Log.FilePath;
         RefreshTailscaleState();
-        RefreshConfigState();
-        RefreshLogState();
     }
 
     /// <summary>
@@ -1088,34 +1143,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private void RefreshConfigState()
+    /// <summary>Liveness word of the idle stopper, from the process list; the button word follows the state.</summary>
+    public void UpdateIdleStop(bool running)
     {
-        ConfigState = File.Exists(ConfigPath)
-            ? Loc.S("Main.Config.Loaded")
-            : Loc.S("Main.Config.Missing");
+        _idleStopRunning = running;
+        IdleStopState = running ? Loc.S("Main.IdleStop.Running") : Loc.S("Main.IdleStop.Off");
+        IdleStopBrush = running ? Theme.Ok : Theme.TextSecondary;
+        IdleStopAction = running ? Loc.S("Main.IdleStop.Button.Stop") : Loc.S("Main.IdleStop.Button.Start");
+        OnPropertyChanged(nameof(IdleStopRunning));
     }
 
-    private void RefreshLogState()
+    /// <summary>A failed liveness search: the state word goes unknown, the last belief and the button stay.</summary>
+    public void SetIdleStopUnknown()
     {
-        try
-        {
-            var file = new FileInfo(_runtime.Log.FilePath);
-            LogState = file.Exists
-                ? Loc.F("Main.Log.WritingFmt", FormatSize(file.Length))
-                : Loc.S("Main.Log.Missing");
-            LogStateBrush = file.Exists ? Theme.TextSecondary : Theme.Warn;
-        }
-        catch (Exception)
-        {
-            LogState = Loc.S("Main.State.Unknown");
-            LogStateBrush = Theme.TextMuted;
-        }
+        IdleStopState = Loc.S("Main.State.Unknown");
+        IdleStopBrush = Theme.TextMuted;
     }
 
-    private static string FormatSize(long bytes) =>
-        bytes >= 1024 * 1024
-            ? Loc.F("Main.Size.MbFmt", Math.Round(bytes / (1024.0 * 1024.0), 1))
-            : Loc.F("Main.Size.KbFmt", Math.Round(bytes / 1024.0));
+    /// <summary>The toggle grays out while its operation runs (spawn + confirmation, or the kill).</summary>
+    public void SetIdleStopBusy(bool busy)
+    {
+        _idleStopBusy = busy;
+        OnPropertyChanged(nameof(CanIdleStop));
+    }
 
     /// <summary>Chain snapshot: the summary word and the last state kept for a language change.</summary>
     public void UpdateChain(ChainState state)
@@ -1123,6 +1173,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _lastChainState = state;
         _chainStateError = null;
         ChainSummary = state.IsFullyUp ? Loc.S("Main.Chain.FullUp") : Loc.S("Main.Chain.Partial");
+        OnPropertyChanged(nameof(CanChainUp));
+        OnPropertyChanged(nameof(CanChainDown));
     }
 
     private void OnLanguageChanged()
@@ -1130,6 +1182,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Refresh();
         OnPropertyChanged(nameof(CheckResult));
         OnPropertyChanged(nameof(UpdateNotice));
+        UpdateIdleStop(_idleStopRunning);
         if (_chainOperationRunning)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");

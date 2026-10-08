@@ -7,6 +7,7 @@ using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Updater;
+using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.App;
 
@@ -41,6 +42,18 @@ public partial class App : Application
         if (e.Args.Contains(ForwardProxySupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
         {
             Shutdown(ProxyWorker.RunAsync(CancellationToken.None).GetAwaiter().GetResult());
+            return;
+        }
+
+        // detached idle-stop worker (spawned by the watchdog supervisor): no UI and no single
+        // instance — waits for the idle, stops the WSL Claude host and the chain, exits by itself;
+        // it outlives the application that started it (the chain card toggle)
+        if (e.Args.Contains(WatchdogSupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
+        {
+            // on the pool, without the Dispatcher context: the worker's awaits (the watchdog loop,
+            // the runtime disposal) must not land in the dispatcher queue while the UI thread is
+            // blocking here — the same pattern as the runtime start below
+            Shutdown(Task.Run(() => WatchdogWorker.RunAsync(CancellationToken.None)).GetAwaiter().GetResult());
             return;
         }
 
