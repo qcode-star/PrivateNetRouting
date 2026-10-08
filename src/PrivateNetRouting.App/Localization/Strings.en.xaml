@@ -9,11 +9,12 @@
     <s:String x:Key="Main.State.Unknown">unknown</s:String>
 
     <!-- Chain card status rows -->
-    <s:String x:Key="Main.Listeners">Listeners</s:String>
+    <s:String x:Key="Main.Listeners">PNR listeners</s:String>
+    <s:String x:Key="Main.TailscaleListeners">Tailscale listeners</s:String>
+    <s:String x:Key="Main.Listeners.Partial">partial</s:String>
     <s:String x:Key="Main.Metric.Active">active</s:String>
     <s:String x:Key="Main.Metric.Total">total</s:String>
     <s:String x:Key="Main.Metric.Errors">errors</s:String>
-    <s:String x:Key="Main.SocksUpstream">SOCKS5 upstream</s:String>
     <s:String x:Key="Main.Config">Config</s:String>
     <s:String x:Key="Main.Config.Loaded">loaded</s:String>
     <s:String x:Key="Main.Config.Missing">no file</s:String>

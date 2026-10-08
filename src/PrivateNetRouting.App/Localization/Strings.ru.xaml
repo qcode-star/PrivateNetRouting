@@ -9,11 +9,12 @@
     <s:String x:Key="Main.State.Unknown">неизвестно</s:String>
 
     <!-- Chain card status rows -->
-    <s:String x:Key="Main.Listeners">Слушатели</s:String>
+    <s:String x:Key="Main.Listeners">Слушатели PNR</s:String>
+    <s:String x:Key="Main.TailscaleListeners">Слушатели tailscale</s:String>
+    <s:String x:Key="Main.Listeners.Partial">частично</s:String>
     <s:String x:Key="Main.Metric.Active">активных</s:String>
     <s:String x:Key="Main.Metric.Total">всего</s:String>
     <s:String x:Key="Main.Metric.Errors">ошибок</s:String>
-    <s:String x:Key="Main.SocksUpstream">Апстрим SOCKS5</s:String>
     <s:String x:Key="Main.Config">Конфиг</s:String>
     <s:String x:Key="Main.Config.Loaded">загружен</s:String>
     <s:String x:Key="Main.Config.Missing">нет файла</s:String>

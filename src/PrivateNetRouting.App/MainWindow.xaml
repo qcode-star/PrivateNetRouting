@@ -98,7 +98,7 @@
                                    TextWrapping="Wrap" Visibility="Collapsed"/>
 
                         <!-- The chain seen as data: the local proxy's listeners with traffic counters,
-                             the sidecar's SOCKS5 upstream, the config and the live log — each row
+                             the sidecar daemon's listeners, the config and the live log — each row
                              carries its state word next to the colour -->
                         <Grid Margin="0,16,0,0">
                             <Grid.ColumnDefinitions>
@@ -135,14 +135,14 @@
                                            Margin="5,0,0,0"/>
                             </StackPanel>
 
-                            <!-- SOCKS5 upstream of the sidecar daemon -->
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.SocksUpstream}"
+                            <!-- Tailscale (sidecar daemon) listeners: its HTTP and SOCKS5 ports -->
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.TailscaleListeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SocksUpstream}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding SocksUpstream}"
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TailscaleListeners}" Style="{StaticResource Text.Mono}"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding TailscaleListeners}"
                                        VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding UpstreamState}"
-                                       Foreground="{Binding UpstreamStateBrush}" Style="{StaticResource Text.Caption}"
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding TailscaleState}"
+                                       Foreground="{Binding TailscaleBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
 
                             <!-- User config of this installation; the path is cut in the middle

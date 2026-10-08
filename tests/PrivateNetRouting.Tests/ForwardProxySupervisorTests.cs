@@ -236,7 +236,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         var processes = new FakeFinderById { CommandLineById = { { 42, @"""C:\app\pnr.exe"" --proxy-worker" } } };
         var kills = new List<int>();
         var supervisor = Make(
-            new ForwardProxyConfig(),
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082" }, // pinned: the fake table has this port
             new FakeProxyInstance(),
             ports,
             tcp,
@@ -320,7 +320,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         var tcp = new FakeTcpTable();
         tcp.Listeners[18082] = [Entry(42, "pnr"), Entry(42, "pnr", WslGateway)];
         var supervisor = Make(
-            new ForwardProxyConfig(),
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082" }, // pinned: the fake table has this port
             new FakeProxyInstance(),
             new FakePortProbe { Listening = true },
             tcp,

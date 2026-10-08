@@ -247,6 +247,7 @@ public class GuardTests : IDisposable
     public void ProxyUrls()
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the test is about URL building, not the default
         Assert.Equal("http://127.0.0.1:18082", ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy));
         Assert.Equal(18082, ClaudeEnvValues.Port(config.ForwardProxy));
         Assert.Null(ClaudeEnvValues.WslProxyUrl(null, config.ForwardProxy));
@@ -272,6 +273,7 @@ public class GuardTests : IDisposable
     private AppConfig SettingsConfig()
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // the assertions expect the documented port, not the moving default
         config.Launcher.BypassDomains = ["corp.example.com"];
         config.Guard.ClaudeSettingsPath = Path.Combine(_tempDir, "settings.json");
         return config;
@@ -376,6 +378,7 @@ public class GuardTests : IDisposable
     private AppConfig WslConfig(string mode, params (string Name, string User, bool Sync)[] distros)
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // the assertions expect the documented port, not the moving default
         config.Guard.Wsl.Mode = mode;
         config.Guard.Wsl.Distros = distros
             .Select(d => new WslDistroConfig { Name = d.Name, User = d.User, Sync = d.Sync })
@@ -545,6 +548,7 @@ public class GuardTests : IDisposable
     public async Task StatusAggregatesLayersAndPolicies()
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the assertions expect the documented port
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts");
         config.Guard.BanProbeName = "probe.invalid";
         File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
@@ -575,6 +579,7 @@ public class GuardTests : IDisposable
     public async Task StatusDetectsPartialBanAndWrongPolicy()
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the assertions expect the documented port
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-empty");
         config.Guard.BanProbeName = "probe.invalid";
         var service = MakeService(
@@ -627,6 +632,7 @@ public class GuardTests : IDisposable
     public async Task SystemProxyOnUsesListenerAddress()
     {
         var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the assertion expects the documented port
         var sysProxy = new FakeSystemProxyStore();
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), sysProxy, new FakeElevatedRunner(), out _);
 

@@ -106,8 +106,8 @@ Application modes (the owner's decision):
   the chain card (tunnel, checks) and then starts Claude with proxy flags;
 - **console** (`pnr`, a separate exe): the headless commands.
 
-Ports per the owner's decision: **18081** (daemon HTTP), **18082** (forward proxy, the address for
-the client), **18083** (daemon SOCKS5). Every module takes its addresses/ports/names from the
+Ports per the owner's decision: **18081** (forward proxy, the address for
+the client), **18082** (daemon HTTP), **18083** (daemon SOCKS5). Every module takes its addresses/ports/names from the
 config; they change only by explicitly editing the user config.
 
 | Module | What it does | Implementation |
@@ -171,8 +171,8 @@ src/
                              # language selection, the chain card — the single lifecycle control
                              # (idempotent bring-up/stop of the whole chain, the animated rail
                              # that runs the bring-up live while launching Claude or a browser,
-                             # status rows: proxy listeners with counters, the SOCKS5 upstream,
-                             # the config, the log), the --launch shortcut mode
+                             # status rows: the PNR listeners with counters, the tailscale
+                             # listeners, the config, the log), the --launch shortcut mode
                              # (Claude running → window only), the "Browser" button and the
                              # --launch-browser shortcut mode (isolated profile, "already running"
                              # note), the startup Claude update check, the update window

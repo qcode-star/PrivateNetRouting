@@ -72,7 +72,7 @@ public sealed class ChainConfig
     public string DaemonSocksListen { get; set; } = "127.0.0.1:18083";
 
     /// <summary>Daemon HTTP listener: its appearance = the daemon is alive.</summary>
-    public string DaemonHttpListen { get; set; } = "127.0.0.1:18081";
+    public string DaemonHttpListen { get; set; } = "127.0.0.1:18082";
 
     /// <summary>Wait for the daemon listeners after start.</summary>
     public int DaemonWaitSeconds { get; set; } = 15;
@@ -356,7 +356,7 @@ public sealed class ForwardProxyConfig
     public bool Enabled { get; set; } = true;
 
     /// <summary>Main listener "host:port".</summary>
-    public string Listen { get; set; } = "127.0.0.1:18082";
+    public string Listen { get; set; } = "127.0.0.1:18081";
 
     /// <summary>One-time bind on the WSL NAT gateway (the adapter address is looked up at start with retries).</summary>
     public bool BindWslGateway { get; set; } = true;

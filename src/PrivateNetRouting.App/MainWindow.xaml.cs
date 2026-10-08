@@ -828,9 +828,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private long _totalConnections;
     private long _failedConnections;
     private Brush _failedBrush = Brushes.Gray;
-    private string _socksUpstream = "";
-    private string _upstreamState = "";
-    private Brush _upstreamStateBrush = Brushes.Gray;
+    private string _tailscaleListeners = "";
+    private string _tailscaleState = "";
+    private Brush _tailscaleBrush = Brushes.Gray;
     private string _configPath = "";
     private string _configState = "";
     private string _logPath = "";
@@ -881,23 +881,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _failedBrush, value);
     }
 
-    public string SocksUpstream
+    /// <summary>The sidecar daemon's listeners: its HTTP and SOCKS5 ports, straight from the config.</summary>
+    public string TailscaleListeners
     {
-        get => _socksUpstream;
-        private set => SetField(ref _socksUpstream, value);
+        get => _tailscaleListeners;
+        private set => SetField(ref _tailscaleListeners, value);
     }
 
-    /// <summary>State word of the SOCKS5 upstream: listening / no listener / unknown.</summary>
-    public string UpstreamState
+    /// <summary>State word of the daemon's listeners: both / partial / none / unknown.</summary>
+    public string TailscaleState
     {
-        get => _upstreamState;
-        private set => SetField(ref _upstreamState, value);
+        get => _tailscaleState;
+        private set => SetField(ref _tailscaleState, value);
     }
 
-    public Brush UpstreamStateBrush
+    public Brush TailscaleBrush
     {
-        get => _upstreamStateBrush;
-        private set => SetField(ref _upstreamStateBrush, value);
+        get => _tailscaleBrush;
+        private set => SetField(ref _tailscaleBrush, value);
     }
 
     public string ConfigPath
@@ -1045,31 +1046,37 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
-        SocksUpstream = _runtime.Config.ForwardProxy.Socks5Upstream;
+        TailscaleListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.ForwardProxy.Socks5Upstream}";
         LogPath = _runtime.Log.FilePath;
-        RefreshUpstreamState();
+        RefreshTailscaleState();
         RefreshConfigState();
         RefreshLogState();
     }
 
     /// <summary>
-    /// The upstream lives in the sidecar daemon: the row just reports whether anything
-    /// listens on its port (a TCP table read, no connection is made). A silent upstream
-    /// is the normal resting state of a stopped chain, so it stays neutral.
+    /// The daemon's listeners live in the sidecar process: the row just reports whether anything
+    /// listens on its ports (a TCP table read, no connection is made). Silent listeners
+    /// are the normal resting state of a stopped chain, so they stay neutral.
     /// </summary>
-    private void RefreshUpstreamState()
+    private void RefreshTailscaleState()
     {
         try
         {
-            var port = Socks5Client.ParseEndPoint(_runtime.Config.ForwardProxy.Socks5Upstream).Port;
-            var listening = _tcpTable.GetListeners(port).Count > 0;
-            UpstreamState = Loc.S(listening ? "Main.Chain.Daemon.Listening" : "Main.Chain.Daemon.NoListener");
-            UpstreamStateBrush = listening ? Theme.Ok : Theme.Idle;
+            var http = Socks5Client.ParseEndPoint(_runtime.Config.Chain.DaemonHttpListen).Port;
+            var socks = Socks5Client.ParseEndPoint(_runtime.Config.ForwardProxy.Socks5Upstream).Port;
+            var httpListening = _tcpTable.GetListeners(http).Count > 0;
+            var socksListening = _tcpTable.GetListeners(socks).Count > 0;
+            (TailscaleState, TailscaleBrush) = (httpListening, socksListening) switch
+            {
+                (true, true) => (Loc.S("Main.Chain.Daemon.Listening"), Theme.Ok),
+                (false, false) => (Loc.S("Main.Chain.Daemon.NoListener"), Theme.Idle),
+                _ => (Loc.S("Main.Listeners.Partial"), Theme.Warn),
+            };
         }
         catch (Exception)
         {
-            UpstreamState = Loc.S("Main.State.Unknown");
-            UpstreamStateBrush = Theme.TextMuted;
+            TailscaleState = Loc.S("Main.State.Unknown");
+            TailscaleBrush = Theme.TextMuted;
         }
     }
 
