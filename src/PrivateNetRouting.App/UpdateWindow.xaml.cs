@@ -294,9 +294,16 @@ public partial class UpdateWindow : Window
             SetDetailDirect(step.Detail);
         }
 
-        if (step.Component == "Daemon" && step.Status == ChainStepStatus.Active)
+        if (step.Component == "Daemon")
         {
-            SetHintKey("Update.Hint.Uac");
+            if (step.Status == ChainStepStatus.Active && step.NeedsUac)
+            {
+                SetHintKey("Update.Hint.Uac");
+            }
+            else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
+            {
+                SetHintDirect("");
+            }
         }
     }
 

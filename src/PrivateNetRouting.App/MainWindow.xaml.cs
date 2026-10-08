@@ -174,7 +174,8 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// A bring-up step from the orchestrator: the rail runs live instead of waiting for the next
-    /// poll, the current step's detail sits under it, and the UAC hint appears with the daemon.
+    /// poll, the current step's detail sits under it, and the UAC hint appears with the daemon
+    /// only when the start actually goes through elevation (chain.daemonElevation).
     /// </summary>
     private void OnChainStep(ChainStep step)
     {
@@ -188,10 +189,17 @@ public partial class MainWindow : Window
         };
         _rail.SetStage(Array.IndexOf(ChainComponents, step.Component), stage);
 
-        if (step.Component == "Daemon" && step.Status == ChainStepStatus.Active)
+        if (step.Component == "Daemon")
         {
-            ChainHint.Text = Loc.S("Main.Chain.Hint.Uac");
-            ChainHint.Visibility = Visibility.Visible;
+            if (step.Status == ChainStepStatus.Active && step.NeedsUac)
+            {
+                ChainHint.Text = Loc.S("Main.Chain.Hint.Uac");
+                ChainHint.Visibility = Visibility.Visible;
+            }
+            else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
+            {
+                ChainHint.Visibility = Visibility.Collapsed;
+            }
         }
 
         if (!string.IsNullOrEmpty(step.Detail))
@@ -563,8 +571,8 @@ public partial class MainWindow : Window
     /// <summary>
     /// Launching Claude: first a live CONNECT roundtrip; if the chain
     /// responds — Claude starts immediately, without any wait. Otherwise the chain card takes over:
-    /// the rail runs the bring-up steps live, with the spinner, the elapsed time and the UAC hint,
-    /// and a failure is reported in the result line.
+    /// the rail runs the bring-up steps live, with the spinner, the elapsed time and — in the
+    /// elevated mode — the UAC hint, and a failure is reported in the result line.
     /// </summary>
     private async void OnLaunchClaude(object sender, RoutedEventArgs e) => await RunLaunchAsync();
 

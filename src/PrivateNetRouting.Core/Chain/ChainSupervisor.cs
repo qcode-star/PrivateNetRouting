@@ -13,8 +13,8 @@ public enum ChainStepStatus
     Failed,
 }
 
-/// <summary>Bring-up/shutdown step for UI and CLI: component, status, detail.</summary>
-public sealed record ChainStep(string Component, ChainStepStatus Status, string Detail);
+/// <summary>Bring-up/shutdown step for UI and CLI: component, status, detail; NeedsUac — the step goes through the elevated helper, a UAC prompt is possible.</summary>
+public sealed record ChainStep(string Component, ChainStepStatus Status, string Detail, bool NeedsUac = false);
 
 /// <summary>Snapshot of all chain links (read-only).</summary>
 public sealed record ChainState(
@@ -93,7 +93,8 @@ public sealed class ChainSupervisor(
         }
         else
         {
-            Report(progress, "Daemon", ChainStepStatus.Active, "starting");
+            var needsUac = daemon.StartNeedsUac();
+            Report(progress, "Daemon", ChainStepStatus.Active, needsUac ? "starting (confirm UAC)" : "starting", needsUac);
             try
             {
                 await daemon.EnsureStartedAsync(new Progress<string>(detail =>
@@ -231,10 +232,10 @@ public sealed class ChainSupervisor(
     }
 
     /// <summary>A step into the UI/CLI progress; also a Debug line to the log (the full bring-up picture).</summary>
-    private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail)
+    private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail, bool needsUac = false)
     {
         log.Debug($"chain: {component}: {status.ToString().ToLowerInvariant()}: {detail}");
-        progress?.Report(new ChainStep(component, status, detail));
+        progress?.Report(new ChainStep(component, status, detail, needsUac));
     }
 }
 

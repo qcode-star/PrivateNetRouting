@@ -61,6 +61,26 @@ public class ChainSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task DaemonStepCarriesUacFlagOnlyWhenElevating()
+    {
+        var elevating = new StepCollector();
+        var supervisor = Create(daemon: new FakeDaemon(_calls) { NeedsUac = true });
+        await supervisor.EnsureRunningAsync(elevating, CancellationToken.None);
+
+        var step = elevating.Steps.Single(s => s.Component == "Daemon" && s.Status == ChainStepStatus.Active);
+        Assert.True(step.NeedsUac);
+        Assert.Equal("starting (confirm UAC)", step.Detail);
+
+        var direct = new StepCollector();
+        var plain = Create(daemon: new FakeDaemon(_calls));
+        await plain.EnsureRunningAsync(direct, CancellationToken.None);
+
+        var plainStep = direct.Steps.Single(s => s.Component == "Daemon" && s.Status == ChainStepStatus.Active);
+        Assert.False(plainStep.NeedsUac);
+        Assert.Equal("starting", plainStep.Detail);
+    }
+
+    [Fact]
     public async Task DaemonFailureStopsEverything()
     {
         var daemon = new FakeDaemon(_calls)
@@ -156,6 +176,14 @@ public class ChainSupervisorTests : IDisposable
         }
     }
 
+    /// <summary>Synchronous step collector (Progress&lt;T&gt; posts asynchronously — unusable in asserts).</summary>
+    private sealed class StepCollector : IProgress<ChainStep>
+    {
+        public List<ChainStep> Steps { get; } = [];
+
+        public void Report(ChainStep step) => Steps.Add(step);
+    }
+
     private sealed class FakeDaemon(List<string> calls) : ISidecarDaemon
     {
         public bool IsHttpListening { get; set; }
@@ -163,6 +191,10 @@ public class ChainSupervisorTests : IDisposable
         public bool IsProcessAlive { get; set; }
 
         public IOException? EnsureThrows { get; init; }
+
+        public bool NeedsUac { get; init; }
+
+        public bool StartNeedsUac() => NeedsUac;
 
         public Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct)
         {

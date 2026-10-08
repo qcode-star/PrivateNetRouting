@@ -18,6 +18,9 @@ public interface ISidecarDaemon
 
     /// <summary>Kills the daemon processes (elevated or direct, by chain.daemonElevation).</summary>
     Task KillAsync(CancellationToken ct);
+
+    /// <summary>Whether starting the daemon now goes through the elevated helper (a UAC prompt is possible).</summary>
+    bool StartNeedsUac();
 }
 
 /// <summary>
@@ -181,6 +184,12 @@ public sealed class SidecarDaemon(
                 "daemon is still alive after a direct kill — it is probably elevated (left from a previous elevated run); stop it once from an elevated context (e.g. \"pnr chain down\" in an admin console)");
         }
     }
+
+    /// <summary>
+    /// The start goes through the runas helper (a UAC prompt) — the same decision
+    /// EnsureStartedAsync makes; a second cheap version probe instead of shared state.
+    /// </summary>
+    public bool StartNeedsUac() => NeedsElevation();
 
     /// <summary>The effective decision: start/stop through the elevated runas helper?</summary>
     private bool NeedsElevation() => config.EffectiveDaemonElevation switch
