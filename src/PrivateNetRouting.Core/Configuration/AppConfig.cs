@@ -36,6 +36,12 @@ public sealed class UiConfig
     /// journal, without bringing up the chain and without UAC; if present — a line in the window and a tray balloon.
     /// </summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
+
+    /// <summary>Chain card of the main window: false — collapsed to the compact status row.</summary>
+    public bool ChainCardExpanded { get; set; } = true;
+
+    /// <summary>Guards card of the main window: false — collapsed to the compact status row.</summary>
+    public bool GuardsCardExpanded { get; set; } = true;
 }
 
 /// <summary>

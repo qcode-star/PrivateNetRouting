@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:PrivateNetRouting.App"
         Title="PrivateNetRouting"
-        Width="820" Height="900" MinWidth="700" MinHeight="660"
+        Width="820" MinWidth="700" MinHeight="200"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Brush.Window}"
         Foreground="{StaticResource Brush.Text}"
@@ -16,6 +17,10 @@
         its control, the status rows: the proxy listeners with connection counters, the sidecar
         listeners, the config with its actions, the idle stopper) → guards → the launch actions
         → the result line. The body scrolls; the actions and the result line stay put.
+        Both cards collapse to one compact row (overall status + the main control); the window
+        then shrinks with the content (SizeToContent=Height, capped at the work area by code —
+        past the cap the body scrolls). A chain operation expands the collapsed chain card and,
+        on success, collapses it back.
     -->
     <Grid>
         <Grid.RowDefinitions>
@@ -53,7 +58,10 @@
                 <!-- Chain: the five stages in bring-up order with their control. The chain buttons
                      are the single lifecycle control: bring-up is idempotent, so a partially up
                      chain gets exactly its missing links. A bring-up runs live in this card —
-                     spinner, elapsed time, the current step and the rail, no separate window. -->
+                     spinner, elapsed time, the current step and the rail, no separate window.
+                     Collapsed, the card is one row: overall status dot + word, the same two
+                     buttons, the chevron; the chain operation expands it and collapses it back
+                     on success. -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <Grid>
@@ -63,6 +71,9 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{DynamicResource Main.Chain}" Style="{StaticResource Text.Section}"/>
+                                <Ellipse x:Name="ChainDot" Width="10" Height="10" Fill="{Binding ChainStateBrush}"
+                                         VerticalAlignment="Center" Margin="12,1,0,1" Visibility="Collapsed"
+                                         ToolTip="{Binding ChainSummary}"/>
                                 <TextBlock Text="{Binding ChainSummary}" Style="{StaticResource Text.Caption}"
                                            VerticalAlignment="Center" Margin="10,2,0,0"/>
                             </StackPanel>
@@ -84,24 +95,33 @@
                                         Style="{StaticResource SecondaryButton}" Click="OnChainUp" IsEnabled="{Binding CanChainUp}"/>
                                 <Button Content="{DynamicResource Main.Button.ChainDown}" MinWidth="108" Margin="8,0,0,0"
                                         Style="{StaticResource GhostButton}" Click="OnChainDown" IsEnabled="{Binding CanChainDown}"/>
+                                <Button x:Name="ChainCardToggle" Style="{StaticResource IconButton}" Margin="8,0,0,0"
+                                        VerticalAlignment="Center" Click="OnToggleChainCard">
+                                    <Path x:Name="ChainCardChevron" Data="{StaticResource Mark.Chevron.Up}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Button>
                             </StackPanel>
                         </Grid>
 
-                        <!-- The rail itself, built by ChainRail: markers on a link, a link carrying the
-                             colour of the stage it leads to -->
-                        <Grid x:Name="RailHost" Margin="0,14,0,0"/>
-
-                        <!-- What the bring-up is doing right now; empty outside of an operation -->
-                        <TextBlock x:Name="ChainDetail" Style="{StaticResource Text.Mono}" Margin="0,12,0,0"
-                                   TextWrapping="Wrap" Visibility="Collapsed"/>
-                        <TextBlock x:Name="ChainHint" Style="{StaticResource Text.Note}" Margin="0,6,0,0"
-                                   TextWrapping="Wrap" Visibility="Collapsed"/>
-
-                        <!-- The chain seen as data: the local proxy's listeners with connection
+                        <!-- Everything the chevron hides: the rail, the live operation line and
+                             the chain seen as data — the local proxy's listeners with connection
                              counters, the sidecar daemon's listeners, the config with its two
                              actions, and the idle stopper — each row carries its state word
                              next to the colour -->
-                        <Grid Margin="0,16,0,0">
+                        <StackPanel x:Name="ChainDetails">
+                            <!-- The rail itself, built by ChainRail: markers on a link, a link carrying the
+                                 colour of the stage it leads to -->
+                            <Grid x:Name="RailHost" Margin="0,14,0,0"/>
+
+                            <!-- What the bring-up is doing right now; empty outside of an operation -->
+                            <TextBlock x:Name="ChainDetail" Style="{StaticResource Text.Mono}" Margin="0,12,0,0"
+                                       TextWrapping="Wrap" Visibility="Collapsed"/>
+                            <TextBlock x:Name="ChainHint" Style="{StaticResource Text.Note}" Margin="0,6,0,0"
+                                       TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                            <Grid Margin="0,16,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
@@ -186,11 +206,15 @@
                                         IsEnabled="{Binding CanIdleStop}"/>
                             </StackPanel>
                         </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
                 <!-- Direct-access guards: state of each layer and its control.
-                     Ban and policy request UAC (elevated helper), settings.json and WSL — without it. -->
+                     Ban and policy request UAC (elevated helper), settings.json and WSL — without it.
+                     Collapsed, the card is one row: the aggregate status dot + word and a single
+                     combined action — "Enable all" (ban, policy, settings.json, WSL) or, when
+                     everything is already on, "Disable all" (ban and policy). -->
                 <Border Style="{StaticResource Card}" Margin="{StaticResource Gap.Card}">
                     <StackPanel>
                         <Grid>
@@ -198,17 +222,37 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{DynamicResource Main.Guard}" Style="{StaticResource Text.Section}"/>
-                                <TextBlock Text="{DynamicResource Main.Guard.Note}" Style="{StaticResource Text.Note}"
-                                           Margin="0,4,16,0" TextWrapping="Wrap"/>
+                                <Ellipse x:Name="GuardDot" Width="10" Height="10" Fill="Gray"
+                                         VerticalAlignment="Center" Margin="12,1,0,1" Visibility="Collapsed"/>
+                                <TextBlock x:Name="GuardSummary" Style="{StaticResource Text.Caption}" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Margin="10,0,0,0" Visibility="Collapsed"/>
                             </StackPanel>
-                            <Button Grid.Column="1" Content="{DynamicResource Main.Guard.Button.Refresh}"
-                                    Style="{StaticResource GhostButton}" MinWidth="100" VerticalAlignment="Top"
-                                    Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Button x:Name="GuardRefreshButton" Content="{DynamicResource Main.Guard.Button.Refresh}"
+                                        Style="{StaticResource GhostButton}" MinWidth="100" VerticalAlignment="Center"
+                                        Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
+                                <Button x:Name="GuardAllButton" MinWidth="130" Margin="8,0,0,0"
+                                        Style="{StaticResource AccentGhostButton}" Click="OnGuardAll"
+                                        IsEnabled="{Binding CanGuard}" Visibility="Collapsed"/>
+                                <Button x:Name="GuardCardToggle" Style="{StaticResource IconButton}" Margin="8,0,0,0"
+                                        VerticalAlignment="Center" Click="OnToggleGuardsCard">
+                                    <Path x:Name="GuardCardChevron" Data="{StaticResource Mark.Chevron.Up}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Button>
+                            </StackPanel>
                         </Grid>
 
-                        <Grid Margin="0,14,0,0">
+                        <!-- Everything the chevron hides: the elevation note and the four guard
+                             layers with their state word and control -->
+                        <StackPanel x:Name="GuardDetails">
+                            <TextBlock Text="{DynamicResource Main.Guard.Note}" Style="{StaticResource Text.Note}"
+                                       Margin="0,4,16,0" TextWrapping="Wrap"/>
+
+                            <Grid Margin="0,14,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -282,7 +326,8 @@
                             <Button Grid.Row="3" Grid.Column="4" x:Name="WslSyncButton" MinWidth="150"
                                     Content="{DynamicResource Main.Guard.Button.Sync}" Style="{StaticResource AccentGhostButton}"
                                     Click="OnGuardWslSync" IsEnabled="{Binding CanGuard}"/>
-                        </Grid>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

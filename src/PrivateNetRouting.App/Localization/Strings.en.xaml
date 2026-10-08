@@ -24,6 +24,9 @@
     <s:String x:Key="Main.Chain">Chain</s:String>
     <s:String x:Key="Main.Chain.FullUp">fully up</s:String>
     <s:String x:Key="Main.Chain.Partial">partial</s:String>
+    <!-- Collapsed/expanded card states -->
+    <s:String x:Key="Main.Card.Expand">Expand</s:String>
+    <s:String x:Key="Main.Card.Collapse">Collapse</s:String>
     <s:String x:Key="Main.Rail.Daemon">Sidecar daemon</s:String>
     <s:String x:Key="Main.Rail.Keeper">Keeper</s:String>
     <s:String x:Key="Main.Rail.Node">Tailscale node</s:String>
@@ -100,6 +103,15 @@
     <s:String x:Key="Main.Guard.Button.On">Enable</s:String>
     <s:String x:Key="Main.Guard.Button.Off">Disable</s:String>
     <s:String x:Key="Main.Guard.Button.Sync">Sync</s:String>
+    <!-- Compact (collapsed) guards card: one aggregate status and one combined action -->
+    <s:String x:Key="Main.Guard.Button.EnableAll">Enable all</s:String>
+    <s:String x:Key="Main.Guard.Button.DisableAll">Disable all</s:String>
+    <s:String x:Key="Main.Guard.Summary.AllOn">all on</s:String>
+    <s:String x:Key="Main.Guard.Summary.Mixed">partially on</s:String>
+    <s:String x:Key="Main.Guard.Summary.AllOff">all off</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json and WSL synced.</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledNoWslFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json synced; WSL skipped ({2}).</s:String>
+    <s:String x:Key="Main.Guard.All.DisabledFmt">Guards off: ban removed (DNS: {0}, direct: {1}), egress policy removed.</s:String>
     <s:String x:Key="Main.Guard.Unknown">state unknown</s:String>
     <s:String x:Key="Main.Guard.State.On">on</s:String>
     <s:String x:Key="Main.Guard.State.Off">off</s:String>

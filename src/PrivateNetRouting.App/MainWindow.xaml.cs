@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -51,12 +52,18 @@ public partial class MainWindow : Window
     private DiagnosticsWindow? _diagnosticsWindow;
     private bool _idleStopBusy;
     private bool _autoStartSyncing;
+    private bool _chainCardExpanded;
+    private bool _guardsCardExpanded;
+
+    /// <summary>The collapsed card was expanded by a chain operation, not by the user — it goes back on success.</summary>
+    private bool _chainCardAutoExpanded;
 
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
         WindowTheme.UseDarkTitleBar(this);
+        MaxHeight = SystemParameters.WorkArea.Height; // past the cap the body scrolls instead of growing
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
@@ -64,6 +71,9 @@ public partial class MainWindow : Window
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
         SyncAutoStartBox();
+        _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
+        _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
+        ApplyCardLayout();
         FillLanguages(languagePreference);
 
         _busyClock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
@@ -117,10 +127,111 @@ public partial class MainWindow : Window
     private void OnLanguageChanged()
     {
         RenderGuards();
+        RenderGuardSummary();
+        UpdateGuardAllButton();
+        ApplyCardLayout(); // the toggle tooltips and the guard-all word follow the language
         _rail.Relabel();
         if (_lastChainState is not null)
         {
             RenderRail(_lastChainState);
+        }
+    }
+
+    // ------------------------------------------------------------------ card collapse
+
+    /// <summary>
+    /// Applies the collapsed/expanded state of both cards: the chevron hides its card's detail
+    /// (rail and status rows for the chain, note and layers for the guards) and leaves the
+    /// compact row — title, overall status dot, the main control. The choice comes from the
+    /// user config and goes back into it only on an explicit toggle.
+    /// </summary>
+    private void ApplyCardLayout()
+    {
+        ChainDetails.Visibility = _chainCardExpanded ? Visibility.Visible : Visibility.Collapsed;
+        ChainDot.Visibility = _chainCardExpanded ? Visibility.Collapsed : Visibility.Visible;
+        ApplyToggleChrome(ChainCardToggle, ChainCardChevron, _chainCardExpanded);
+
+        GuardDetails.Visibility = _guardsCardExpanded ? Visibility.Visible : Visibility.Collapsed;
+        GuardDot.Visibility = _guardsCardExpanded ? Visibility.Collapsed : Visibility.Visible;
+        GuardSummary.Visibility = _guardsCardExpanded ? Visibility.Collapsed : Visibility.Visible;
+        GuardAllButton.Visibility = _guardsCardExpanded ? Visibility.Collapsed : Visibility.Visible;
+        GuardRefreshButton.Visibility = _guardsCardExpanded ? Visibility.Visible : Visibility.Collapsed;
+        ApplyToggleChrome(GuardCardToggle, GuardCardChevron, _guardsCardExpanded);
+    }
+
+    /// <summary>The chevron points where the card goes; the word sits in the tooltip and the name.</summary>
+    private void ApplyToggleChrome(System.Windows.Controls.Button toggle, System.Windows.Shapes.Path chevron, bool expanded)
+    {
+        chevron.Data = (Geometry)FindResource(expanded ? "Mark.Chevron.Up" : "Mark.Chevron.Down");
+        var label = Loc.S(expanded ? "Main.Card.Collapse" : "Main.Card.Expand");
+        toggle.ToolTip = label;
+        AutomationProperties.SetName(toggle, label);
+    }
+
+    private void OnToggleChainCard(object sender, RoutedEventArgs e) => SetChainCardExpanded(!_chainCardExpanded, persist: true);
+
+    private void OnToggleGuardsCard(object sender, RoutedEventArgs e)
+    {
+        _guardsCardExpanded = !_guardsCardExpanded;
+        ApplyCardLayout();
+        try
+        {
+            AppConfigStore.Update(config => config.Ui.GuardsCardExpanded = _guardsCardExpanded);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+    }
+
+    private void SetChainCardExpanded(bool expanded, bool persist)
+    {
+        _chainCardExpanded = expanded;
+        _chainCardAutoExpanded = false; // a manual toggle owns the state from here on
+        ApplyCardLayout();
+        if (!persist)
+        {
+            return;
+        }
+
+        try
+        {
+            AppConfigStore.Update(config => config.Ui.ChainCardExpanded = expanded);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// A chain operation needs the rail visible: a collapsed card expands for it (without
+    /// touching the stored choice) and, on success, collapses back; on failure it stays
+    /// expanded so the failing stage remains on screen.
+    /// </summary>
+    private void ExpandChainCardForOperation()
+    {
+        if (_chainCardExpanded)
+        {
+            return;
+        }
+
+        _chainCardExpanded = true;
+        _chainCardAutoExpanded = true;
+        ApplyCardLayout();
+    }
+
+    private void SettleChainCardAfterOperation(bool success)
+    {
+        if (!_chainCardAutoExpanded)
+        {
+            return;
+        }
+
+        _chainCardAutoExpanded = false;
+        if (success)
+        {
+            SetChainCardExpanded(false, persist: false);
         }
     }
 
@@ -215,6 +326,7 @@ public partial class MainWindow : Window
     /// <summary>The card shows a live operation: spinner, elapsed time and a line for the steps.</summary>
     private void BeginOperation()
     {
+        ExpandChainCardForOperation();
         _busyWatch.Restart();
         BusyElapsed.Text = FormatElapsed(TimeSpan.Zero);
         BusySpinner.Visibility = Visibility.Visible;
@@ -262,6 +374,8 @@ public partial class MainWindow : Window
             _lastGuards = null;
             BanDetail.Text = PolicyDetail.Text = SettingsDetail.Text = WslDetail.Text = ex.Message;
             SetGuardDots(GuardState.Unknown, GuardState.Unknown, GuardState.Unknown, GuardState.Unknown);
+            RenderGuardSummary();
+            UpdateGuardAllButton();
         }
     }
 
@@ -310,6 +424,95 @@ public partial class MainWindow : Window
         WslDetail.ToolTip = snapshot.Wsl.Distros.Count == 0
             ? null
             : string.Join("\n", snapshot.Wsl.Distros.Select(d => $"{d.Distro}: {d.Reason}"));
+
+        RenderGuardSummary();
+        UpdateGuardAllButton();
+    }
+
+    /// <summary>
+    /// The collapsed card's one status line: the four layer states folded into one. Unknown
+    /// dominates (nobody knows), any mix folds to partial; only all-on is good, all-off is the
+    /// only bad one.
+    /// </summary>
+    private void RenderGuardSummary()
+    {
+        var state = _lastGuards is null
+            ? GuardState.Unknown
+            : Merge(Merge(_lastGuards.Ban.State, _lastGuards.Policy.State), Merge(_lastGuards.Settings.State, _lastGuards.Wsl.State));
+
+        var (word, brush) = state switch
+        {
+            GuardState.On => (Loc.S("Main.Guard.Summary.AllOn"), Theme.Ok),
+            GuardState.Off => (Loc.S("Main.Guard.Summary.AllOff"), Theme.Bad),
+            GuardState.Partial => (Loc.S("Main.Guard.Summary.Mixed"), Theme.Warn),
+            _ => (Loc.S("Main.Guard.Unknown"), Theme.TextMuted),
+        };
+        GuardDot.Fill = brush;
+        GuardSummary.Text = word;
+
+        // the same readability rule as the rows: an unknown state keeps the muted text colour
+        GuardSummary.Foreground = state == GuardState.Unknown ? Theme.TextMuted : brush;
+
+        static GuardState Merge(GuardState a, GuardState b)
+        {
+            if (a == b)
+            {
+                return a;
+            }
+
+            return a == GuardState.Unknown || b == GuardState.Unknown ? GuardState.Unknown : GuardState.Partial;
+        }
+    }
+
+    /// <summary>
+    /// The collapsed card's single action follows the state: everything on — "Disable all"
+    /// (ban and policy; the sync layers have no "off"), anything less — "Enable all".
+    /// </summary>
+    private void UpdateGuardAllButton()
+    {
+        var allOn = _lastGuards is { } snapshot
+            && snapshot.Ban.State == GuardState.On
+            && snapshot.Policy.State == GuardState.On
+            && snapshot.Settings.State == GuardState.On
+            && snapshot.Wsl.State == GuardState.On;
+        GuardAllButton.Content = Loc.S(allOn ? "Main.Guard.Button.DisableAll" : "Main.Guard.Button.EnableAll");
+    }
+
+    /// <summary>
+    /// The combined guard action of the collapsed card: bring every layer up (ban, policy,
+    /// settings.json, WSL — ban and policy ask for UAC), or, when everything is already on,
+    /// remove the ban and the policy.
+    /// </summary>
+    private async void OnGuardAll(object sender, RoutedEventArgs e)
+    {
+        var disable = _lastGuards is { } snapshot
+            && snapshot.Ban.State == GuardState.On
+            && snapshot.Policy.State == GuardState.On
+            && snapshot.Settings.State == GuardState.On
+            && snapshot.Wsl.State == GuardState.On;
+        await RunGuardAsync(async () =>
+        {
+            var ban = await _runtime.Guard.BanAsync(enable: !disable, CancellationToken.None);
+            await _runtime.Guard.PolicyAsync(enable: !disable, CancellationToken.None);
+            var dns = Loc.S(ban.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
+            var direct = Loc.S(ban.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
+            if (disable)
+            {
+                _viewModel.SetCheckResult("Main.Guard.All.DisabledFmt", dns, direct);
+                return;
+            }
+
+            await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+            var wsl = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
+            if (wsl.LayerDisabled)
+            {
+                _viewModel.SetCheckResult("Main.Guard.All.EnabledNoWslFmt", dns, direct, LocalizeWslReason(wsl.Reason ?? ""));
+            }
+            else
+            {
+                _viewModel.SetCheckResult("Main.Guard.All.EnabledFmt", dns, direct);
+            }
+        });
     }
 
     /// <summary>Line of a single distro: name + localized state (details are in the tooltip).</summary>
@@ -501,9 +704,11 @@ public partial class MainWindow : Window
         _chainBusy = true;
         _viewModel.SetChainBusy(true);
         BeginOperation();
+        var success = false;
         try
         {
             await action();
+            success = true;
             return true;
         }
         catch (Exception ex)
@@ -516,6 +721,7 @@ public partial class MainWindow : Window
             _chainBusy = false;
             _viewModel.SetChainBusy(false);
             EndOperation();
+            SettleChainCardAfterOperation(success);
         }
     }
 
@@ -634,6 +840,9 @@ public partial class MainWindow : Window
         {
             _runtime.ReloadConfig();
             SyncAutoStartBox();
+            _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
+            _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
+            ApplyCardLayout();
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);
@@ -694,6 +903,7 @@ public partial class MainWindow : Window
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
+        var success = false;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
@@ -705,6 +915,7 @@ public partial class MainWindow : Window
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
             var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, CancellationToken.None);
             _viewModel.SetCheckResult("Main.Launch.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+            success = true;
         }
         catch (Exception ex)
         {
@@ -715,6 +926,7 @@ public partial class MainWindow : Window
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
             EndOperation();
+            SettleChainCardAfterOperation(success);
             await RefreshChainAsync();
         }
     }
@@ -759,6 +971,7 @@ public partial class MainWindow : Window
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
+        var success = false;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
@@ -770,6 +983,7 @@ public partial class MainWindow : Window
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
             var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, CancellationToken.None);
             _viewModel.SetCheckResult("Main.Browser.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+            success = true;
         }
         catch (Exception ex)
         {
@@ -780,6 +994,7 @@ public partial class MainWindow : Window
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
             EndOperation();
+            SettleChainCardAfterOperation(success);
             await RefreshChainAsync();
         }
     }
@@ -923,6 +1138,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _idleStopAction = "";
     private Brush _idleStopBrush = Brushes.Gray;
     private string _chainSummary = "…";
+    private Brush _chainStateBrush = Theme.TextMuted;
     private bool _chainOperationRunning;
     private bool _launchRunning;
     private string? _updateNoticeKey;
@@ -1083,6 +1299,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _chainSummary, value);
     }
 
+    /// <summary>
+    /// Colour of the collapsed card's one status dot: fully up — good, anything up — warning
+    /// (a partial chain is present but not usable), nothing up — the neutral resting state.
+    /// </summary>
+    public Brush ChainStateBrush
+    {
+        get => _chainStateBrush;
+        private set => SetField(ref _chainStateBrush, value);
+    }
+
     public bool CanLaunch => !_chainOperationRunning && !_launchRunning;
 
     public bool CanGuard { get; private set; } = true;
@@ -1100,6 +1326,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (busy)
         {
             ChainSummary = Loc.S("Main.Launch.Busy");
+            ChainStateBrush = Theme.Accent;
         }
 
         OnPropertyChanged(nameof(CanLaunch));
@@ -1113,6 +1340,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (busy)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");
+            ChainStateBrush = Theme.Accent;
         }
 
         OnPropertyChanged(nameof(CanChainUp));
@@ -1132,6 +1360,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _chainStateError = message;
         _lastChainState = null; // the state is unknown — both chain buttons stay available
         ChainSummary = Loc.F("Main.Chain.StateUnknownFmt", message);
+        ChainStateBrush = Theme.TextMuted;
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
     }
@@ -1208,6 +1437,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _lastChainState = state;
         _chainStateError = null;
         ChainSummary = state.IsFullyUp ? Loc.S("Main.Chain.FullUp") : Loc.S("Main.Chain.Partial");
+        ChainStateBrush = state.IsFullyUp ? Theme.Ok : HasAnythingUp(state) ? Theme.Warn : Theme.Idle;
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
     }

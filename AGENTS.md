@@ -179,13 +179,19 @@ src/
                              # status rows: the PNR listeners with connection counters, the
                              # tailscale listeners, the config with its actions (open the
                              # folder / reload), the idle stopper with its status, the
-                             # auto-start flag and the toggle),
+                             # auto-start flag and the toggle; collapsible to one compact row —
+                             # overall status dot + word and the same two buttons, a chain
+                             # operation expands the card and collapses it back on success,
+                             # the choice is remembered in ui.chainCardExpanded),
                              # the --launch shortcut mode
                              # (Claude running → window only), the "Browser" button and the
                              # --launch-browser shortcut mode (isolated profile, "already running"
                              # note), the startup Claude update check, the update window
                              # (UpdateWindow), the "Guards" card (status and control of
-                             # ban/policy/settings.json/WSL), the diagnostics window
+                             # ban/policy/settings.json/WSL; collapsible to one row — aggregate
+                             # status dot + word and a single combined action: "enable all"
+                             # = ban + policy + both syncs, "disable all" = ban + policy,
+                             # remembered in ui.guardsCardExpanded), the diagnostics window
                              # (DiagnosticsWindow: read-only state summary with highlighting,
                              # a log list with tail, rotation, opening the folder);
                              # the shared application icon
@@ -202,7 +208,8 @@ src/
     Theme.cs                 # App.xaml tokens for the code paths: state → brush, state → word
     WindowTheme.cs           # dark DWM title bar; unsupported builds keep the system one
   PrivateNetRouting.Core/    # logic without UI
-    Configuration/           # AppConfig (including ui.language, ui.checkUpdatesOnStart),
+    Configuration/           # AppConfig (including ui.language, ui.checkUpdatesOnStart,
+                             # ui.chainCardExpanded, ui.guardsCardExpanded),
                              # AppLanguage (auto → system → en),
                              # loading from %APPDATA% (the template is config/*.example.json)
     Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info) +

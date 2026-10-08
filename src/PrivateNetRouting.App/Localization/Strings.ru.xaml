@@ -24,6 +24,9 @@
     <s:String x:Key="Main.Chain">Цепочка</s:String>
     <s:String x:Key="Main.Chain.FullUp">полностью поднята</s:String>
     <s:String x:Key="Main.Chain.Partial">не полностью</s:String>
+    <!-- Collapsed/expanded card states -->
+    <s:String x:Key="Main.Card.Expand">Развернуть</s:String>
+    <s:String x:Key="Main.Card.Collapse">Свернуть</s:String>
     <s:String x:Key="Main.Rail.Daemon">Демон sidecar</s:String>
     <s:String x:Key="Main.Rail.Keeper">Кипер</s:String>
     <s:String x:Key="Main.Rail.Node">Узел tailscale</s:String>
@@ -100,6 +103,15 @@
     <s:String x:Key="Main.Guard.Button.On">Вкл</s:String>
     <s:String x:Key="Main.Guard.Button.Off">Выкл</s:String>
     <s:String x:Key="Main.Guard.Button.Sync">Синхронизировать</s:String>
+    <!-- Compact (collapsed) guards card: one aggregate status and one combined action -->
+    <s:String x:Key="Main.Guard.Button.EnableAll">Включить всё</s:String>
+    <s:String x:Key="Main.Guard.Button.DisableAll">Выключить всё</s:String>
+    <s:String x:Key="Main.Guard.Summary.AllOn">всё включено</s:String>
+    <s:String x:Key="Main.Guard.Summary.Mixed">включено частично</s:String>
+    <s:String x:Key="Main.Guard.Summary.AllOff">всё выключено</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledFmt">Всё включено: бан применён (DNS: {0}, напрямую: {1}), политика задана, settings.json и WSL синхронизированы.</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledNoWslFmt">Всё включено: бан применён (DNS: {0}, напрямую: {1}), политика задана, settings.json синхронизирован; WSL пропущен ({2}).</s:String>
+    <s:String x:Key="Main.Guard.All.DisabledFmt">Всё выключено: бан снят (DNS: {0}, напрямую: {1}), политика убрана.</s:String>
     <s:String x:Key="Main.Guard.Unknown">состояние неизвестно</s:String>
     <s:String x:Key="Main.Guard.State.On">вкл</s:String>
     <s:String x:Key="Main.Guard.State.Off">выкл</s:String>

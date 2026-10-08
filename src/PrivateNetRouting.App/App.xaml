@@ -217,10 +217,21 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Small square ghost button for icon-only controls (the card collapse chevron);
+             the icon inherits the foreground, so the hover tiers of GhostButton apply to it -->
+        <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="MinWidth" Value="30"/>
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+
         <!-- =============================== Card ============================== -->
         <!-- Stage markers of the rails (see StepRail.cs): the shape adds to the colour, never colour alone -->
         <Geometry x:Key="Mark.Check">M 2,6.2 L 5,9.4 L 10,3</Geometry>
         <Geometry x:Key="Mark.Cross">M 3,3.4 L 9,9.4 M 9,3.4 L 3,9.4</Geometry>
+        <!-- Card collapse/expand chevrons: the arrow shows where the card goes, the tooltip carries the word -->
+        <Geometry x:Key="Mark.Chevron.Down">M 2.5,4.75 L 7,9.25 L 11.5,4.75</Geometry>
+        <Geometry x:Key="Mark.Chevron.Up">M 2.5,8.25 L 7,3.75 L 11.5,8.25</Geometry>
 
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource Brush.Card}"/>
