@@ -178,6 +178,13 @@ public static class BrowserKindParser
 /// </summary>
 public sealed class WatchdogConfig
 {
+    /// <summary>
+    /// Arm the stopper automatically after every successful chain raise (the window button,
+    /// the Claude/browser launch, `pnr chain up`); default on. A manual toggle in the chain
+    /// card and the CLI form `pnr watchdog` work regardless of this flag.
+    /// </summary>
+    public bool AutoStart { get; set; } = true;
+
     /// <summary>Busyness check interval, sec; also the freshness window of the activity marker.</summary>
     public int CheckSeconds { get; set; } = 600;
 

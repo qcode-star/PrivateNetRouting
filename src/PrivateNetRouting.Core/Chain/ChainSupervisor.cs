@@ -58,7 +58,8 @@ public interface IChainSupervisor
 /// Chain orchestrator: idempotent bring-up (daemon → keeper → node → proxy → health)
 /// and full shutdown (down → daemon → keeper → proxy). Order and liveness signals:
 /// daemon HTTP listener, watch-ipn process, BackendState=Running,
-/// proxy listener, live CONNECT-roundtrip.
+/// proxy listener, live CONNECT-roundtrip. A successful bring-up ends with the
+/// chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart).
 /// </summary>
 public sealed class ChainSupervisor(
     ChainConfig config,
@@ -67,7 +68,8 @@ public sealed class ChainSupervisor(
     ISidecarKeeper keeper,
     ISidecarCli cli,
     FileLog log,
-    Func<CancellationToken, Task<bool>> healthCheck) : IChainSupervisor
+    Func<CancellationToken, Task<bool>> healthCheck,
+    Action? chainRaised = null) : IChainSupervisor
 {
     public async Task<ChainState> GetStateAsync(CancellationToken ct)
     {
@@ -184,6 +186,7 @@ public sealed class ChainSupervisor(
             {
                 Report(progress, "Health", ChainStepStatus.Done, "chain is alive");
                 log.Info("chain: fully up");
+                chainRaised?.Invoke();
                 return;
             }
 

@@ -51,6 +51,8 @@
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Idle stop</s:String>
     <s:String x:Key="Main.IdleStop.Note">Stops Claude in WSL and the chain when Claude is not in use. Lives as a separate background process: it keeps working after the application is closed and switches itself off after firing.</s:String>
+    <s:String x:Key="Main.IdleStop.AutoStart">auto-start</s:String>
+    <s:String x:Key="Main.IdleStop.AutoStart.Note">Arm the idle stopper automatically after every chain bring-up.</s:String>
     <s:String x:Key="Main.IdleStop.Running">running</s:String>
     <s:String x:Key="Main.IdleStop.Off">not running</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Start</s:String>

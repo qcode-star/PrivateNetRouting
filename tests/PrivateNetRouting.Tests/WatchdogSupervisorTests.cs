@@ -13,7 +13,7 @@ namespace PrivateNetRouting.Tests;
 /// </summary>
 public class WatchdogSupervisorTests : IDisposable
 {
-    private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-watchdog-supervisor-{Guid.NewGuid():N}.log");
+    private readonly string _logDir = Directory.CreateTempSubdirectory("pnr-watchdog-supervisor-").FullName;
     private readonly List<FileLog> _logs = [];
 
     [Fact]
@@ -147,13 +147,48 @@ public class WatchdogSupervisorTests : IDisposable
         Assert.Equal([22], killed);
     }
 
+    [Fact]
+    public async Task AutoStartRespectsTheConfigFlagAndARunningStopper()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["pnr.exe"] = [new(22, "pnr.exe watchdog")];
+        var spawned = new List<string>();
+
+        var off = Create(finder, config: new WatchdogConfig { AutoStart = false, WorkerStartWaitSeconds = 0 }, spawn: spawned.Add);
+        await off.AutoStartAsync(CancellationToken.None);
+        Assert.Empty(spawned); // the flag is off — nothing spawns
+
+        var running = Create(finder, config: new WatchdogConfig { WorkerStartWaitSeconds = 0 }, spawn: spawned.Add);
+        await running.AutoStartAsync(CancellationToken.None);
+        Assert.Empty(spawned); // a stopper is already running — nothing spawns
+
+        var absent = new FakeFinderByName();
+        var armed = Create(absent, config: new WatchdogConfig { WorkerStartWaitSeconds = 0 }, spawn: commandLine =>
+        {
+            spawned.Add(commandLine);
+            absent.ByName["PrivateNetRouting.App.exe"] = [new(33, commandLine)];
+        });
+        await armed.AutoStartAsync(CancellationToken.None);
+        Assert.Single(spawned); // off and absent — armed
+    }
+
+    [Fact]
+    public async Task AutoStartFailureIsSwallowed()
+    {
+        var config = new WatchdogConfig { WorkerStartWaitSeconds = 0 }; // the worker never appears — a failure
+        var supervisor = Create(new FakeFinderByName(), config: config, spawn: _ => { });
+
+        await supervisor.AutoStartAsync(CancellationToken.None); // no throw: the raise must not fail because of it
+    }
+
     private WatchdogSupervisor Create(
         FakeFinderByName finder,
         WatchdogConfig? config = null,
         Action<string>? spawn = null,
         Action<int>? kill = null)
     {
-        var log = new FileLog(_logPath);
+        // a personal log path per supervisor: several FileLog writers on one file are not allowed
+        var log = new FileLog(Path.Combine(_logDir, $"{Guid.NewGuid():N}.log"));
         _logs.Add(log);
         return new WatchdogSupervisor(
             config ?? new WatchdogConfig(),
@@ -176,9 +211,6 @@ public class WatchdogSupervisorTests : IDisposable
             log.Dispose();
         }
 
-        foreach (var file in Directory.GetFiles(Path.GetDirectoryName(_logPath)!, $"{Path.GetFileName(_logPath)}*"))
-        {
-            File.Delete(file);
-        }
+        Directory.Delete(_logDir, recursive: true);
     }
 }

@@ -140,6 +140,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var processes = new WmiProcessFinder();
         var tcpTable = new TcpConnectionTable();
         var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log);
+        var watchdogLog = NewLog("watchdog.log");
+        var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");
         var elevated = new ElevatedRunner(config.Chain, chainLog);
         var chain = new ChainSupervisor(
@@ -150,7 +152,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new SidecarKeeper(config.Chain, processes, chainLog),
             new SidecarCli(config.Chain),
             chainLog,
-            ct => ChainHealthAsync(config, ct));
+            ct => ChainHealthAsync(config, ct),
+            // after every successful raise the idle stopper re-arms itself (watchdog.autoStart);
+            // fire and forget: the raise result must not wait for the worker spawn
+            () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)));
 
         var launcherLog = NewLog("launcher.log");
         var launcher = new ClaudeLauncher(
@@ -168,7 +173,6 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             browserLog);
 
-        var watchdogLog = NewLog("watchdog.log");
         IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
             ? null
             : new WslClaudeHostStopper(config.Watchdog.WslDistro, new WslProcessRunner());
@@ -178,7 +182,6 @@ public sealed class ProxyRuntime : IAsyncDisposable
             Socks5Client.ParseEndPoint(fp.Listen).Port,
             fp.ActivityMarkerPath);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
-        var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
         // the download goes through its own forward proxy (DoH resolution, SOCKS5 dial);

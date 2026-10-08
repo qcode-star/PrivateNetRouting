@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private UpdateWindow? _updateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private bool _idleStopBusy;
+    private bool _autoStartSyncing;
 
     public MainWindow(ProxyRuntime runtime, string configPath, string languagePreference)
     {
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         _rail = new ChainRail(RailHost);
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
+        SyncAutoStartBox();
         FillLanguages(languagePreference);
 
         _busyClock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
@@ -576,6 +578,38 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// The auto-start flag (watchdog.autoStart): when on, the chain orchestrator re-arms the
+    /// stopper itself after every successful raise. The choice is persisted to the user config
+    /// and applied to the shared config object, so the next raise sees it immediately.
+    /// </summary>
+    private void OnAutoStartToggled(object sender, RoutedEventArgs e)
+    {
+        if (_autoStartSyncing)
+        {
+            return;
+        }
+
+        var enabled = AutoStartBox.IsChecked == true;
+        try
+        {
+            AppConfigStore.Update(config => config.Watchdog.AutoStart = enabled);
+            _runtime.Config.Watchdog.AutoStart = enabled;
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+    }
+
+    /// <summary>The checkbox follows the config: on window construction and after a config reload.</summary>
+    private void SyncAutoStartBox()
+    {
+        _autoStartSyncing = true;
+        AutoStartBox.IsChecked = _runtime.Config.Watchdog.AutoStart;
+        _autoStartSyncing = false;
+    }
+
     /// <summary>Opens the config folder in Explorer with the file selected — the user edits it in their own editor.</summary>
     private void OnConfigOpen(object sender, RoutedEventArgs e)
     {
@@ -599,6 +633,7 @@ public partial class MainWindow : Window
         try
         {
             _runtime.ReloadConfig();
+            SyncAutoStartBox();
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);

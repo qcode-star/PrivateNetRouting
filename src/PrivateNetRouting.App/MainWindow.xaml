@@ -166,7 +166,8 @@
 
                             <!-- Idle auto-stop: a detached background worker — it keeps working after
                                  the application is closed, stops the WSL Claude host and the chain on
-                                 idle, and switches itself off after firing -->
+                                 idle, and switches itself off after firing. The flag re-arms it
+                                 automatically after every chain raise (watchdog.autoStart). -->
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.IdleStop}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"
                                        ToolTip="{DynamicResource Main.IdleStop.Note}"/>
@@ -174,9 +175,16 @@
                                        Foreground="{Binding IdleStopBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" HorizontalAlignment="Left" VerticalAlignment="Center"
                                        ToolTip="{DynamicResource Main.IdleStop.Note}"/>
-                            <Button Grid.Row="3" Grid.Column="2" Content="{Binding IdleStopAction}" MinWidth="86"
-                                    HorizontalAlignment="Right" Style="{StaticResource GhostButton}" Click="OnIdleStopToggled"
-                                    IsEnabled="{Binding CanIdleStop}"/>
+                            <StackPanel Grid.Row="3" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                        HorizontalAlignment="Right">
+                                <CheckBox x:Name="AutoStartBox" Content="{DynamicResource Main.IdleStop.AutoStart}"
+                                          VerticalAlignment="Center" Margin="0,0,12,0"
+                                          ToolTip="{DynamicResource Main.IdleStop.AutoStart.Note}"
+                                          Checked="OnAutoStartToggled" Unchecked="OnAutoStartToggled"/>
+                                <Button Content="{Binding IdleStopAction}" MinWidth="86"
+                                        Style="{StaticResource GhostButton}" Click="OnIdleStopToggled"
+                                        IsEnabled="{Binding CanIdleStop}"/>
+                            </StackPanel>
                         </Grid>
                     </StackPanel>
                 </Border>

@@ -93,6 +93,36 @@ public sealed class WatchdogSupervisor(
         throw new IOException($"watchdog worker did not start within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
     }
 
+    /// <summary>
+    /// Automatic arming after a chain raise (watchdog.autoStart, default on): a running stopper
+    /// is left alone, failures are logged and swallowed — the raise must not fail because of it.
+    /// Never throws: it is invoked fire-and-forget from the chain orchestrator.
+    /// </summary>
+    public async Task AutoStartAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!config.AutoStart)
+            {
+                log.Debug("watchdog: auto start is off (watchdog.autoStart)");
+                return;
+            }
+
+            if (IsRunning())
+            {
+                log.Debug("watchdog: stopper is already running — auto start skipped");
+                return;
+            }
+
+            log.Info("watchdog: auto start after the chain raise");
+            await StartAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"watchdog: auto start failed: {ex.Message}");
+        }
+    }
+
     /// <summary>Stops the running stoppers (killing by pid from the command-line search) and waits for them to disappear.</summary>
     public async Task StopAsync(CancellationToken ct)
     {

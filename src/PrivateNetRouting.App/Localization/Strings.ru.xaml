@@ -51,6 +51,8 @@
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Автостоп</s:String>
     <s:String x:Key="Main.IdleStop.Note">Останавливает Claude в WSL и цепочку, когда Claude не используется. Живёт отдельным фоновым процессом: работает и после закрытия приложения, а после срабатывания выключается сам.</s:String>
+    <s:String x:Key="Main.IdleStop.AutoStart">автозапуск</s:String>
+    <s:String x:Key="Main.IdleStop.AutoStart.Note">Запускать автостоп автоматически после каждого поднятия цепочки.</s:String>
     <s:String x:Key="Main.IdleStop.Running">запущен</s:String>
     <s:String x:Key="Main.IdleStop.Off">не запущен</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Запустить</s:String>

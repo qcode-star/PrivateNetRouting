@@ -16,7 +16,8 @@ public class ChainSupervisorTests : IDisposable
         FakeDaemon? daemon = null,
         FakeKeeper? keeper = null,
         FakeCli? cli = null,
-        Func<CancellationToken, Task<bool>>? health = null)
+        Func<CancellationToken, Task<bool>>? health = null,
+        Action? chainRaised = null)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
@@ -27,7 +28,8 @@ public class ChainSupervisorTests : IDisposable
             keeper ?? new FakeKeeper(_calls),
             cli ?? new FakeCli(_calls),
             log,
-            health ?? (_ => Task.FromResult(true)));
+            health ?? (_ => Task.FromResult(true)),
+            chainRaised);
     }
 
     [Fact]
@@ -58,6 +60,25 @@ public class ChainSupervisorTests : IDisposable
             ["daemon.ensure", "keeper.ensure", "cli.up", "proxy.start"],
             _calls);
         Assert.Equal("Running", cli.BackendState); // after up the node must become Running
+    }
+
+    [Fact]
+    public async Task SuccessfulRaiseFiresTheHookAndFailureDoesNot()
+    {
+        var raised = new List<int>();
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin" };
+        var supervisor = Create(cli: cli, chainRaised: () => raised.Add(1));
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+        Assert.Single(raised); // a full raise ends with the hook (the idle stopper re-arms through it)
+
+        raised.Clear();
+        var failing = Create(
+            daemon: new FakeDaemon(_calls) { EnsureThrows = new IOException("UAC declined") },
+            chainRaised: () => raised.Add(1));
+        await Assert.ThrowsAsync<ChainException>(() =>
+            failing.EnsureRunningAsync(null, CancellationToken.None));
+        Assert.Empty(raised); // a failed raise has no "fully up" — no hook
     }
 
     [Fact]
