@@ -141,7 +141,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var chain = new ChainSupervisor(
             config.Chain,
             proxyControl,
-            new SidecarDaemon(config.Chain, ports, processes, chainLog, elevated),
+            new SidecarDaemon(config.Chain, ports, processes, chainLog, elevated,
+                new TailscaleVersionProbe(config.Chain.TailscaledPath)),
             new SidecarKeeper(config.Chain, processes, chainLog),
             new SidecarCli(config.Chain),
             chainLog,

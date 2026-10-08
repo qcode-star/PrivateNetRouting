@@ -85,14 +85,15 @@ public sealed class ChainSupervisor(
 
     public async Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
-        // 1. daemon (the only possible UAC prompt on a cold start)
+        // 1. daemon (UAC only in the elevated mode: chain.daemonElevation=always
+        // or an old tailscale under auto)
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
             Report(progress, "Daemon", ChainStepStatus.Skipped, "already listening");
         }
         else
         {
-            Report(progress, "Daemon", ChainStepStatus.Active, "starting (confirm UAC)");
+            Report(progress, "Daemon", ChainStepStatus.Active, "starting");
             try
             {
                 await daemon.EnsureStartedAsync(new Progress<string>(detail =>
@@ -211,7 +212,7 @@ public sealed class ChainSupervisor(
             log.Warn($"chain: down failed: {ex.Message}");
         }
 
-        Report(progress, "Daemon", ChainStepStatus.Active, "stopping (needs elevation)");
+        Report(progress, "Daemon", ChainStepStatus.Active, "stopping");
         try
         {
             await daemon.KillAsync(ct);

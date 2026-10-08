@@ -11,7 +11,7 @@ and read-only diagnostics. It provides a GUI and a headless CLI. Development rul
 | Module | What it does |
 |---|---|
 | Forward proxy | Local CONNECT proxy: resolves names over DoH, dials through the userspace sidecar's SOCKS5 upstream, listens on localhost and the WSL gateway, and keeps an activity marker for the watchdog. Runs in-process or as a detached worker that outlives the GUI/command. |
-| Chain supervisor | Idempotent bring-up/stop of the userspace tailscaled daemon → keeper → node → forward proxy, with a single UAC prompt for the daemon start. |
+| Chain supervisor | Idempotent bring-up/stop of the userspace tailscaled daemon → keeper → node → forward proxy. On tailscale 1.104.1+ the daemon runs without elevation (`chain.daemonElevation`, default auto); older builds start it through a one-shot elevated copy (UAC). |
 | Launchers | Claude Desktop with `--proxy-server`/`--proxy-bypass-list`; a browser with an isolated profile (Firefox `user.js` or Chromium flags) and the application proxy. Both bring the chain up when needed; the bring-up runs live in the chain card of the main window. |
 | Watchdog | Idle auto-stop: watches Claude processes, proxy connections and the activity marker; on idle it stops the WSL Claude host and then the chain. Started only explicitly. |
 | Updater | Manual MSIX update of Claude Desktop: version check before bring-up, package URL from the AppX journal, multi-threaded chunked download through the proxy, Publisher verification, `Add-AppxPackage`. A startup check shows an "update available" line in the main window, which the update window's own check or a finished installation clears; the window closes itself 30 s after a successful installation, with a visible countdown. |

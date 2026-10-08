@@ -16,33 +16,42 @@ public interface ISidecarDaemon
     /// <summary>Idempotent start: already alive — skip; stale — kill; start and wait for the listener.</summary>
     Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct);
 
-    /// <summary>Kills the daemon processes (elevated if necessary).</summary>
+    /// <summary>Kills the daemon processes (elevated or direct, by chain.daemonElevation).</summary>
     Task KillAsync(CancellationToken ct);
 }
 
 /// <summary>
 /// Userspace-tailscaled (a second daemon next to the system service): no TUN, no routes
-/// or DNS in the OS. A non-elevated process cannot create a named pipe — the start always
-/// goes through UAC (directly if we already have rights, otherwise via an elevated copy of ourselves).
+/// or DNS in the OS. On tailscale 1.104.1+ the daemon pipe no longer names Administrators as
+/// its owner, so a non-elevated start works with --windows-mode=dev (the pipe is owned by the
+/// current user); older builds cannot create the pipe and are started through the elevated
+/// runas copy. chain.daemonElevation picks: auto (by the daemon version) / never / always;
+/// the modes are version-locked — a 1.104.1+ daemon refuses a custom socket without the dev
+/// flag even elevated, and an older daemon refuses to listen without elevation.
 /// </summary>
 public sealed class SidecarDaemon(
     ChainConfig config,
     IPortProbe ports,
     IProcessFinder processes,
     FileLog log,
-    ElevatedRunner elevated) : ISidecarDaemon
+    ElevatedRunner elevated,
+    ITailscaleVersionProbe versionProbe) : ISidecarDaemon
 {
+    /// <summary>The first tailscale whose daemon pipe a non-elevated process can create (the SDDL owner fix).</summary>
+    internal static readonly Version MinNonElevatedVersion = new(1, 104, 1);
+
     private int HttpPort => Socks5Client.ParseEndPoint(config.DaemonHttpListen).Port;
 
     public bool IsHttpListening => ports.IsListening(HttpPort);
 
     /// <summary>
-    /// Daemon liveness = responsiveness of its named pipe. The command line of an elevated
-    /// daemon is not visible to a non-elevated WMI reader (Windows 11 24H2+ returns an empty CommandLine),
-    /// so identifying "our" processes by statedir in the cmdline does not work for status; the pipe with our
-    /// name, though, can only be held by a daemon started with our --socket (the Tailscale system
-    /// service has its own). An elevated shutdown still kills processes by searching the cmdline —
-    /// from an elevated context command lines are visible.
+    /// Daemon liveness = responsiveness of its named pipe. For an elevated daemon
+    /// (chain.daemonElevation=always, or an old tailscale in auto) the command line is not visible
+    /// to a non-elevated WMI reader (Windows 11 24H2+ returns an empty CommandLine), so identifying
+    /// "our" processes by statedir in the cmdline does not work for status; the pipe with our name,
+    /// though, can only be held by a daemon started with our --socket (the Tailscale system
+    /// service has its own). A stop in the elevated mode still kills processes by searching the
+    /// cmdline — from an elevated context command lines are visible.
     /// </summary>
     public bool IsProcessAlive => ProbePipe(config.Socket, TimeSpan.FromMilliseconds(500));
 
@@ -68,6 +77,7 @@ public sealed class SidecarDaemon(
 
     public async Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct)
     {
+        var viaHelper = NeedsElevation();
         if (IsHttpListening && IsProcessAlive)
         {
             log.Debug("daemon: already listening, skipping");
@@ -87,18 +97,18 @@ public sealed class SidecarDaemon(
                 $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.daemonHttpListen");
         }
 
-        progress?.Report("daemon: starting tailscaled (confirm UAC)");
-        if (WindowsPrivilege.IsElevated())
-        {
-            StartProcess();
-        }
-        else
+        progress?.Report(viaHelper ? "daemon: starting tailscaled (confirm UAC)" : "daemon: starting tailscaled");
+        if (viaHelper)
         {
             var result = await elevated.RunAsync(ElevatedChainCommands.StartDaemon, ct);
             if (!result.Ok)
             {
                 throw new IOException($"daemon failed to start: {result.Detail}");
             }
+        }
+        else
+        {
+            StartProcess(devMode: true);
         }
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.DaemonWaitSeconds);
@@ -114,21 +124,30 @@ public sealed class SidecarDaemon(
         }
 
         throw new IOException(
-            $"daemon listener did not come up within {config.DaemonWaitSeconds}s; log: {Path.Combine(config.StateDir, "daemon.err.log")}");
+            $"daemon listener did not come up within {config.DaemonWaitSeconds}s; log: {Path.Combine(config.StateDir, "daemon.err.log")}"
+            + " (a non-elevated start needs tailscale 1.104.1+ — see chain.daemonElevation)");
     }
 
-    /// <summary>Direct launch of the daemon process (the context already has administrator rights).</summary>
-    public void StartProcess()
+    /// <summary>
+    /// Direct launch of the daemon process (the context already has the rights it needs).
+    /// devMode adds --windows-mode=dev — the non-elevated listen of tailscale 1.104.1+; older
+    /// builds do not know the flag, their elevated start goes without it.
+    /// </summary>
+    public void StartProcess(bool devMode)
     {
         Directory.CreateDirectory(config.StateDir);
-        var commandLine = string.Join(' ',
-            ProcessOps.Quote(config.TailscaledPath),
-            "--tun=userspace-networking",
-            ProcessOps.Quote($"--statedir={config.StateDir}"),
-            ProcessOps.Quote($"--socket={config.Socket}"),
-            "--port=0",
-            $"--socks5-server={config.DaemonSocksListen}",
-            $"--outbound-http-proxy-listen={config.DaemonHttpListen}");
+        var arguments = new List<string> { "--tun=userspace-networking" };
+        if (devMode)
+        {
+            arguments.Add("--windows-mode=dev");
+        }
+
+        arguments.Add(ProcessOps.Quote($"--statedir={config.StateDir}"));
+        arguments.Add(ProcessOps.Quote($"--socket={config.Socket}"));
+        arguments.Add("--port=0");
+        arguments.Add($"--socks5-server={config.DaemonSocksListen}");
+        arguments.Add($"--outbound-http-proxy-listen={config.DaemonHttpListen}");
+        var commandLine = $"{ProcessOps.Quote(config.TailscaledPath)} {string.Join(' ', arguments)}";
         var started = ProcessOps.StartViaCmd(
             commandLine,
             stdoutPath: Path.Combine(config.StateDir, "daemon.out.log"),
@@ -138,18 +157,42 @@ public sealed class SidecarDaemon(
 
     public async Task KillAsync(CancellationToken ct)
     {
-        if (WindowsPrivilege.IsElevated())
+        if (NeedsElevation())
         {
-            KillProcesses();
+            var result = await elevated.RunAsync(ElevatedChainCommands.StopChain, ct);
+            if (!result.Ok)
+            {
+                throw new IOException($"failed to stop daemon: {result.Detail}");
+            }
+
             return;
         }
 
-        var result = await elevated.RunAsync(ElevatedChainCommands.StopChain, ct);
-        if (!result.Ok)
+        KillProcesses();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline && (IsProcessAlive || IsHttpListening))
         {
-            throw new IOException($"failed to stop daemon: {result.Detail}");
+            await Task.Delay(200, ct);
+        }
+
+        if (IsProcessAlive || IsHttpListening)
+        {
+            throw new IOException(
+                "daemon is still alive after a direct kill — it is probably elevated (left from a previous elevated run); stop it once from an elevated context (e.g. \"pnr chain down\" in an admin console)");
         }
     }
+
+    /// <summary>The effective decision: start/stop through the elevated runas helper?</summary>
+    private bool NeedsElevation() => config.EffectiveDaemonElevation switch
+    {
+        DaemonElevationMode.Never => false,
+        DaemonElevationMode.Always => true,
+        _ => VersionNeedsElevation(versionProbe.GetVersion()),
+    };
+
+    /// <summary>The auto rule: an unknown or older-than-1.104.1 daemon goes through elevation.</summary>
+    internal static bool VersionNeedsElevation(Version? version) =>
+        version is null || version < MinNonElevatedVersion;
 
     private void KillProcesses()
     {

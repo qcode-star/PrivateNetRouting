@@ -74,6 +74,18 @@ public sealed class ChainConfig
     /// <summary>Daemon HTTP listener: its appearance = the daemon is alive.</summary>
     public string DaemonHttpListen { get; set; } = "127.0.0.1:18082";
 
+    /// <summary>
+    /// How the daemon start/stop is elevated: "auto" (default) — directly on tailscale 1.104.1+
+    /// (--windows-mode=dev, the socket pipe is owned by the user), through the elevated runas copy
+    /// on older builds; "never"/"always" force one of the modes ("always" only makes sense for
+    /// tailscale older than 1.104.1 — newer daemons reject a custom socket without the dev flag
+    /// even elevated). Unknown — auto.
+    /// </summary>
+    public string DaemonElevation { get; set; } = "auto";
+
+    [JsonIgnore]
+    public DaemonElevationMode EffectiveDaemonElevation => DaemonElevationParser.Parse(DaemonElevation);
+
     /// <summary>Wait for the daemon listeners after start.</summary>
     public int DaemonWaitSeconds { get; set; } = 15;
 

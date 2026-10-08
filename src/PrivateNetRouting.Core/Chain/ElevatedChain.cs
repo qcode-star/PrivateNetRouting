@@ -6,7 +6,10 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Chain;
 
-/// <summary>Elevated application commands: self-launch via runas (UAC).</summary>
+/// <summary>
+/// Elevated application commands (the chain on an old tailscale or with
+/// chain.daemonElevation=always; the guards): self-launch via runas (UAC).
+/// </summary>
 public static class ElevatedChainCommands
 {
     public const string StartDaemon = "--elevated-start-daemon";
@@ -59,13 +62,14 @@ public static class ElevatedChainCommands
             new TcpPortProbe(),
             new WmiProcessFinder(),
             log,
-            new ElevatedRunner(chain, log, elevatedBypass: true));
+            new ElevatedRunner(chain, log, elevatedBypass: true),
+            new TailscaleVersionProbe(chain.TailscaledPath));
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
             return "daemon is already listening";
         }
 
-        daemon.StartProcess();
+        daemon.StartProcess(devMode: false);
         var httpPort = Socks5Client.ParseEndPoint(chain.DaemonHttpListen).Port;
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(chain.DaemonWaitSeconds);
         while (DateTime.UtcNow < deadline)
