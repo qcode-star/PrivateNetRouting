@@ -8,10 +8,11 @@ namespace PrivateNetRouting.App;
 
 /// <summary>
 /// A text block for file paths: bind the full value to <see cref="Source"/>; when it does not
-/// fit the column, the text shows the head of the path, an ellipsis, and the complete file name
-/// at the end ("C:\dir\…\file.ext") — the file name is the part that identifies the row, so it
-/// is never cut. A tooltip still carries the full value. Falls back to the ordinary end
-/// ellipsis when even the file name does not fit. Recomputes on value changes and on resize.
+/// fit the column, the text shows the head of the path, an ellipsis, and the separator with the
+/// complete file name at the end ("C:\dir…\file.ext") — the leading separator makes it obvious
+/// the file name is whole, not cut. A tooltip still carries the full value. Falls back to the
+/// ordinary end ellipsis when even the file name does not fit. Recomputes on value changes and
+/// on resize.
 /// </summary>
 public class PathTextBlock : TextBlock
 {
@@ -62,9 +63,10 @@ public class PathTextBlock : TextBlock
             return;
         }
 
-        var tail = Path.GetFileName(_source);
+        // the separator rides with the file name: "head…\name" reads as a whole name
+        var tail = Path.DirectorySeparatorChar + Path.GetFileName(_source);
         // no directory part to cut from — the built-in end ellipsis stays in charge
-        if (tail.Length == 0 || tail.Length >= _source.Length || Measure("…" + tail) > available)
+        if (tail.Length <= 1 || tail.Length >= _source.Length || Measure("…" + tail) > available)
         {
             return;
         }
