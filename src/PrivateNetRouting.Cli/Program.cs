@@ -322,7 +322,7 @@ internal static class Program
                     checkOnly = true;
                     break;
                 case "--no-splash":
-                    break; // the splash screen exists only in GUI mode; the flag is accepted for shortcut compatibility
+                    break; // the bring-up is drawn by the GUI window; accepted for shortcut compatibility
                 default:
                     Console.Error.WriteLine($"unknown option: {argument} (--check-only | --no-splash)");
                     return 1;

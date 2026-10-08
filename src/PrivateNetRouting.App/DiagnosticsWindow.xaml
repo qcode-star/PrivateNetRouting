@@ -2,57 +2,55 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Diagnostics"
-        Width="760" Height="680" MinWidth="600" MinHeight="520"
+        Width="780" Height="700" MinWidth="620" MinHeight="520"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize" ShowInTaskbar="False"
         Background="{StaticResource Brush.Window}" Foreground="{StaticResource Brush.Text}"
-        FontFamily="Segoe UI" SnapsToDevicePixels="True" UseLayoutRounding="True">
+        FontFamily="{StaticResource Font.Ui}" FontSize="{StaticResource Font.Body}"
+        SnapsToDevicePixels="True" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="220"/>
+            <RowDefinition Height="230"/>
         </Grid.RowDefinitions>
 
-        <!-- Header and buttons -->
+        <!-- Header: what the window shows and the two things it can do -->
         <Grid Grid.Row="0" Margin="0,0,0,14">
-            <TextBlock x:Name="HeaderText" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <TextBlock x:Name="HeaderText" Style="{StaticResource Text.Title}" VerticalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <TextBlock x:Name="StatusText" Style="{StaticResource Text.Caption}" VerticalAlignment="Center"
+                           Margin="0,0,12,0" TextTrimming="CharacterEllipsis" MaxWidth="320"/>
                 <Button x:Name="BtnRefresh" MinWidth="110" Click="OnRefresh"/>
-                <Button x:Name="BtnOpenFolder" MinWidth="130" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}" Click="OnOpenFolder"/>
+                <Button x:Name="BtnOpenFolder" MinWidth="140" Margin="8,0,0,0" Style="{StaticResource GhostButton}"
+                        Click="OnOpenFolder"/>
             </StackPanel>
         </Grid>
 
-        <!-- Summary: sections with "name: value" lines, the value highlighted by mark -->
-        <Border Grid.Row="1" Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"
-                BorderThickness="1" CornerRadius="8" Padding="20">
+        <!-- Summary: sections of "name: value" lines, the value carrying the mark of its state -->
+        <Border Grid.Row="1" Style="{StaticResource Card}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel x:Name="SectionsPanel" Margin="0,0,8,0"/>
             </ScrollViewer>
         </Border>
 
-        <!-- Logs: header, rotation operation status, button to rotate the selected one -->
-        <Grid Grid.Row="2" Margin="0,14,0,6">
-            <TextBlock x:Name="LogsHeaderText" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource Brush.TextSecondary}"
-                           VerticalAlignment="Center" Margin="0,0,12,0"/>
-                <Button x:Name="BtnRotate" MinWidth="110" Style="{StaticResource SecondaryButton}" Click="OnRotateLog"/>
-            </StackPanel>
+        <!-- Logs: the list header and rotation of the selected file -->
+        <Grid Grid.Row="2" Margin="0,16,0,8">
+            <TextBlock x:Name="LogsHeaderText" Style="{StaticResource Text.Section}" VerticalAlignment="Center"/>
+            <Button x:Name="BtnRotate" MinWidth="110" HorizontalAlignment="Right" Style="{StaticResource GhostButton}"
+                    Click="OnRotateLog"/>
         </Grid>
 
-        <!-- File list (size/date) and the tail of the selected log -->
+        <!-- Files (name, size, time) and the tail of the selected one -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="280"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <ListBox x:Name="LogsList" SelectionChanged="OnLogSelected"
-                     Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"/>
-            <TextBox x:Name="TailBox" Grid.Column="1" Margin="8,0,0,0" IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                     TextWrapping="NoWrap" FontFamily="Consolas" FontSize="12"
-                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                     Background="{StaticResource Brush.Card}" BorderBrush="{StaticResource Brush.CardBorder}"/>
+            <ListBox x:Name="LogsList" SelectionChanged="OnLogSelected"/>
+            <TextBox x:Name="TailBox" Grid.Column="1" Margin="12,0,0,0" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                     TextWrapping="NoWrap" FontFamily="{StaticResource Font.Mono}" FontSize="{StaticResource Font.Caption}"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
         </Grid>
     </Grid>
 </Window>

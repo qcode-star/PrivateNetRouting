@@ -27,9 +27,7 @@ public partial class UpdateWindow : Window
 
     private readonly ProxyRuntime _runtime;
     private readonly string _logPath;
-    private readonly TextBlock[] _glyphs;
-    private readonly TextBlock[] _labels;
-    private readonly TextBlock[] _details;
+    private readonly StepRailRow[] _rows;
     private readonly ChainStepStatus[] _states;
     private readonly DispatcherTimer _clock;
     private readonly Stopwatch _watch = new();
@@ -57,37 +55,20 @@ public partial class UpdateWindow : Window
     {
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
+        WindowTheme.UseDarkTitleBar(this);
         _runtime = runtime;
         _logPath = runtime.Updater.Log.FilePath;
 
-        _glyphs = new TextBlock[StepOrder.Length];
-        _labels = new TextBlock[StepOrder.Length];
-        _details = new TextBlock[StepOrder.Length];
+        _rows = new StepRailRow[StepOrder.Length];
         _states = new ChainStepStatus[StepOrder.Length];
+        var body = (Style)FindResource("Text.Body");
+        var mono = (Style)FindResource("Text.Mono");
         for (var i = 0; i < StepOrder.Length; i++)
         {
             _states[i] = ChainStepStatus.Pending;
-            var row = new Grid { Height = 30 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            _glyphs[i] = new TextBlock { FontSize = 13 };
-            Grid.SetColumn(_glyphs[i], 0);
-            _labels[i] = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(_labels[i], 1);
-            _details[i] = new TextBlock
-            {
-                FontSize = 11,
-                Foreground = FindResource("Brush.Idle") as Brush,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(12, 0, 0, 0),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            };
-            Grid.SetColumn(_details[i], 2);
-            row.Children.Add(_glyphs[i]);
-            row.Children.Add(_labels[i]);
-            row.Children.Add(_details[i]);
-            StepsPanel.Children.Add(row);
+            _rows[i] = new StepRailRow(Loc.S($"Update.Step.{StepOrder[i]}"), body, mono);
+            _rows[i].Apply(ChainStepStatus.Pending, "");
+            StepsPanel.Children.Add(_rows[i].Element);
         }
 
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
@@ -123,9 +104,8 @@ public partial class UpdateWindow : Window
         _watch.Restart();
         _clock.Start();
         ElapsedText.Text = "0:00";
-        Progress.Visibility = Visibility.Visible;
-        Progress.IsIndeterminate = true;
-        Progress.Value = 0;
+        ShowProgress(true);
+        SetProgressUnknown();
         UrlPanel.Visibility = Visibility.Collapsed;
         BtnStop.Visibility = Visibility.Visible;
         BtnRetry.Visibility = Visibility.Collapsed;
@@ -212,7 +192,7 @@ public partial class UpdateWindow : Window
             // Pause before installation — only if Claude is running (it will be closed)
             if (_runtime.Updater.IsClaudeRunning())
             {
-                Progress.Visibility = Visibility.Collapsed;
+                ShowProgress(false);
                 SetDetailKey("Update.Pause.Message");
                 BtnInstallNow.Visibility = Visibility.Visible;
                 BtnDefer.Visibility = Visibility.Visible;
@@ -230,13 +210,13 @@ public partial class UpdateWindow : Window
                     return;
                 }
 
-                Progress.Visibility = Visibility.Visible;
+                ShowProgress(true);
             }
 
             // Installation: not interrupted — "Stop"/closing are unavailable
             SetPhase(UpdatePhase.Install);
             SetStep(3, ChainStepStatus.Active);
-            Progress.IsIndeterminate = true;
+            SetProgressUnknown();
             var after = await _runtime.Updater.InstallAsync(_packageFile, UpdateOptions.Default, updateProgress, ct);
             SetStep(3, ChainStepStatus.Done, after.Version);
             SetDetailKey("Update.Done.InstalledFmt", _beforeVersion, after.Version);
@@ -280,7 +260,7 @@ public partial class UpdateWindow : Window
             return;
         }
 
-        _details[1].Text = $"{step.Component}: {step.Detail}";
+        _rows[1].Detail.Text = $"{step.Component}: {step.Detail}";
         if (step.Status == ChainStepStatus.Active && !string.IsNullOrEmpty(step.Detail))
         {
             SetDetailDirect(step.Detail);
@@ -311,8 +291,7 @@ public partial class UpdateWindow : Window
                 }
             }
 
-            Progress.IsIndeterminate = false;
-            Progress.Value = 100.0 * p.DoneBytes / p.TotalBytes;
+            SetProgress(100.0 * p.DoneBytes / p.TotalBytes);
             UpdateDownloadDetail();
         }
         else if (p.Message.Length > 0)
@@ -370,27 +349,33 @@ public partial class UpdateWindow : Window
         BtnClose.IsEnabled = phase != UpdatePhase.Install;
     }
 
+    /// <summary>Progress area: the bar together with the percentage that goes with it.</summary>
+    private void ShowProgress(bool visible) =>
+        ProgressArea.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Known length: a determinate bar and the number the user actually reads.</summary>
+    private void SetProgress(double percent)
+    {
+        Progress.IsIndeterminate = false;
+        Progress.Value = percent;
+        ProgressText.Text = $"{percent:0} %";
+    }
+
+    /// <summary>Unknown length: the bar breathes and the number stays empty instead of inventing one.</summary>
+    private void SetProgressUnknown()
+    {
+        Progress.IsIndeterminate = true;
+        ProgressText.Text = "";
+    }
+
     private void SetStep(int index, ChainStepStatus status, string detail = "")
     {
         _states[index] = status;
-        _glyphs[index].Text = status switch
+        _rows[index].Apply(status, detail);
+        for (var i = 1; i < StepOrder.Length; i++)
         {
-            ChainStepStatus.Done => "✓",
-            ChainStepStatus.Active => "●",
-            ChainStepStatus.Failed => "✕",
-            ChainStepStatus.Skipped => "—",
-            _ => "○",
-        };
-        var brush = (status switch
-        {
-            ChainStepStatus.Done => FindResource("Brush.Ok"),
-            ChainStepStatus.Active => FindResource("Brush.Accent"),
-            ChainStepStatus.Failed => FindResource("Brush.Bad"),
-            _ => FindResource("Brush.Idle"),
-        }) as Brush;
-        _glyphs[index].Foreground = brush;
-        _labels[index].Foreground = status == ChainStepStatus.Pending ? FindResource("Brush.Idle") as Brush : brush;
-        _details[index].Text = detail;
+            _rows[i].SetLinkFrom(_states[i - 1]);
+        }
     }
 
     private void MarkCurrentStepFailed()
@@ -416,18 +401,14 @@ public partial class UpdateWindow : Window
         _clock.Stop();
         _pauseDecision?.TrySetResult(false);
         _pauseDecision = null;
-        Progress.IsIndeterminate = false;
-        if (!success)
+        if (success && progressFull)
         {
-            Progress.Visibility = Visibility.Collapsed;
-        }
-        else if (progressFull)
-        {
-            Progress.Value = 100;
+            SetProgress(100);
         }
         else
         {
-            Progress.Visibility = Visibility.Collapsed;
+            ShowProgress(false);
+            SetProgressUnknown();
         }
 
         BtnStop.Visibility = Visibility.Collapsed;
@@ -584,7 +565,7 @@ public partial class UpdateWindow : Window
         SubHeaderText.Text = Loc.S("Update.SubHeader");
         for (var i = 0; i < StepOrder.Length; i++)
         {
-            _labels[i].Text = Loc.S($"Update.Step.{StepOrder[i]}");
+            _rows[i].Label.Text = Loc.S($"Update.Step.{StepOrder[i]}");
         }
 
         BtnStop.Content = Loc.S("Update.Button.Stop");

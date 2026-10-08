@@ -29,6 +29,7 @@ public partial class DiagnosticsWindow : Window
     {
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
+        WindowTheme.UseDarkTitleBar(this);
         _runtime = runtime;
         Loc.LanguageChanged += OnLanguageChanged;
         RenderTitles();
@@ -74,6 +75,7 @@ public partial class DiagnosticsWindow : Window
         }
 
         _busy = true;
+        StatusText.Foreground = Theme.TextSecondary;
         StatusText.Text = Loc.S("Diag.Busy");
         BtnRefresh.IsEnabled = false;
         try
@@ -84,6 +86,7 @@ public partial class DiagnosticsWindow : Window
         }
         catch (Exception ex)
         {
+            StatusText.Foreground = Theme.Bad;
             StatusText.Text = Loc.F("Main.ErrorFmt", ex.Message);
         }
         finally
@@ -107,8 +110,8 @@ public partial class DiagnosticsWindow : Window
             SectionsPanel.Children.Add(new TextBlock
             {
                 Text = Loc.S($"Diag.Section.{section.Key}"),
-                FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, SectionsPanel.Children.Count == 0 ? 0 : 14, 0, 6),
+                Style = (Style)Application.Current.FindResource("Text.Section"),
+                Margin = new Thickness(0, SectionsPanel.Children.Count == 0 ? 0 : 18, 0, 8),
             });
             foreach (var line in section.Lines)
             {
@@ -117,20 +120,22 @@ public partial class DiagnosticsWindow : Window
         }
     }
 
-    /// <summary>Summary line: a gray technical name and a value highlighted by mark.</summary>
+    /// <summary>Summary line: a muted label and a monospace value carrying the mark of its state;
+    /// a line without a label is a note in prose.</summary>
     private static TextBlock MakeLine(string? name, string value, DiagMark mark, bool wrap = false)
     {
         var block = new TextBlock
         {
+            Style = (Style)Application.Current.FindResource(name is null ? "Text.Body" : "Text.Mono"),
             TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
-            Margin = new Thickness(0, 2, 0, 2),
-            FontSize = 12.5,
+            Margin = new Thickness(0, 3, 0, 3),
         };
         if (name is not null)
         {
             block.Inlines.Add(new Run($"{name}:  ")
             {
-                Foreground = (Brush)Application.Current.FindResource("Brush.TextSecondary"),
+                Foreground = Theme.TextMuted,
+                FontFamily = (FontFamily)Application.Current.FindResource("Font.Ui"),
             });
         }
 
@@ -140,10 +145,10 @@ public partial class DiagnosticsWindow : Window
 
     private static Brush BrushFor(DiagMark mark) => mark switch
     {
-        DiagMark.Good => new SolidColorBrush(Color.FromRgb(0x7C, 0xB9, 0x7C)),
-        DiagMark.Warn => new SolidColorBrush(Color.FromRgb(0xE0, 0xA8, 0x3E)),
-        DiagMark.Bad => new SolidColorBrush(Color.FromRgb(0xD9, 0x6B, 0x6B)),
-        _ => (Brush)Application.Current.FindResource("Brush.Text"),
+        DiagMark.Good => Theme.Ok,
+        DiagMark.Warn => Theme.Warn,
+        DiagMark.Bad => Theme.Bad,
+        _ => Theme.Text,
     };
 
     /// <summary>List of log files preserving the selection; the tail — on selection and by timer.</summary>
@@ -154,19 +159,53 @@ public partial class DiagnosticsWindow : Window
         LogsList.Items.Clear();
         foreach (var file in _runtime.Logs.List())
         {
+            LogsList.Items.Add(new ListBoxItem { Tag = file, Content = MakeLogRow(file) });
+        }
+
+        if (LogsList.Items.Count == 0)
+        {
             LogsList.Items.Add(new ListBoxItem
             {
-                Tag = file,
-                Content = $"{file.Name}  ·  {ByteSize.Format(file.Bytes)}  ·  {file.LastWriteTime:HH:mm}",
+                IsEnabled = false,
+                Content = new TextBlock
+                {
+                    Text = Loc.S("Diag.Logs.Empty"),
+                    Style = (Style)FindResource("Text.Note"),
+                    TextWrapping = TextWrapping.Wrap,
+                },
             });
         }
 
         var restore = LogsList.Items.OfType<ListBoxItem>()
             .FirstOrDefault(item => item.Tag is LogFileInfo f && f.Name == selected?.Name)
-            ?? LogsList.Items.OfType<ListBoxItem>().FirstOrDefault();
+            ?? LogsList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag is not null);
         LogsList.SelectedItem = restore;
         _fillingLogs = false;
         ShowTail();
+    }
+
+    /// <summary>File row: the name, then size and time as the monospace metadata of the list.</summary>
+    private Grid MakeLogRow(LogFileInfo file)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var name = new TextBlock
+        {
+            Text = file.Name,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            ToolTip = file.Name,
+        };
+        var meta = new TextBlock
+        {
+            Text = $"{ByteSize.Format(file.Bytes)} · {file.LastWriteTime:HH:mm}",
+            Style = (Style)FindResource("Text.Mono"),
+            Margin = new Thickness(10, 0, 0, 0),
+        };
+        Grid.SetColumn(meta, 1);
+        row.Children.Add(name);
+        row.Children.Add(meta);
+        return row;
     }
 
     private void OnLogSelected(object sender, SelectionChangedEventArgs e)
@@ -199,6 +238,7 @@ public partial class DiagnosticsWindow : Window
         }
 
         var result = _runtime.RotateLog(info.Name);
+        StatusText.Foreground = result.Ok ? Theme.TextSecondary : Theme.Bad;
         StatusText.Text = $"{info.Name}: {result.Detail}";
         RefreshLogs();
     }

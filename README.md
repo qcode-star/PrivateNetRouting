@@ -12,7 +12,7 @@ and read-only diagnostics. It provides a GUI and a headless CLI. Development rul
 |---|---|
 | Forward proxy | Local CONNECT proxy: resolves names over DoH, dials through the userspace sidecar's SOCKS5 upstream, listens on localhost and the WSL gateway, and keeps an activity marker for the watchdog. Runs in-process or as a detached worker that outlives the GUI/command. |
 | Chain supervisor | Idempotent bring-up/stop of the userspace tailscaled daemon → keeper → node → forward proxy, with a single UAC prompt for the daemon start. |
-| Launchers | Claude Desktop with `--proxy-server`/`--proxy-bypass-list`; a browser with an isolated profile (Firefox `user.js` or Chromium flags) and the application proxy. Both bring the chain up when needed, behind a splash screen in GUI mode. |
+| Launchers | Claude Desktop with `--proxy-server`/`--proxy-bypass-list`; a browser with an isolated profile (Firefox `user.js` or Chromium flags) and the application proxy. Both bring the chain up when needed; the bring-up runs live in the chain card of the main window. |
 | Watchdog | Idle auto-stop: watches Claude processes, proxy connections and the activity marker; on idle it stops the WSL Claude host and then the chain. Started only explicitly. |
 | Updater | Manual MSIX update of Claude Desktop: version check before bring-up, package URL from the AppX journal, multi-threaded chunked download through the proxy, Publisher verification, `Add-AppxPackage`. |
 | Guards | Direct-access control: the managed `egressProxyUrl` policy, a local ban (hosts + one NRPT rule + firewall subnet block), Claude Code env on Windows and in WSL, and the WinINET system proxy. Status is read-only; changes go through an elevated helper. |
@@ -32,8 +32,8 @@ dotnet run --project src/PrivateNetRouting.App
 
 The WPF application (`PrivateNetRouting.App`) shows a status/control window with a tray icon.
 Special modes: `--launch` (the Claude desktop shortcut — show the window if Claude is running,
-otherwise launch it behind the bring-up splash screen) and `--launch-browser` (the isolated browser
-profile).
+otherwise launch it, with the chain bring-up drawn live in the chain card) and `--launch-browser`
+(the isolated browser profile).
 
 The headless CLI (`pnr`):
 

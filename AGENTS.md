@@ -102,8 +102,8 @@ Application modes (the owner's decision):
   (the proxy and an enabled watchdog keep working); the real exit is "Exit" in the tray menu or
   ending the Windows session; a second launch shows the hidden window;
 - **shortcut GUI** (`--launch`): this is how the Claude desktop shortcut works — if Claude is
-  already running, the application window is simply shown; if not, a window with the launch process
-  (bring-up splash screen: tunnel, checks) and the start of Claude with proxy flags;
+  already running, the application window is simply shown; if not, the window draws the bring-up in
+  the chain card (tunnel, checks) and then starts Claude with proxy flags;
 - **console** (`pnr`, a separate exe): the headless commands.
 
 Ports per the owner's decision: **18081** (daemon HTTP), **18082** (forward proxy, the address for
@@ -114,11 +114,11 @@ config; they change only by explicitly editing the user config.
 |---|---|---|
 | ForwardProxy | local CONNECT proxy: DoH resolution of names through the resolvers from the config, dialing through the SOCKS5 upstream of the userspace sidecar, bind on localhost and the WSL gateway, activity marker (mtime) for the watchdog; the listener placement mode is decided by ForwardProxySupervisor: in-process (default) or a detached worker (`forwardProxy.detached`, its own exe with the `--proxy-worker` marker, spawned through cmd with redirection) — the port is a single resource: a busy one is not bound by anyone, stop kills only the worker identified by cmdline, a foreign owner is left alone (warning to the log) | `PrivateNetRouting.Core.Net.*`; CLI `pnr proxy [--detached]` |
 | ChainSupervisor | idempotent chain bring-up/shutdown (userspace tailscaled daemon → watch-ipn keeper → up → forward proxy → health check), elevation of the daemon start through a runas copy of itself (the only UAC), "our" processes are identified by the statedir/pipe in the command line; daemon/keeper logs are file handles through cmd, surviving application exit. Daemon liveness is determined by the responsiveness of its named pipe: WMI hides the CommandLine of an elevated process from a non-elevated reader (Windows 11 24H2+), while an elevated stop still kills processes by cmdline search | `PrivateNetRouting.Core.Chain`; CLI `pnr chain up\|down\|status`, `pnr check` |
-| Launcher | starting Claude Desktop with `--proxy-server`/`--proxy-bypass-list` (the bypass list is built from the config domains, both spellings of each zone; the base entries — localhost/private ranges — are fixed in the code), checking and bringing up the chain (live CONNECT, then an idempotent chain up), a splash screen with the bring-up steps (on a live chain there is no window), control warnings to the log about the `egressProxyUrl` managed policy and an already running Claude without flags, mode flags (check-only/no-splash); the GUI shortcut mode `--launch`: Claude already running (exact process name) — only the application window, not running — a full launch with the splash screen | `PrivateNetRouting.Core.Launcher` + `SplashWindow` in App; CLI `pnr launch [--check-only] [--no-splash]` (the splash screen is GUI-only); the Claude desktop shortcut → `PrivateNetRouting.App --launch` |
+| Launcher | starting Claude Desktop with `--proxy-server`/`--proxy-bypass-list` (the bypass list is built from the config domains, both spellings of each zone; the base entries — localhost/private ranges — are fixed in the code), checking and bringing up the chain (live CONNECT, then an idempotent chain up), the bring-up steps drawn live in the chain card of the main window (spinner, elapsed time, the current step; on a live chain nothing is drawn at all), control warnings to the log about the `egressProxyUrl` managed policy and an already running Claude without flags, mode flags (check-only/no-splash); the GUI shortcut mode `--launch`: Claude already running (exact process name) — only the application window, not running — a full launch whose bring-up runs in the window | `PrivateNetRouting.Core.Launcher`; CLI `pnr launch [--check-only] [--no-splash]` (the flag is accepted and ignored: the progress belongs to the GUI window); the Claude desktop shortcut → `PrivateNetRouting.App --launch` |
 | Watchdog | idle auto-stop: periodic activity check (claude* processes, connections to the proxy, activity marker freshness; the first poll is after the interval, every timer tick is Debug, Info only carries a reason change and the auto-stop itself), when idle — graceful stop of the WSL Claude host (RPC server.shutdown with its own binary, SIGTERM→SIGKILL escalation on orphans, the distro is not brought up just for the check), then stopping the chain with the existing orchestrator; the start is only explicit (`pnr watchdog` / the checkbox in the application window), it lives as long as the process that started it, and is never written to autostart | `PrivateNetRouting.Core.Watchdog`; CLI `pnr watchdog`; the checkbox in the application window (the interval and the WSL distro are under `watchdog.*`) |
 | Updater | manual MSIX update: version check BEFORE the chain bring-up ("nothing to install" — no UAC), the package address from the AppX journal (or manual entry), multi-threaded chunked download through the application's own forward proxy, Publisher verification, closing Claude, `Add-AppxPackage`; a GUI with steps/progress/stop button, a pause before installation and a deferred installation (`--install-from`); during the download the activity marker is kept fresh (auto-stop does not shut the chain down under the download); on GUI start — a background update check (read-only on versions and the AppX journal, no chain and no UAC; `ui.checkUpdatesOnStart`): if there is one — a line next to the launch buttons and a tray balloon | `PrivateNetRouting.Core.Updater` + `UpdateWindow` in App; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]` |
 | Guard | direct-access control: the managed policy `egressProxyUrl` (+`disableWslSessions=0`); a local ban in three layers — a hosts block, one NRPT rule for all subtrees, a firewall outbound Block by subnet (the rule identifiers are configurable; the application maintains a ban with these identifiers instead of creating a parallel one); env in Claude Code settings.json (Windows and WSL: the application proxy + NO_PROXY from the config domains; in WSL also a startup script with the NAT gateway address; the layer is entirely optional: `guard.wsl.mode` = on/off/auto and a per-distro choice of syncing); the WinINET system proxy on/off. The status of all guards is read-only (a GUI card, `pnr guard status [--live]`); the ban and the policy go through an elevated helper, and after a ban — live probes (DNS/direct/proxied) | `PrivateNetRouting.Core.Guard` + the "Guards" card in App; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off` |
-| BrowserLauncher | launching a browser with an isolated profile and the application proxy, without touching system settings: Firefox — a separate profile with user.js, rewritten on every launch (the proxy address from `forwardProxy.listen`, `no_proxies_on` — the `launcher.bypassDomains` domains in both forms + `*.tld` from `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), started with `--new-instance` (otherwise the URL would go to the everyday instance without a proxy); Chromium-like — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (a separate directory is mandatory: a running instance ignores the flags); the chain is like the Claude launcher's (live CONNECT, on failure an idempotent bring-up, splash screen while waiting); the browser is chosen by `browser.type` (firefox/chromium, an unknown value — firefox), the private window — `browser.private` or a flag; an already running instance of ours (cmdline with our profile) is not duplicated — a note in the application window | `PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; the "Browser" button in the main window; GUI shortcut mode `--launch-browser`; the "Claude (browser)" shortcuts point at the application |
+| BrowserLauncher | launching a browser with an isolated profile and the application proxy, without touching system settings: Firefox — a separate profile with user.js, rewritten on every launch (the proxy address from `forwardProxy.listen`, `no_proxies_on` — the `launcher.bypassDomains` domains in both forms + `*.tld` from `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), started with `--new-instance` (otherwise the URL would go to the everyday instance without a proxy); Chromium-like — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (a separate directory is mandatory: a running instance ignores the flags); the chain is like the Claude launcher's (live CONNECT, on failure an idempotent bring-up drawn in the chain card while waiting); the browser is chosen by `browser.type` (firefox/chromium, an unknown value — firefox), the private window — `browser.private` or a flag; an already running instance of ours (cmdline with our profile) is not duplicated — a note in the application window | `PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; the "Browser" button in the main window; GUI shortcut mode `--launch-browser`; the "Claude (browser)" shortcuts point at the application |
 | Diagnostics | a read-only state summary: owners of the chain listeners with PIDs (a TCP table through iphlpapi, no PowerShell), keeper/node, the proxy's WSL bind, counters and age of the activity marker, a detailed CONNECT roundtrip (time + first response line), the core of the guards (policy + ban, without WSL), watchdog liveness (`pnr watchdog` is visible from outside by cmdline, a watchdog inside the GUI — only from its window); a fully stopped chain — a short "normal" message instead of the full picture; log viewing (a list with sizes, tail by name `--tail N`) and rotation: the process's live log — in place (`FileLog.RotateNow`), a free file — by shifting the age chain, one held by another process — honestly "locked" | `PrivateNetRouting.Core.Diagnostics` + `DiagnosticsWindow` in App (the "Diagnostics…" button: a highlighted summary, a log list with tail, rotation, opening the folder); CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]` |
 | Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | `PrivateNetRouting.App/Localization`; en/ru; a selector in the window header |
 
@@ -155,6 +155,12 @@ Architecture notes:
 - The external protocols the semantics rest on: CONNECT roundtrip as a health check, the WSL host's
   `server.shutdown` RPC, the AppX journal as the source of the package URL, AppX Publisher
   verification.
+- UI tokens: everything visual comes from `App.xaml` — semantic brush names (window/band/card/code,
+  three weights of text, one accent, the state colours), a 4px spacing grid, two corner radii and a
+  four-step type scale, with control styles on top. Windows and code reference the keys (code goes
+  through `Theme`) and never hardcode a colour, size or radius; a state is always a word next to the
+  colour, never colour alone; machine data (addresses, paths, counters, log lines) is monospaced
+  with tabular figures.
 
 ## Repository structure
 
@@ -162,8 +168,9 @@ Architecture notes:
 src/
   PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
                              # window hidden to the tray), tray (TrayIcon: open/exit, balloon),
-                             # proxy and chain status, language selection, starting Claude with the
-                             # bring-up splash screen (SplashWindow), the --launch shortcut mode
+                             # proxy and chain status, language selection, the chain card with the
+                             # animated rail that runs the bring-up live while launching Claude or
+                             # a browser, the --launch shortcut mode
                              # (Claude running → window only), the "Browser" button and the
                              # --launch-browser shortcut mode (isolated profile, "already running"
                              # note), the startup Claude update check, the update window
@@ -177,6 +184,13 @@ src/
     Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary
                              # swap (DynamicResource in XAML, Loc.S/Loc.F in code,
                              # Loc.LanguageChanged)
+    ChainRail.cs             # the chain rail of the main window: five stages as markers on a link,
+                             # built in code so a stage can light up (colour fade, a pop when it
+                             # completes, a breath while it is being brought up)
+    StepRail.cs              # one row of a vertical rail (the update window's phases), sharing the
+                             # marker vocabulary of the chain rail: hollow / check / cross
+    Theme.cs                 # App.xaml tokens for the code paths: state → brush, state → word
+    WindowTheme.cs           # dark DWM title bar; unsupported builds keep the system one
   PrivateNetRouting.Core/    # logic without UI
     Configuration/           # AppConfig (including ui.language, ui.checkUpdatesOnStart),
                              # AppLanguage (auto → system → en),
@@ -284,7 +298,7 @@ From the repository root, `dotnet build` / `dotnet test` act on all four project
 (`GuardTests`, `UpdaterTests`, `WatchdogTests`, …). `dotnet format` is the source of truth for
 style; run it before committing.
 
-Commits: in small steps, the message in the infinitive ("Add forward proxy core", "Fix splash
+Commits: in small steps, the message in the infinitive ("Add forward proxy core", "Fix chain card
 focus"). Branching: `main` is the buildable state; features go in short branches or straight into
 `main` (a personal repository, the main thing is not to break the build).
 
