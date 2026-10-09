@@ -392,6 +392,9 @@ public sealed class LoggingConfig
 
 public sealed class ForwardProxyConfig
 {
+    /// <summary>Gates the <c>pnr proxy</c> command only; otherwise the proxy is raised explicitly
+    /// as part of the chain (chain up, launches), regardless of this flag — the GUI does not
+    /// auto-start it on open.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>Main listener "host:port".</summary>

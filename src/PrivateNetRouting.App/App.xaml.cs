@@ -20,6 +20,8 @@ namespace PrivateNetRouting.App;
 /// UI — this is a second process). Single instance — mutex + activation event: a repeated launch
 /// shows the already open (or minimized to tray) window. Closing and minimizing the window hides
 /// the application to the tray; the real exit is "Exit" in the tray menu (or Windows session end).
+/// Opening the window raises nothing: the chain and the proxy come up only from explicit actions
+/// (chain up, Claude/browser launch, update).
 /// </summary>
 public partial class App : Application
 {
@@ -91,19 +93,9 @@ public partial class App : Application
         var config = AppConfigStore.LoadOrCreate();
         Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
         _runtime = ProxyRuntime.FromConfig(config);
-        if (config.ForwardProxy.Enabled)
-        {
-            try
-            {
-                // on the pool, without Dispatcher context: a delayed start (waiting for the
-                // detached worker's listener) would otherwise deadlock the blocking wait on the UI thread
-                Task.Run(() => _runtime.StartAsync(CancellationToken.None)).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                _runtime.Log.Error($"proxy start failed: {ex.Message}");
-            }
-        }
+        // opening the window raises nothing: without the chain the proxy is unusable (its SOCKS5
+        // upstream is down), so an auto-start would only produce a guaranteed-failing CONNECT
+        // check; the proxy comes up as part of the chain (chain up / launches / update)
 
         var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath(), config.Ui.Language);
         MainWindow = window;
