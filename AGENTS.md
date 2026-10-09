@@ -23,7 +23,7 @@ leak into the rest of the repository.
 
 ## Rule #2: repository anonymity — check every commit
 
-The repository is private and must stay **as anonymous as possible**: it does not contain and must
+The repository is public and must stay **as anonymous as possible**: it does not contain and must
 never receive my settings, secrets, or anything that links the machine or the author to the
 employer, the corporate network, or its infrastructure. It is forbidden to commit:
 
@@ -121,6 +121,7 @@ config; they change only by explicitly editing the user config.
 | Watchdog | idle auto-stop: periodic activity check (claude* processes, connections to the proxy, activity marker freshness; the first poll is after the interval, every timer tick is Debug, Info only carries a reason change and the auto-stop itself), when idle — graceful stop of the WSL Claude host (RPC server.shutdown with its own binary, SIGTERM→SIGKILL escalation on orphans, the distro is not brought up just for the check), then stopping the chain with the existing orchestrator; the start is only explicit (`pnr watchdog` — the foreground CLI form / the toggle in the chain card): the GUI starts a detached worker (its own exe with the `--watchdog-worker` marker, spawned through cmd with redirection) that outlives the application and switches itself off after the idle stop; `watchdog.autoStart` (default on) — after every successful chain raise the orchestrator's hook re-arms the stopper fire-and-forget, the checkbox sits in the chain card row next to the toggle; liveness is read from process command lines, the stop kills only the identified stoppers, and the worker is never written to autostart (rule #4) | `PrivateNetRouting.Core.Watchdog` (WatchdogService + WatchdogSupervisor/Worker); CLI `pnr watchdog`; the "Idle stop" row of the chain card (the interval and the WSL distro are under `watchdog.*`) |
 | Updater | manual MSIX update: version check BEFORE the chain bring-up ("nothing to install" — no UAC), the package address from Claude's own update feed — asked through the already-live proxy, without raising the chain (the AppX journal where the built-in updater leaves a failed-download address is the fallback; or manual entry), multi-threaded chunked download through the application's own forward proxy, Publisher verification, closing Claude, `Add-AppxPackage`; a GUI with steps/progress/stop button, a pause before installation and a deferred installation (`--install-from`); during the download the activity marker is kept fresh (auto-stop does not shut the chain down under the download); on GUI start — a background update check (read-only on versions, the feed and the journal, no chain and no UAC; `ui.checkUpdatesOnStart`): if there is one — a line next to the launch buttons and a tray balloon, and the update window's own check or a finished installation keeps that line in sync (a stale one is dropped); after a successful installation the window closes itself in 30 s with a visible countdown (any interaction keeps it open); a full run with no address yet raises the chain and asks the feed once more | `PrivateNetRouting.Core.Updater` + `UpdateWindow` in App; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]` |
 | Guard | direct-access control: the managed policy `egressProxyUrl` (+`disableWslSessions=0`); a local ban in three layers — a hosts block, one NRPT rule for all subtrees, a firewall outbound Block by subnet (the rule identifiers are configurable; the application maintains a ban with these identifiers instead of creating a parallel one); env in Claude Code settings.json (Windows and WSL: the application proxy + NO_PROXY from the config domains; in WSL also a startup script with the NAT gateway address; the layer is entirely optional: `guard.wsl.mode` = on/off/auto and a per-distro choice of syncing); the WinINET system proxy on/off. The status of all guards is read-only (a GUI card, `pnr guard status [--live]`); the ban and the policy go through an elevated helper, and after a ban — live probes (DNS/direct/proxied) | `PrivateNetRouting.Core.Guard` + the "Guards" card in App; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off` |
+| App self-update | a one-time check on GUI start (`ui.checkAppUpdatesOnStart`) and a "Check for updates…" item of the "?" help menu: the repository's GitHub releases against the running version; a newer release — an offer to open the releases page (no auto-install); the request is anonymous api.github.com (the repository is public), no chain and no proxy needed; at start a failure is logged quietly, from the menu it is a message box | `PrivateNetRouting.Core.AppUpdate` + the "?" menu item; log `appupdate.log` |
 | BrowserLauncher | launching a browser with an isolated profile and the application proxy, without touching system settings: Firefox — a separate profile with user.js, rewritten on every launch (the proxy address from `forwardProxy.listen`, `no_proxies_on` — the `launcher.bypassDomains` domains in both forms + `*.tld` from `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), started with `--new-instance` (otherwise the URL would go to the everyday instance without a proxy); Chromium-like — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (a separate directory is mandatory: a running instance ignores the flags); the chain is like the Claude launcher's (live CONNECT, on failure an idempotent bring-up drawn in the chain card while waiting); the browser is chosen by `browser.type` (firefox/chromium, an unknown value — firefox), the private window — `browser.private` or a flag; an already running instance of ours (cmdline with our profile) is not duplicated — a note in the application window | `PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; the "Browser" button in the main window; GUI shortcut mode `--launch-browser`; the "Claude (browser)" shortcuts point at the application |
 | Diagnostics | a read-only state summary: owners of the chain listeners with PIDs (a TCP table through iphlpapi, no PowerShell), keeper/node, the proxy's WSL bind, counters and age of the activity marker, a detailed CONNECT roundtrip (time + first response line), the core of the guards (policy + ban, without WSL), idle stopper liveness (visible from outside by the command line: the detached worker `--watchdog-worker` or the foreground `pnr watchdog`); a fully stopped chain — a short "normal" message instead of the full picture; log viewing (a list with sizes, tail by name `--tail N`) and rotation: the process's live log — in place (`FileLog.RotateNow`), a free file — by shifting the age chain, one held by another process — honestly "locked" | `PrivateNetRouting.Core.Diagnostics` + `DiagnosticsWindow` in App (the "Diagnostics…" item of the "?" help menu: a highlighted summary and an "Open logs" button — the log list and rotation live in the CLI); CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]` |
 | Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | `PrivateNetRouting.App/Localization`; en/ru; a flag selector (en/ru/system, drawn by `LanguageFlag`) in the window header |
@@ -160,6 +161,12 @@ Architecture notes:
 - Updater: the version check phase runs before the chain bring-up (no extra UAC is needed);
   installation is not interrupted; during long phases keep the activity marker fresh so that
   auto-stop does not shut the chain down under the download.
+- Releases and installation: `Directory.Build.props` holds the version and must match the release
+  tag (the workflow checks); a `v*` tag runs the release workflow — tests, then
+  `packaging/make-release.ps1` (both projects self-contained into one folder, the portable zip,
+  the Inno Setup installer) — and attaches zip + setup to a GitHub release with generated notes.
+  The installer is per-user (`%LOCALAPPDATA%\Programs\PrivateNetRouting`, no elevation), recognizes
+  the running GUI by the single-instance mutex, and writes no autostart entries (rule #4).
 - Guard: the ban rule identifiers (hosts block markers, the NRPT rule DisplayName, the firewall
   rule Group) are in the config; the application maintains a ban with these identifiers, not a
   parallel one. The guard status is read-only; after applying or removing a ban — live probes,
@@ -184,7 +191,8 @@ src/
                              # up/down, launch Claude, two exits, balloon),
                              # the language selector with drawn flag marks (en/ru/system,
                              # LanguageFlag + the data template) and the "?" help menu
-                             # (diagnostics, open logs, about with the project's GitHub page),
+                             # (diagnostics, open logs, check for updates, about with the
+                             # project's GitHub page),
                              # the chain card — the single lifecycle control
                              # (idempotent bring-up/stop of the whole chain, the animated rail
                              # that runs the bring-up live while launching Claude or a browser,
@@ -230,6 +238,11 @@ src/
     Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info) +
                              # rotation by size once at start and manual RotateNow;
                              # a file held by another process → fallback to <name>.<pid>.log
+    AppUpdate/               # app self-update: AppUpdateChecker (the running version vs the
+                             # latest release of the repository) + GitHubAppReleaseFeed
+                             # (anonymous api.github.com — the repository is public); the
+                             # "?"-menu item and the one-time start check
+                             # (ui.checkAppUpdatesOnStart, the offer opens the releases page)
     Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient, DohEndpointPool, cache resolver,
                              # TailscaleNetmapDohSource (auto-filling the pool from the tailnet config)
     Net/Socks/               # Socks5Client (no-auth, dial by IPv4)
@@ -308,6 +321,14 @@ tests/
                              # file/RotateNow), the cmd argument form
 config/
   appsettings.example.json   # user config template with placeholders
+packaging/
+  setup.iss                  # Inno Setup script: per-user install (no elevation), the version
+                             # via /DAppVersion, no autostart (rule #4)
+  make-release.ps1           # self-contained publish of App+Cli + zip + installer into
+                             # artifacts/; the release workflow runs the same script
+.github/
+  workflows/release.yml      # a v* tag: tests → make-release.ps1 → a GitHub release with the
+                             # zip and the installer (the tag must match Directory.Build.props)
 ```
 
 The test project references `PrivateNetRouting.Core` only, plus `Fakes.cs` (the shared fake
@@ -324,7 +345,7 @@ default values); logs are in `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
 |---|---|---|
 | .NET SDK | 10.0.401 LTS (WindowsDesktop.App — WPF) | a winget package; in already running sessions PATH may not see `dotnet` — use the full path `C:\Program Files\dotnet\dotnet.exe` |
 | git | 2.55 (Git for Windows) | the identity is set locally in the repository (noreply) |
-| gh | 2.102 | logged in; a private repository on github.com |
+| gh | 2.102 | logged in; the public repository on github.com |
 
 ```bash
 dotnet build

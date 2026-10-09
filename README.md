@@ -6,6 +6,24 @@ and for an isolated browser profile, idle auto-stop, an MSIX package updater, di
 and read-only diagnostics. It provides a GUI and a headless CLI. Development rules are in
 [AGENTS.md](AGENTS.md).
 
+## Install
+
+Releases live on the [Releases page](https://github.com/qcode-star/PrivateNetRouting/releases/latest).
+Every release carries two self-contained artifacts for Windows x64 (the .NET runtime is bundled —
+nothing else to install):
+
+- `PrivateNetRouting-<version>-setup-win-x64.exe` — the installer: a per-user install without
+  elevation into `%LOCALAPPDATA%\Programs\PrivateNetRouting`, with start-menu shortcuts and an
+  uninstaller. The build is not signed, so SmartScreen asks to confirm the first run.
+- `PrivateNetRouting-<version>-win-x64.zip` — portable: unpack anywhere and run
+  `PrivateNetRouting.App.exe` (GUI with a tray icon) or `pnr.exe` (CLI).
+
+On first launch the user config is created at `%APPDATA%\PrivateNetRouting\appsettings.json` from
+default values. The defaults are placeholders by design (rule #3 in AGENTS.md): endpoints, paths,
+bypass domain lists and the like must be filled in for the specific environment — the schema with
+comments is in [config/appsettings.example.json](config/appsettings.example.json). Logs are in
+`%LOCALAPPDATA%\PrivateNetRouting\logs\`.
+
 ## Modules
 
 | Module | What it does |
@@ -59,5 +77,5 @@ pnr config path|init           # user config path / create from defaults
 
 Everything environment-specific (endpoint addresses, ports, bypass domain lists, paths, timeouts)
 lives in the application's user config and never reaches git. The repository holds only templates
-with placeholders in `config/*.example.json`. The repository is private and anonymous: no real
+with placeholders in `config/*.example.json`. The repository is public and anonymous: no real
 addresses, domains, names, or secrets (rule #2 in AGENTS.md).
