@@ -5,7 +5,9 @@ namespace PrivateNetRouting.Core.SystemOps;
 /// <summary>
 /// Launching Windows PowerShell without a window (updater: Get-AppxPackage/Add-AppxPackage/Get-WinEvent;
 /// guard: Get-DnsClientNrptRule/NetFirewall). PowerShell 5.1 is an OS component,
-/// the path is taken from the config (updater.powerShellPath).
+/// the path is taken from the config (updater.powerShellPath). The awaits do not capture the
+/// context: the elevated guard helper blocks a thread on this method — a captured dispatcher
+/// context would deadlock it (the AGENTS.md rule for Core paths).
 /// </summary>
 public interface IPowerShellExecutor
 {
@@ -34,7 +36,7 @@ public sealed class PowerShellRunner(string powerShellPath) : IPowerShellExecuto
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
         try
         {
-            await process.WaitForExitAsync(ct);
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -50,7 +52,7 @@ public sealed class PowerShellRunner(string powerShellPath) : IPowerShellExecuto
             throw;
         }
 
-        var output = (await stdoutTask + await stderrTask).Trim();
+        var output = (await stdoutTask.ConfigureAwait(false) + await stderrTask.ConfigureAwait(false)).Trim();
         return (process.ExitCode, output);
     }
 }

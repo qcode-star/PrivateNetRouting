@@ -292,6 +292,37 @@ public class ChainSupervisorTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The result file of an elevated command lives in the statedir, but the statedir is normally
+    /// created by the daemon — an elevated guard command on a machine where the daemon never ran
+    /// must still be able to report, so the runner creates the directory itself.
+    /// </summary>
+    [Fact]
+    public async Task ElevatedRunnerCreatesStateDirForTheResultFile()
+    {
+        var stateDir = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}", "nested");
+        var config = new ChainConfig { StateDir = stateDir };
+        var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
+        var log = new FileLog(logPath);
+        string? writtenTo = null;
+        var runner = new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, resultFile) =>
+        {
+            writtenTo = resultFile;
+            File.WriteAllText(resultFile, "ok test");
+            return 0;
+        });
+
+        var result = await runner.RunAsync("--elevated-test-command", CancellationToken.None);
+
+        Assert.True(result.Ok);
+        Assert.NotNull(writtenTo);
+        Assert.True(Directory.Exists(stateDir));
+        Assert.Equal("ok test", File.ReadAllText(writtenTo).Trim());
+        Directory.Delete(stateDir, recursive: true);
+        log.Dispose();
+        File.Delete(logPath);
+    }
+
     public void Dispose()
     {
         foreach (var log in _logs)

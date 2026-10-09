@@ -161,9 +161,16 @@ public partial class App : Application
             return false;
         }
 
-        exitCode = GuardElevatedCommands.IsCommand(command)
-            ? GuardElevatedCommands.Execute(command, resultFile)
-            : ElevatedChainCommands.Execute(command, resultFile);
+        // on the pool, without the Dispatcher context: the guard command awaits PowerShell
+        // (NRPT/firewall) and the chain command awaits the sidecar CLI — their continuations must
+        // not land in this blocked dispatcher queue (the same pattern as the runtime start below);
+        // a blocking wait on the UI thread + a captured dispatcher context = a deadlock and an
+        // eternally alive helper that never writes the result file
+        var command1 = command;
+        exitCode = Task.Run(() => GuardElevatedCommands.IsCommand(command1)
+                ? GuardElevatedCommands.Execute(command1, resultFile)
+                : ElevatedChainCommands.Execute(command1, resultFile))
+            .GetAwaiter().GetResult();
         return true;
     }
 

@@ -248,6 +248,10 @@ public sealed class ElevatedRunner(
     private string MakeResultPath(string command, out string nonce)
     {
         nonce = Guid.NewGuid().ToString("N")[..8];
-        return Path.Combine(config.StateDir, $"{command.TrimStart('-')}={nonce}.result");
+        var path = Path.Combine(config.StateDir, $"{command.TrimStart('-')}={nonce}.result");
+        // the result file must have where to appear even if the daemon (the usual creator of the
+        // statedir) has never run — otherwise the helper cannot report even a failure
+        Directory.CreateDirectory(config.StateDir);
+        return path;
     }
 }
