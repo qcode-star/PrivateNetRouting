@@ -123,9 +123,20 @@ public sealed class ProxyRuntime : IAsyncDisposable
             log.Warn($"doh: skipped malformed seed endpoints: {rejected}");
         }
 
-        IDohEndpointSource? source = fp.DohDiscovery.Enabled
-            ? new TailscaleNetmapDohSource(fp.DohDiscovery)
-            : null;
+        // netmap discovery reads the tailnet config through the sidecar pipe — it only exists in
+        // the tailscale mode; in socks5 mode the pool lives on the seed set
+        IDohEndpointSource? source = null;
+        if (fp.DohDiscovery.Enabled)
+        {
+            if (config.Chain.EffectiveMode == ChainMode.Tailscale)
+            {
+                source = new TailscaleNetmapDohSource(fp.DohDiscovery);
+            }
+            else
+            {
+                log.Info("doh: netmap discovery needs the tailscale mode, keeping the seed set");
+            }
+        }
         var pool = new DohEndpointPool(
             socks,
             seed,
@@ -165,7 +176,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
             ct => ChainHealthAsync(config, ct),
             // after every successful raise the idle stopper re-arms itself (watchdog.autoStart);
             // fire and forget: the raise result must not wait for the worker spawn
-            () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)));
+            () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)),
+            config.Chain.EffectiveMode == ChainMode.Socks5
+                ? ct => EgressCheckAsync(config, resolver, socks, chainLog, ct)
+                : null);
 
         var launcherLog = NewLog("launcher.log");
         var launcher = new ClaudeLauncher(
@@ -252,6 +266,35 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
         (await ChainProbeAsync(config, ct)).Ok;
+
+    /// <summary>
+    /// The socks5 egress check: the per-connection path without the local listener — DoH
+    /// resolution (the DoH traffic itself rides the upstream) and a CONNECT-dial through it.
+    /// </summary>
+    private static async Task<bool> EgressCheckAsync(
+        AppConfig config,
+        IDnsResolver resolver,
+        Socks5Client socks,
+        FileLog log,
+        CancellationToken ct)
+    {
+        try
+        {
+            var fp = config.ForwardProxy;
+            var destination = await resolver.ResolveAsync(fp.HealthCheckHost, ct);
+            using var connection = await socks.ConnectAsync(
+                destination.Ip,
+                fp.HealthCheckPort,
+                TimeSpan.FromSeconds(fp.SocksTimeoutSeconds),
+                ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log.Debug($"chain: egress check failed: {ex.Message}");
+            return false;
+        }
+    }
 
     private static Task<HealthProbeResult> ChainProbeAsync(AppConfig config, CancellationToken ct)
     {

@@ -131,6 +131,27 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ChainModeDefaultsToTailscaleAndParsesSocks5()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(ChainMode.Tailscale, config.Chain.EffectiveMode);
+
+        File.WriteAllText(_path, """
+            {
+              "chain": { "mode": "socks5" }
+            }
+            """);
+        Assert.Equal(ChainMode.Socks5, AppConfigStore.LoadOrCreate(_path).Chain.EffectiveMode);
+
+        File.WriteAllText(_path, """
+            {
+              "chain": { "mode": "wireguard" }
+            }
+            """);
+        Assert.Equal(ChainMode.Tailscale, AppConfigStore.LoadOrCreate(_path).Chain.EffectiveMode);
+    }
+
+    [Fact]
     public void UpdateChangesUiLanguageWithoutExpandingVariables()
     {
         File.WriteAllText(_path, """

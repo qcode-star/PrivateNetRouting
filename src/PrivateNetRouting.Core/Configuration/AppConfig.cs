@@ -66,11 +66,24 @@ public sealed class LauncherConfig
 }
 
 /// <summary>
-/// Sidecar chain parameters (userspace-tailscaled + keeper + node): own pipe, own ports,
-/// own statedir. They change only by explicitly editing the user config.
+/// Chain parameters. The mode picks what carries the traffic: "tailscale" — the userspace
+/// sidecar (daemon + keeper + node), "socks5" — an external SOCKS5 upstream taken from
+/// forwardProxy.socks5Upstream. Own pipe, own ports, own statedir. They change only by
+/// explicitly editing the user config.
 /// </summary>
 public sealed class ChainConfig
 {
+    /// <summary>
+    /// What carries the traffic: "tailscale" (default) — the userspace sidecar daemon + keeper +
+    /// node below; "socks5" — an external SOCKS5 proxy (forwardProxy.socks5Upstream): every
+    /// tailscale step is skipped, replaced by one egress check. Unknown — tailscale.
+    /// Applies after a restart, like every config section.
+    /// </summary>
+    public string Mode { get; set; } = "tailscale";
+
+    [JsonIgnore]
+    public ChainMode EffectiveMode => ChainModeParser.Parse(Mode);
+
     public string TailscaledPath { get; set; } = @"C:\Program Files\Tailscale\tailscaled.exe";
 
     public string TailscaleCliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";

@@ -19,19 +19,22 @@ public class ChainSupervisorTests : IDisposable
         FakeCli? cli = null,
         Func<CancellationToken, Task<bool>>? health = null,
         Action? chainRaised = null,
-        int healthWaitSeconds = 5)
+        int healthWaitSeconds = 5,
+        string? mode = null,
+        Func<CancellationToken, Task<bool>>? upstream = null)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
         return new ChainSupervisor(
-            new ChainConfig { HealthWaitSeconds = healthWaitSeconds },
+            new ChainConfig { HealthWaitSeconds = healthWaitSeconds, Mode = mode ?? "tailscale" },
             proxy ?? new FakeProxy(_calls),
             daemon ?? new FakeDaemon(_calls),
             keeper ?? new FakeKeeper(_calls),
             cli ?? new FakeCli(_calls),
             log,
             health ?? (_ => Task.FromResult(true)),
-            chainRaised);
+            chainRaised,
+            upstream);
     }
 
     [Fact]
@@ -212,6 +215,89 @@ public class ChainSupervisorTests : IDisposable
         Assert.Equal(
             ["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"],
             _calls);
+    }
+
+    /// <summary>socks5 egress: instead of the three tailscale links, one check of the provided upstream.</summary>
+    [Fact]
+    public async Task Socks5ColdStartChecksEgressThenStartsProxy()
+    {
+        var supervisor = Create(mode: "socks5", upstream: _ => Task.FromResult(true), healthWaitSeconds: 1);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Equal(["proxy.start"], _calls); // no daemon/keeper/cli touches at all
+    }
+
+    [Fact]
+    public async Task Socks5EgressStepRunsBeforeProxyAndHealth()
+    {
+        var steps = new StepCollector();
+        var supervisor = Create(mode: "socks5", upstream: _ => Task.FromResult(true), healthWaitSeconds: 1);
+
+        await supervisor.EnsureRunningAsync(steps, CancellationToken.None);
+
+        Assert.Equal("Egress", steps.Steps[0].Component);
+        Assert.Equal(ChainStepStatus.Active, steps.Steps[0].Status);
+        Assert.Equal("Egress", steps.Steps.First(s => s.Status == ChainStepStatus.Done).Component);
+        Assert.Contains(steps.Steps, s => s.Component == "Proxy" && s.Status == ChainStepStatus.Done);
+        Assert.Contains(steps.Steps, s => s.Component == "Health" && s.Status == ChainStepStatus.Done);
+        Assert.DoesNotContain(steps.Steps, s => s.Component is "Daemon" or "Keeper" or "Node");
+    }
+
+    [Fact]
+    public async Task Socks5EgressFailureKeepsTheProxyDown()
+    {
+        var supervisor = Create(mode: "socks5", upstream: _ => Task.FromResult(false), healthWaitSeconds: 1);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        Assert.Contains("egress", ex.Message);
+        Assert.DoesNotContain("proxy.start", _calls);
+    }
+
+    [Fact]
+    public async Task Socks5StopOnlyStopsTheProxy()
+    {
+        var supervisor = Create(mode: "socks5");
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Equal(["proxy.stop"], _calls);
+    }
+
+    [Fact]
+    public async Task Socks5StateOnlyCoversProxyAndEgress()
+    {
+        var proxy = new FakeProxy(_calls) { IsRunning = true };
+        var supervisor = Create(
+            proxy: proxy,
+            mode: "socks5",
+            upstream: _ => Task.FromResult(true),
+            health: _ => Task.FromResult(true));
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.True(state.UpstreamReachable);
+        Assert.True(state.ProxyRunning);
+        Assert.True(state.ProxyHealthy);
+        Assert.True(state.IsFullyUp);
+        Assert.Empty(_calls); // the tailscale links were not consulted for the state either
+    }
+
+    [Fact]
+    public async Task TailscaleStateLeavesUpstreamUnknown()
+    {
+        var daemon = new FakeDaemon(_calls) { IsHttpListening = true, IsProcessAlive = true };
+        var keeper = new FakeKeeper(_calls) { IsRunning = true };
+        var cli = new FakeCli(_calls) { BackendState = "Running" };
+        var proxy = new FakeProxy(_calls) { IsRunning = true };
+        var supervisor = Create(proxy, daemon, keeper, cli, health: _ => Task.FromResult(true));
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.Null(state.UpstreamReachable);
+        Assert.True(state.IsFullyUp);
     }
 
     private sealed class FakeProxy(List<string> calls) : IProxyControl
