@@ -104,6 +104,13 @@ public sealed class ChainConfig
     /// <summary>tailscale up timeout (login by key from statedir is silent).</summary>
     public int UpTimeoutSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Hard limit of one tailscale CLI call (status, down): a daemon that stopped answering
+    /// its pipe leaves the CLI hanging forever, and the whole operation would hang with it.
+    /// "up" is bounded by its own --timeout (upTimeoutSeconds) plus a margin on top.
+    /// </summary>
+    public int CliTimeoutSeconds { get; set; } = 20;
+
     /// <summary>Wait for UAC confirmation and the elevated daemon start.</summary>
     public int UacWaitSeconds { get; set; } = 90;
 

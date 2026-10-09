@@ -177,12 +177,16 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // 5. health: CONNECT-roundtrip through the whole path
+        // 5. health: CONNECT-roundtrip through the whole path; every attempt is capped by the
+        // remaining budget, so the phase ends at the deadline instead of a probe-timeout past it
         Report(progress, "Health", ChainStepStatus.Active, "CONNECT-roundtrip");
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.HealthWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
-            if (await healthCheck(ct))
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var remaining = deadline - DateTime.UtcNow;
+            attemptCts.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+            if (await healthCheck(attemptCts.Token))
             {
                 Report(progress, "Health", ChainStepStatus.Done, "chain is alive");
                 log.Info("chain: fully up");

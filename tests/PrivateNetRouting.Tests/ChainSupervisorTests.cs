@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
@@ -17,12 +18,13 @@ public class ChainSupervisorTests : IDisposable
         FakeKeeper? keeper = null,
         FakeCli? cli = null,
         Func<CancellationToken, Task<bool>>? health = null,
-        Action? chainRaised = null)
+        Action? chainRaised = null,
+        int healthWaitSeconds = 5)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
         return new ChainSupervisor(
-            new ChainConfig { HealthWaitSeconds = 5 },
+            new ChainConfig { HealthWaitSeconds = healthWaitSeconds },
             proxy ?? new FakeProxy(_calls),
             daemon ?? new FakeDaemon(_calls),
             keeper ?? new FakeKeeper(_calls),
@@ -164,6 +166,40 @@ public class ChainSupervisorTests : IDisposable
 
         await Assert.ThrowsAsync<ChainException>(() =>
             supervisor.EnsureRunningAsync(null, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// A probe that hangs past the deadline is cut off by it: the phase must end at the deadline,
+    /// not a full probe timeout later (ProxyHealthCheck folds cancellation into "not alive" the
+    /// same way this fake does).
+    /// </summary>
+    [Fact]
+    public async Task HealthDeadlineCapsAHangingProbe()
+    {
+        async Task<bool> Health(CancellationToken ct)
+        {
+            try
+            {
+                await Task.Delay(5000, ct); // longer than the whole phase budget
+            }
+            catch (OperationCanceledException)
+            {
+                // the probe reports "not alive" on cancellation instead of throwing
+            }
+
+            return false;
+        }
+
+        var supervisor = Create(health: Health, healthWaitSeconds: 1);
+        var stopwatch = Stopwatch.StartNew();
+
+        await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        stopwatch.Stop();
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"the health phase took {stopwatch.Elapsed}, the deadline must cap it");
     }
 
     [Fact]
