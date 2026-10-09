@@ -150,8 +150,12 @@
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: записан прокси {1}</s:String>
 
     <!-- Tray -->
-    <s:String x:Key="Tray.Open">Открыть</s:String>
+    <s:String x:Key="Tray.Open">Показать окно</s:String>
+    <s:String x:Key="Tray.ChainUp">Запустить цепочку</s:String>
+    <s:String x:Key="Tray.ChainDown">Остановить цепочку</s:String>
+    <s:String x:Key="Tray.LaunchClaude">Запустить Claude</s:String>
     <s:String x:Key="Tray.Exit">Выход</s:String>
+    <s:String x:Key="Tray.ExitStop">Выход с полной остановкой цепочки</s:String>
 
     <!-- Update window (manual Claude Desktop MSIX update) -->
     <s:String x:Key="Update.Title">Обновление Claude Desktop</s:String>

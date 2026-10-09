@@ -215,6 +215,105 @@ public sealed class ForwardProxySupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task Detach_StopsInner_AndSpawnsWorker()
+    {
+        // the tray "Exit" with the chain kept: the in-process listener must survive the process
+        var inner = new FakeProxyInstance();
+        var ports = new FakePortProbe();
+        var spawns = new List<(string CommandLine, string? Stdout, string Stderr)>();
+        var supervisor = Make(
+            new ForwardProxyConfig(),
+            inner,
+            ports,
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (commandLine, stdoutPath, stderrPath) =>
+            {
+                spawns.Add((commandLine, stdoutPath, stderrPath));
+                ports.Listening = true; // the worker "came up"
+                return 4242;
+            });
+        await supervisor.StartAsync(CancellationToken.None); // in-process
+
+        await supervisor.DetachAsync(CancellationToken.None);
+
+        var spawn = Assert.Single(spawns);
+        Assert.EndsWith(" --proxy-worker", spawn.CommandLine);
+        Assert.Equal(1, inner.StopCount);
+        Assert.True(supervisor.IsRunning);
+    }
+
+    [Fact]
+    public async Task Detach_LeavesRunningWorker_AsIs()
+    {
+        // the listener is already held by our detached worker — nothing to hand over
+        var inner = new FakeProxyInstance();
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18082] = [Entry(42, "pnr")];
+        var processes = new FakeFinderById { CommandLineById = { { 42, @"""C:\app\pnr.exe"" --proxy-worker" } } };
+        var spawns = new List<(string CommandLine, string? Stdout, string Stderr)>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082" }, // pinned: the fake table has this port
+            inner,
+            ports,
+            tcp,
+            processes,
+            spawn: (commandLine, stdoutPath, stderrPath) =>
+            {
+                spawns.Add((commandLine, stdoutPath, stderrPath));
+                return 1;
+            });
+
+        await supervisor.DetachAsync(CancellationToken.None);
+
+        Assert.Empty(spawns);
+        Assert.Equal(0, inner.StopCount);
+    }
+
+    [Fact]
+    public async Task Detach_NoListener_IsNoop()
+    {
+        var inner = new FakeProxyInstance();
+        var spawns = new List<(string CommandLine, string? Stdout, string Stderr)>();
+        var supervisor = Make(
+            new ForwardProxyConfig(),
+            inner,
+            new FakePortProbe(),
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (commandLine, stdoutPath, stderrPath) =>
+            {
+                spawns.Add((commandLine, stdoutPath, stderrPath));
+                return 1;
+            });
+
+        await supervisor.DetachAsync(CancellationToken.None);
+
+        Assert.Empty(spawns);
+        Assert.Equal(0, inner.StopCount);
+    }
+
+    [Fact]
+    public async Task Detach_Fails_WhenWorkerNeverListens()
+    {
+        // the inner instance is already stopped at that point: the exit continues without a proxy
+        var inner = new FakeProxyInstance();
+        var supervisor = Make(
+            new ForwardProxyConfig { WorkerStartWaitSeconds = 0 },
+            inner,
+            new FakePortProbe(),
+            new FakeTcpTable(),
+            new FakeFinderById());
+        await supervisor.StartAsync(CancellationToken.None);
+
+        await Assert.ThrowsAsync<IOException>(() => supervisor.DetachAsync(CancellationToken.None));
+
+        Assert.Equal(1, inner.StopCount);
+        Assert.False(supervisor.IsRunning);
+    }
+
+    [Fact]
     public async Task Stop_StopsInnerInstance_WhenInProcess()
     {
         var inner = new FakeProxyInstance();

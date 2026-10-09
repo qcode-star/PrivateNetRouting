@@ -100,7 +100,9 @@ Application modes (the owner's decision):
 - **normal GUI** (`PrivateNetRouting.App` with no arguments): the status/control window; the tray
   icon lives as long as the application runs; minimizing and closing the window hide it to the tray
   (the proxy and the started idle stopper keep working — the stopper is a detached process and
-  survives even the real exit); the real exit is "Exit" in the tray menu or
+  survives even the real exit); the real exit is only from the tray menu — "Exit" leaves the chain
+  running in the background (the in-process forward proxy is handed over to a detached worker, the
+  next start sees the chain as it was), "Exit with full chain stop" brings it down first — or
   ending the Windows session; a second launch shows the hidden window;
 - **shortcut GUI** (`--launch`): this is how the Claude desktop shortcut works — if Claude is
   already running, the application window is simply shown; if not, the window draws the bring-up in
@@ -134,8 +136,11 @@ Architecture notes:
   alive process (the regression test is `StopCompletesUnderBlockedSynchronizationContext`).
 - Tray and GUI lifetime: `ShutdownMode=OnExplicitShutdown`, closing/minimizing the main window only
   hides it (the `TrayIcon` tray on WinForms NotifyIcon — WinForms is referenced for it alone, and
-  global usings are removed to avoid name conflicts with WPF); the started idle stopper keeps
-  working — it lives in its own detached process and survives even the real exit. Desktop
+  global usings are removed to avoid name conflicts with WPF); the tray menu is show window,
+  chain up / chain down / launch Claude (the same code paths as the chain card and the launch
+  button, enablement follows the card's buttons), "Exit" (the chain keeps working: an in-process
+  proxy is handed to a detached worker) and "Exit with full chain stop"; the started idle stopper
+  keeps working — it lives in its own detached process and survives even the real exit. Desktop
   shortcuts: Claude → `--launch`, "Claude (browser)" → `--launch-browser`.
 - Elevation: a separate helper launch (runas) with a window-0, not a restart of the whole
   application.
@@ -143,7 +148,9 @@ Architecture notes:
   through cmd); the forward proxy by default lives as long as its process (the application window or
   `pnr proxy`), and with `forwardProxy.detached=true` — in a separate worker (its own exe with
   `--proxy-worker`) that outlives the command/GUI exit: bring-up/shutdown go through chain up/down
-  (a GUI exit does not kill the worker), a one-off bring-up — `pnr proxy --detached`; the idle
+  (a GUI exit does not kill the worker), a one-off bring-up — `pnr proxy --detached`; the tray
+  "Exit" with the chain kept hands an in-process listener over to such a worker
+  (`ForwardProxySupervisor.DetachAsync`); the idle
   stopper started from the GUI — a separate worker (`--watchdog-worker`) that outlives the exit on
   its own and disappears after the idle stop (the CLI form `pnr watchdog` — foreground, in the
   terminal).
@@ -173,7 +180,8 @@ Architecture notes:
 ```
 src/
   PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
-                             # window hidden to the tray), tray (TrayIcon: open/exit, balloon),
+                             # window hidden to the tray), tray (TrayIcon: show window, chain
+                             # up/down, launch Claude, two exits, balloon),
                              # language selection, the chain card — the single lifecycle control
                              # (idempotent bring-up/stop of the whole chain, the animated rail
                              # that runs the bring-up live while launching Claude or a browser,

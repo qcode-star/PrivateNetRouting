@@ -150,8 +150,12 @@
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written</s:String>
 
     <!-- Tray -->
-    <s:String x:Key="Tray.Open">Open</s:String>
+    <s:String x:Key="Tray.Open">Show window</s:String>
+    <s:String x:Key="Tray.ChainUp">Start chain</s:String>
+    <s:String x:Key="Tray.ChainDown">Stop chain</s:String>
+    <s:String x:Key="Tray.LaunchClaude">Launch Claude</s:String>
     <s:String x:Key="Tray.Exit">Exit</s:String>
+    <s:String x:Key="Tray.ExitStop">Exit with full chain stop</s:String>
 
     <!-- Update window (manual Claude Desktop MSIX update) -->
     <s:String x:Key="Update.Title">Update Claude Desktop</s:String>

@@ -106,6 +106,29 @@ public sealed class ForwardProxySupervisor(
         throw new IOException($"proxy worker did not start listening within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
     }
 
+    /// <summary>
+    /// Hands the listener over to a detached worker so it survives this process's exit (the tray
+    /// "Exit" with the chain kept): the in-process instance is stopped and a worker takes the port,
+    /// so clients see only a short gap. A listener already held by our worker — or by anyone else —
+    /// is left as it is.
+    /// </summary>
+    public async Task DetachAsync(CancellationToken ct)
+    {
+        if (!inner.IsRunning)
+        {
+            if (ports.IsListening(Port))
+            {
+                log.Info($"forward-proxy: detach not needed — the port is held by {DescribeOwners()}");
+            }
+
+            return;
+        }
+
+        log.Info("forward-proxy: handing the listener over to a detached worker");
+        await inner.StopAsync().ConfigureAwait(false);
+        await StartWorkerAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task StopAsync()
     {
         if (inner.IsRunning)

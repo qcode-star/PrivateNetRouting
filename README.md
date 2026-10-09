@@ -31,6 +31,10 @@ dotnet run --project src/PrivateNetRouting.App
 ## Run
 
 The WPF application (`PrivateNetRouting.App`) shows a status/control window with a tray icon.
+The tray menu shows the window, runs chain up / chain down / launch Claude (the same paths as the
+window's buttons) and exits: "Exit" leaves the chain working in the background (the next start sees
+it), "Exit with full chain stop" brings it down first. Closing or minimizing the window only hides
+it to the tray.
 Special modes: `--launch` (the Claude desktop shortcut — show the window if Claude is running,
 otherwise launch it, with the chain bring-up drawn live in the chain card) and `--launch-browser`
 (the isolated browser profile).

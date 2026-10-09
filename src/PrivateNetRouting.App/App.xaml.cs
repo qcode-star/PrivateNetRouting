@@ -19,7 +19,10 @@ namespace PrivateNetRouting.App;
 /// of the detached proxy worker (--proxy-worker, before the single-instance mutex and before the
 /// UI — this is a second process). Single instance — mutex + activation event: a repeated launch
 /// shows the already open (or minimized to tray) window. Closing and minimizing the window hides
-/// the application to the tray; the real exit is "Exit" in the tray menu (or Windows session end).
+/// the application to the tray; the real exit is only from the tray menu: "Exit" leaves the chain
+/// running in the background (the in-process proxy is handed to a detached worker, the next start
+/// sees the chain as it was), "Exit with full chain stop" brings the chain down first
+/// (or Windows session end).
 /// Opening the window raises nothing: the chain and the proxy come up only from explicit actions
 /// (chain up, Claude/browser launch, update).
 /// </summary>
@@ -113,7 +116,12 @@ public partial class App : Application
 
         _tray = new TrayIcon();
         _tray.OpenRequested += ActivateMainWindow;
-        _tray.ExitRequested += ExitFromTray;
+        _tray.ChainUpRequested += () => _ = window.ChainUpAsync();
+        _tray.ChainDownRequested += () => _ = window.ChainDownAsync();
+        _tray.LaunchClaudeRequested += () => _ = window.LaunchClaudeAsync();
+        _tray.ExitRequested += () => _ = ExitFromTrayAsync(stopChain: false);
+        _tray.ExitAndStopChainRequested += () => _ = ExitFromTrayAsync(stopChain: true);
+        window.AttachTray(_tray);
 
         if (launchOnStart)
         {
@@ -178,10 +186,39 @@ public partial class App : Application
         MainWindow.Activate();
     }
 
-    private void ExitFromTray()
+    /// <summary>
+    /// Tray exit. "Exit" leaves the chain as it is: daemon, keeper and node are detached
+    /// processes anyway, and the in-process forward proxy (if it is the one holding the port)
+    /// is handed over to a detached worker — the chain keeps working in the background and the
+    /// next GUI start sees it. "Exit with full chain stop" brings the whole chain down first
+    /// (a UAC prompt is possible for the elevated daemon). A failure of either is logged and
+    /// the exit continues — the user has already asked to leave.
+    /// </summary>
+    private async Task ExitFromTrayAsync(bool stopChain)
     {
         _exiting = true;
         _tray?.Dispose();
+        _tray = null;
+        var runtime = _runtime;
+        if (runtime is not null)
+        {
+            try
+            {
+                if (stopChain)
+                {
+                    await runtime.Chain.StopAsync(null, CancellationToken.None);
+                }
+                else
+                {
+                    await runtime.ProxyControl.DetachAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                runtime.Log.Error($"exit: {(stopChain ? "chain stop" : "proxy detach")} failed: {ex.Message}");
+            }
+        }
+
         Shutdown();
     }
 

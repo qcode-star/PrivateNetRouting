@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private bool _autoStartSyncing;
     private bool _chainCardExpanded;
     private bool _guardsCardExpanded;
+    private TrayIcon? _tray;
 
     /// <summary>The collapsed card was expanded by a chain operation, not by the user — it goes back on success.</summary>
     private bool _chainCardAutoExpanded;
@@ -118,10 +119,41 @@ public partial class MainWindow : Window
         _chainTimer.Stop();
         _guardTimer.Stop();
         _busyClock.Stop();
+        if (_tray is not null)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _tray = null;
+        }
+
         Loc.LanguageChanged -= OnLanguageChanged;
         _viewModel.Dispose();
         base.OnClosed(e);
     }
+
+    /// <summary>
+    /// The tray's action items mirror the card's buttons: this window owns the operations and
+    /// pushes its Can* flags into the tray on every change; the tray's chain and launch requests
+    /// come back as the public ChainUpAsync/ChainDownAsync/LaunchClaudeAsync.
+    /// </summary>
+    internal void AttachTray(TrayIcon tray)
+    {
+        _tray = tray;
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        PushTrayActions();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.CanChainUp)
+            or nameof(MainViewModel.CanChainDown)
+            or nameof(MainViewModel.CanLaunch))
+        {
+            PushTrayActions();
+        }
+    }
+
+    private void PushTrayActions() =>
+        _tray?.UpdateActions(_viewModel.CanChainUp, _viewModel.CanChainDown, _viewModel.CanLaunch);
 
     /// <summary>A language change redraws everything the window has already painted by hand.</summary>
     private void OnLanguageChanged()
@@ -671,8 +703,21 @@ public partial class MainWindow : Window
             _runtime.Config.ForwardProxy.Listen);
     }
 
-    private async void OnChainUp(object sender, RoutedEventArgs e)
+    private async void OnChainUp(object sender, RoutedEventArgs e) => await ChainUpAsync();
+
+    private async void OnChainDown(object sender, RoutedEventArgs e) => await ChainDownAsync();
+
+    /// <summary>
+    /// Chain bring-up, shared by the card button and the tray item: the card draws the steps
+    /// (the window may be hidden), the tray enablement follows the same Can* flags.
+    /// </summary>
+    public async Task ChainUpAsync()
     {
+        if (_chainBusy || _launchBusy)
+        {
+            return;
+        }
+
         if (!await RunChainBusy(() => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
         {
             return;
@@ -682,8 +727,14 @@ public partial class MainWindow : Window
         await RefreshChainAsync();
     }
 
-    private async void OnChainDown(object sender, RoutedEventArgs e)
+    /// <summary>Chain shutdown, shared by the card button and the tray item.</summary>
+    public async Task ChainDownAsync()
     {
+        if (_chainBusy || _launchBusy)
+        {
+            return;
+        }
+
         if (!await RunChainBusy(() => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
         {
             return;
@@ -887,6 +938,17 @@ public partial class MainWindow : Window
         if (claudeRunning)
         {
             _viewModel.SetCheckResult("Main.Launch.AlreadyRunning");
+            return;
+        }
+
+        await RunLaunchAsync();
+    }
+
+    /// <summary>Launching Claude from the tray: the same path as the window's launch button.</summary>
+    public async Task LaunchClaudeAsync()
+    {
+        if (_chainBusy || _launchBusy)
+        {
             return;
         }
 
