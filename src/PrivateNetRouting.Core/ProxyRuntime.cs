@@ -1,3 +1,4 @@
+using PrivateNetRouting.Core.AppUpdate;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Diagnostics;
@@ -12,6 +13,7 @@ using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
 using PrivateNetRouting.Core.Watchdog;
 using System.Net;
+using System.Reflection;
 
 namespace PrivateNetRouting.Core;
 
@@ -52,6 +54,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public LogStore Logs { get; }
 
+    /// <summary>App self-update: the running version against the repository's GitHub releases
+    /// (the help-menu item and the one-time start check).</summary>
+    public AppUpdateChecker AppUpdate { get; }
+
     private readonly FileLog _chainLog;
 
     private readonly FileLog _launcherLog;
@@ -66,9 +72,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly HttpClient _updaterHttp;
 
+    private readonly FileLog _appUpdateLog;
+
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -91,6 +99,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _guardLog = guardLog;
         Diagnostics = diagnostics;
         Logs = logs;
+        AppUpdate = appUpdate;
+        _appUpdateLog = appUpdateLog;
         _allLogs = allLogs;
     }
 
@@ -219,8 +229,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guardLog,
             ct => ChainHealthAsync(config, ct));
 
+        var appUpdateLog = NewLog("appupdate.log");
+        var appUpdate = new AppUpdateChecker(
+            Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0),
+            new GitHubAppReleaseFeed(),
+            appUpdateLog);
+
         var logs = new LogStore(config.Logging.Directory);
-        var allLogs = new List<FileLog> { log, chainLog, launcherLog, browserLog, watchdogLog, updaterLog, guardLog };
+        var allLogs = new List<FileLog> { log, chainLog, launcherLog, browserLog, watchdogLog, updaterLog, guardLog, appUpdateLog };
         var diagnostics = new DiagnosticsService(
             config,
             chain,
@@ -231,7 +247,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guard.GetCoreStatusAsync,
             logs);
 
-        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, allLogs);
+        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
@@ -299,6 +315,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _watchdogLog.Dispose();
         _updaterLog.Dispose();
         _guardLog.Dispose();
+        _appUpdateLog.Dispose();
         _updaterHttp.Dispose();
         Log.Dispose();
     }

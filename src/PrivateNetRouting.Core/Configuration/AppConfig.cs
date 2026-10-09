@@ -37,6 +37,13 @@ public sealed class UiConfig
     /// </summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 
+    /// <summary>
+    /// One check at GUI start whether an update of the application itself is available (GitHub
+    /// releases of the repository, no chain and no UAC); if there is one — an offer to open the
+    /// releases page.
+    /// </summary>
+    public bool CheckAppUpdatesOnStart { get; set; } = true;
+
     /// <summary>Chain card of the main window: false — collapsed to the compact status row.</summary>
     public bool ChainCardExpanded { get; set; } = true;
 

@@ -134,6 +134,7 @@ public partial class App : Application
         }
 
         _ = RunStartupUpdateCheckAsync(window);
+        _ = RunStartupAppUpdateCheckAsync(window);
     }
 
     private static bool TryRunElevatedHelper(string[] args, out int exitCode)
@@ -251,6 +252,29 @@ public partial class App : Application
         catch (Exception ex)
         {
             _runtime.Updater.Log.Warn($"startup update check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// One-time app self-update check on start (ui.checkAppUpdatesOnStart): the repository's
+    /// GitHub releases against the running version — no chain and no proxy needed. A newer
+    /// release — an offer to open the releases page; a failure is logged quietly.
+    /// </summary>
+    private async Task RunStartupAppUpdateCheckAsync(MainWindow window)
+    {
+        if (_runtime is null || !_runtime.Config.Ui.CheckAppUpdatesOnStart)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await window.OfferAppUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            _runtime.AppUpdate.Log?.Warn($"startup self-update check failed: {ex.Message}");
         }
     }
 

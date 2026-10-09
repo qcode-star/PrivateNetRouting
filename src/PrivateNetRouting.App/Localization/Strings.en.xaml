@@ -199,6 +199,7 @@
     <s:String x:Key="Main.Help">Help</s:String>
     <s:String x:Key="Main.Help.Diagnostics">Diagnostics…</s:String>
     <s:String x:Key="Main.Help.OpenLogs">Open logs</s:String>
+    <s:String x:Key="Main.Help.CheckUpdates">Check for updates…</s:String>
     <s:String x:Key="Main.Help.About">About</s:String>
 
     <!-- About window (the "?" help menu) -->
@@ -207,6 +208,12 @@
     <s:String x:Key="Main.About.Tagline">Local proxy with DoH resolution, a proxy chain supervisor, a Claude launcher, idle auto-stop and direct-access guards.</s:String>
     <s:String x:Key="Main.About.VersionFmt">version {0}</s:String>
     <s:String x:Key="Main.About.Close">Close</s:String>
+
+    <!-- App self-update (the help menu item and the one-time start check) -->
+    <s:String x:Key="SelfUpdate.Title">PrivateNetRouting update</s:String>
+    <s:String x:Key="SelfUpdate.AvailableFmt">Version {0} is available (installed: {1}). Open the releases page?</s:String>
+    <s:String x:Key="SelfUpdate.UpToDateFmt">The installed version {0} is the latest one.</s:String>
+    <s:String x:Key="SelfUpdate.FailedFmt">The update check failed: {0}</s:String>
 
     <!-- Diagnostics window (read-only live state summary) -->
     <s:String x:Key="Diag.Title">Diagnostics</s:String>

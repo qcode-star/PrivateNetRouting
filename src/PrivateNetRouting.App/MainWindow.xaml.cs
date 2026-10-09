@@ -11,6 +11,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
+using PrivateNetRouting.Core.AppUpdate;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
@@ -1117,6 +1118,7 @@ public partial class MainWindow : Window
         };
         menu.Items.Add(MakeHelpItem("Main.Help.Diagnostics", OnDiagnostics));
         menu.Items.Add(MakeHelpItem("Main.Help.OpenLogs", OnOpenLogs));
+        menu.Items.Add(MakeHelpItem("Main.Help.CheckUpdates", OnCheckAppUpdates));
         menu.Items.Add(new Separator());
         menu.Items.Add(MakeHelpItem("Main.Help.About", OnAbout));
         HelpButton.ContextMenu = menu;
@@ -1174,6 +1176,95 @@ public partial class MainWindow : Window
         _diagnosticsWindow.Closed += (_, _) => _diagnosticsWindow = null;
         _diagnosticsWindow.Show();
     }
+
+    /// <summary>
+    /// App self-update check from the help menu: the repository's GitHub releases against the
+    /// running version — no chain and no proxy needed. A newer release — an offer to open the
+    /// releases page; up to date or failed — a message box. The item is disabled while checking.
+    /// </summary>
+    private async void OnCheckAppUpdates(object sender, RoutedEventArgs e)
+    {
+        var menuItem = sender as MenuItem;
+        if (menuItem is not null)
+        {
+            menuItem.IsEnabled = false;
+        }
+
+        try
+        {
+            var check = await _runtime.AppUpdate.CheckAsync(CancellationToken.None);
+            if (check.HasUpdate)
+            {
+                if (AskOpenReleases(check))
+                {
+                    OpenReleasesPage();
+                }
+            }
+            else
+            {
+                MessageBox.Show(
+                    this,
+                    Loc.F("SelfUpdate.UpToDateFmt", check.Current),
+                    Loc.S("SelfUpdate.Title"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            _runtime.AppUpdate.Log?.Warn($"self-update check failed: {ex.Message}");
+            MessageBox.Show(
+                this,
+                Loc.F("SelfUpdate.FailedFmt", ex.Message),
+                Loc.S("SelfUpdate.Title"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (menuItem is not null)
+            {
+                menuItem.IsEnabled = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The startup offer: a newer release — a question dialog, "yes" opens the releases page in
+    /// the browser. Quiet when up to date; a failure is logged (nothing bothers the user on start).
+    /// </summary>
+    public async Task OfferAppUpdateAsync()
+    {
+        AppUpdateCheck check;
+        try
+        {
+            check = await _runtime.AppUpdate.CheckAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _runtime.AppUpdate.Log?.Warn($"self-update check failed: {ex.Message}");
+            return;
+        }
+
+        if (check.HasUpdate && AskOpenReleases(check))
+        {
+            OpenReleasesPage();
+        }
+    }
+
+    private bool AskOpenReleases(AppUpdateCheck check)
+    {
+        var answer = MessageBox.Show(
+            this,
+            Loc.F("SelfUpdate.AvailableFmt", check.Latest, check.Current),
+            Loc.S("SelfUpdate.Title"),
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        return answer == MessageBoxResult.Yes;
+    }
+
+    private static void OpenReleasesPage() =>
+        Process.Start(new ProcessStartInfo(AppUpdateChecker.ReleasesPageUrl) { UseShellExecute = true });
 
     /// <summary>
     /// Fills the language selector: a drawn flag + the short code per language, then "system"

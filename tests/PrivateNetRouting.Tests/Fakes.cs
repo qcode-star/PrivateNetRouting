@@ -1,4 +1,5 @@
 using System.Net;
+using PrivateNetRouting.Core.AppUpdate;
 using PrivateNetRouting.Core.Net.Dns;
 using PrivateNetRouting.Core.SystemOps;
 
@@ -41,5 +42,19 @@ internal sealed class FakeResolver(Func<string, ResolveResult>? factory = null) 
     {
         Calls++;
         return Task.FromResult(_factory(host));
+    }
+}
+
+/// <summary>Release feed with a canned answer: a fixed release, a fixed error, or "nothing".</summary>
+internal sealed class FakeAppReleaseFeed((string Tag, string Url)? release, Exception? error = null) : IAppReleaseFeed
+{
+    public int Calls { get; private set; }
+
+    public Task<(string Tag, string Url)?> GetLatestReleaseAsync(CancellationToken ct)
+    {
+        Calls++;
+        return error is not null
+            ? Task.FromException<(string Tag, string Url)?>(error)
+            : Task.FromResult(release);
     }
 }

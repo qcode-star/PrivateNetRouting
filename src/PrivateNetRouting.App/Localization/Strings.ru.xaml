@@ -199,6 +199,7 @@
     <s:String x:Key="Main.Help">Справка</s:String>
     <s:String x:Key="Main.Help.Diagnostics">Диагностика…</s:String>
     <s:String x:Key="Main.Help.OpenLogs">Открыть логи</s:String>
+    <s:String x:Key="Main.Help.CheckUpdates">Проверить обновления…</s:String>
     <s:String x:Key="Main.Help.About">О программе</s:String>
 
     <!-- About window (the "?" help menu) -->
@@ -207,6 +208,12 @@
     <s:String x:Key="Main.About.Tagline">Локальный прокси с DoH-разрешением имён, супервизор прокси-цепочки, запуск Claude, автостоп по простою и контроль прямого доступа.</s:String>
     <s:String x:Key="Main.About.VersionFmt">версия {0}</s:String>
     <s:String x:Key="Main.About.Close">Закрыть</s:String>
+
+    <!-- App self-update (the help menu item and the one-time start check) -->
+    <s:String x:Key="SelfUpdate.Title">Обновление PrivateNetRouting</s:String>
+    <s:String x:Key="SelfUpdate.AvailableFmt">Доступна версия {0} (установлена: {1}). Открыть страницу релизов?</s:String>
+    <s:String x:Key="SelfUpdate.UpToDateFmt">Установлена последняя версия ({0}).</s:String>
+    <s:String x:Key="SelfUpdate.FailedFmt">Не удалось проверить обновления: {0}</s:String>
 
     <!-- Diagnostics window (read-only live state summary) -->
     <s:String x:Key="Diag.Title">Диагностика</s:String>
