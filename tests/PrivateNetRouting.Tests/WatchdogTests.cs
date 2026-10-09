@@ -83,7 +83,7 @@ public class WatchdogTests : IDisposable
     public async Task DistroNotRunningSkipsBash()
     {
         var wsl = new FakeWsl([]) { ListResponse = "Ubuntu\r\n" };
-        var stopper = new WslClaudeHostStopper("debian", wsl);
+        var stopper = new WslClaudeHostStopper("pnr-test", wsl);
 
         var result = await stopper.StopAsync(CancellationToken.None);
 
@@ -95,8 +95,8 @@ public class WatchdogTests : IDisposable
     [Fact]
     public async Task DistroListingNulsAreStripped()
     {
-        var wsl = new FakeWsl([]) { ListResponse = "deb\0ian\r\n" }; // UTF-16LE-like junk
-        var stopper = new WslClaudeHostStopper("debian", wsl);
+        var wsl = new FakeWsl([]) { ListResponse = "pnr\0-test\r\n" }; // UTF-16LE-like junk
+        var stopper = new WslClaudeHostStopper("pnr-test", wsl);
 
         await stopper.StopAsync(CancellationToken.None);
 
@@ -180,7 +180,7 @@ public class WatchdogTests : IDisposable
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
-        IWslClaudeHost? host = wsl is null ? null : new WslClaudeHostStopper("debian", wsl);
+        IWslClaudeHost? host = wsl is null ? null : new WslClaudeHostStopper("pnr-test", wsl);
         return new WatchdogService(
             new WatchdogConfig { CheckSeconds = 600 },
             usage,
@@ -234,7 +234,7 @@ public class WatchdogTests : IDisposable
     {
         public List<string> Calls { get; } = [];
 
-        public string ListResponse { get; set; } = "debian\r\n";
+        public string ListResponse { get; set; } = "pnr-test\r\n";
 
         public string BashResponse { get; set; } = "STOP pid=1 -> ok\nREMAIN=0\nSTATE=stopped\n";
 
@@ -247,7 +247,7 @@ public class WatchdogTests : IDisposable
             }
 
             events.Add("wsl.stop");
-            Assert.Equal("-d debian -- bash -s", string.Join(' ', arguments));
+            Assert.Equal("-d pnr-test -- bash -s", string.Join(' ', arguments));
             return Task.FromResult(BashResponse);
         }
     }
