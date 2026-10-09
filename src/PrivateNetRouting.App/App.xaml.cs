@@ -187,7 +187,8 @@ public partial class App : Application
 
     /// <summary>
     /// Background Claude update check on startup (ui.checkUpdatesOnStart): read-only of
-    /// versions and the AppX journal — without bringing up the chain and without UAC. If there
+    /// versions, the update feed (only when the proxy is already alive) and the AppX journal —
+    /// without bringing up the chain and without UAC. If there
     /// is something to install — a line in the main window and a tray balloon; a failure is
     /// written quietly to the updater log.
     /// </summary>

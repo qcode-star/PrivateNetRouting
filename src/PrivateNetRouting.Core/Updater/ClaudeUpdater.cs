@@ -73,6 +73,7 @@ public sealed class ClaudeUpdater(
     Func<CancellationToken, Task<bool>> healthCheck,
     IAppxPackageSource appx,
     IUpdateUrlFinder urlFinder,
+    IUpdateUrlFinder? feedUrlFinder,
     IMsixDownloader downloader,
     ActivityMarker activityMarker,
     IClaudeProcessSource claudeProcesses,
@@ -88,7 +89,7 @@ public sealed class ClaudeUpdater(
 
     public bool IsClaudeRunning() => claudeProcesses.Find(config.Updater.ClaudeProcessName).Count > 0;
 
-    /// <summary>Step "Version check": installed package, URL from the journal (or manual), comparison.</summary>
+    /// <summary>Step "Version check": installed package, URL from the feed/journal (or manual), comparison.</summary>
     public async Task<UpdateCheckResult> CheckAsync(UpdateOptions options, CancellationToken ct)
     {
         var installed = await appx.GetInstalledAsync(config.Updater.PackageName, ct);
@@ -97,12 +98,32 @@ public sealed class ClaudeUpdater(
             return new UpdateCheckResult(null, null, null, UpToDate: false);
         }
 
-        var url = options.ManualUrl ?? await urlFinder.FindLatestPackageUrlAsync(ct);
+        var url = await FindPackageUrlAsync(options, installed.Version, ct);
         var offered = url is null ? null : PackageUrl.ParseOfferedVersion(url);
 
         // version formats differ: the URL has 2.26454.2, the package has 2.26454.2.0 — compare by prefix
         var upToDate = offered is not null && installed.Version.StartsWith(offered, StringComparison.Ordinal);
         return new UpdateCheckResult(installed, url, offered, upToDate);
+    }
+
+    /// <summary>
+    /// Package address, in order: manual; the update feed (only when the proxy is already
+    /// alive — the check never brings the chain up and asks for no UAC); the AppX journal.
+    /// </summary>
+    private async Task<string?> FindPackageUrlAsync(UpdateOptions options, string installedVersion, CancellationToken ct)
+    {
+        if (options.ManualUrl is not null)
+        {
+            return options.ManualUrl;
+        }
+
+        string? url = null;
+        if (feedUrlFinder is not null && await healthCheck(ct))
+        {
+            url = await feedUrlFinder.FindLatestPackageUrlAsync(installedVersion, ct);
+        }
+
+        return url ?? await urlFinder.FindLatestPackageUrlAsync(installedVersion, ct);
     }
 
     /// <summary>Step "Chain": live CONNECT roundtrip; on failure an idempotent bring-up (UAC possible).</summary>
@@ -233,25 +254,30 @@ public sealed class ClaudeUpdater(
             return new UpdateRunResult(UpdateOutcome.UpToDate, check.Installed, check.Installed, null, null);
         }
 
-        if (check.PackageUrl is null)
+        var packageUrl = check.PackageUrl;
+        if (packageUrl is null)
         {
-            throw new IOException(
-                "package URL not found: the AppX journal has no fresh address. Launch Claude Desktop — its updater " +
-                "leaves one about once an hour — or pass the URL explicitly (--url)");
+            // neither source has an address without the chain (the feed is unreachable, the
+            // journal is empty): the run raises the chain anyway — then the feed answers
+            await EnsureChainAsync(chainProgress, progress, ct);
+            packageUrl = await FindPackageUrlAsync(options, check.Installed.Version, ct)
+                ?? throw new IOException(
+                    "package URL not found: the update feed gave nothing and the AppX journal has no fresh address. " +
+                    "Pass the URL explicitly (--url)");
         }
 
         await EnsureChainAsync(chainProgress, progress, ct);
-        var file = await DownloadAsync(check.PackageUrl, progress, ct);
+        var file = await DownloadAsync(packageUrl, progress, ct);
         await VerifyAsync(file, ct);
         if (options.DownloadOnly)
         {
             progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"package ready: {file}"));
-            return new UpdateRunResult(UpdateOutcome.Downloaded, check.Installed, check.Installed, file, check.PackageUrl);
+            return new UpdateRunResult(UpdateOutcome.Downloaded, check.Installed, check.Installed, file, packageUrl);
         }
 
         var after = await InstallAsync(file, options, progress, ct);
         progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} -> {after.Version}"));
-        return new UpdateRunResult(UpdateOutcome.Installed, check.Installed, after, file, check.PackageUrl);
+        return new UpdateRunResult(UpdateOutcome.Installed, check.Installed, after, file, packageUrl);
     }
 
     /// <summary>Closing Claude: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>

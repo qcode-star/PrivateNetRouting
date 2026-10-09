@@ -212,17 +212,29 @@ public sealed class WatchdogConfig
 }
 
 /// <summary>
-/// Manual Claude Desktop update (MSIX): installed version, package URL from the AppX journal
-/// (or manual), multithreaded chunked download through the proxy chain, Publisher
-/// verification, closing Claude and Add-AppxPackage.
+/// Manual Claude Desktop update (MSIX): installed version, package URL from Claude's own
+/// update feed or the AppX journal (or manual), multithreaded chunked download through the
+/// proxy chain, Publisher verification, closing Claude and Add-AppxPackage.
 /// </summary>
 public sealed class UpdaterConfig
 {
     /// <summary>MSIX package name of Claude Desktop (Get-AppxPackage -Name).</summary>
     public string PackageName { get; set; } = "Claude";
 
-    /// <summary>Package distribution host (a public Anthropic constant; the URL is looked up in the AppX journal).</summary>
+    /// <summary>Package distribution host (a public Anthropic constant; feed and journal URLs are filtered by it).</summary>
     public string PackageHost { get; set; } = "downloads.claude.ai";
+
+    /// <summary>
+    /// Claude's own update feed (a public Anthropic constant — the same endpoint its built-in
+    /// updater polls): asking it returns the latest .msix address at once, without waiting
+    /// until the built-in updater leaves one in the AppX journal. Reachable only through the
+    /// proxy chain — the lookup runs only when the chain is already alive. Empty — do not ask
+    /// the feed (the journal lookup stays).
+    /// </summary>
+    public string UpdateFeedUrl { get; set; } = "https://api.anthropic.com/api/desktop/win32/x64/msix/update";
+
+    /// <summary>Timeout of one update feed request, sec.</summary>
+    public int FeedTimeoutSeconds { get; set; } = 15;
 
     /// <summary>Cache of packages and download chunks; environment variables are expanded.</summary>
     public string CacheDir { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\update-cache";

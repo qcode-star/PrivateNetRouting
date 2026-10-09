@@ -516,7 +516,7 @@ internal static class Program
 
             Console.WriteLine($"installed: {check.Installed.Version}");
             Console.WriteLine(check.PackageUrl is null
-                ? "offered:    no fresh package URL in the AppX journal (launch Claude Desktop or pass --url)"
+                ? "offered:    no package URL from the update feed or the AppX journal (raise the chain or pass --url)"
                 : $"offered:    {check.OfferedVersion}  ({check.PackageUrl})");
             Console.WriteLine(check.UpToDate ? "up to date — nothing to do" : "update available");
             return 0;

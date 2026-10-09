@@ -161,10 +161,10 @@
     <s:String x:Key="Update.Step.Chain">Прокси-цепочка</s:String>
     <s:String x:Key="Update.Step.Download">Скачивание</s:String>
     <s:String x:Key="Update.Step.Install">Установка</s:String>
-    <s:String x:Key="Update.Check.Running">смотрю установленную версию и журнал AppX</s:String>
+    <s:String x:Key="Update.Check.Running">смотрю установленную версию, ленту обновлений и журнал AppX</s:String>
     <s:String x:Key="Update.Check.UpToDateFmt">Установлено {0} — версия актуальна, ставить нечего.</s:String>
     <s:String x:Key="Update.Check.AvailableFmt">Установлено {0} → предлагается {1}</s:String>
-    <s:String x:Key="Update.Check.NoUrl">Адрес пакета не найден в журнале AppX. Запусти Claude Desktop — его апдейтер примерно раз в час оставляет свежий адрес в журнале; или вставь адрес пакета (.msix) ниже.</s:String>
+    <s:String x:Key="Update.Check.NoUrl">Адрес пакета не дали ни лента обновлений, ни журнал AppX — скорее всего, цепочка не поднята. Подними цепочку и повтори, или вставь адрес пакета (.msix) ниже.</s:String>
     <s:String x:Key="Update.Check.InvalidUrl">По этому адресу нет .msix-пакета — вставь другой.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop не установлен как MSIX-пакет — обновлять нечего.</s:String>
     <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>

@@ -161,10 +161,10 @@
     <s:String x:Key="Update.Step.Chain">Proxy chain</s:String>
     <s:String x:Key="Update.Step.Download">Download</s:String>
     <s:String x:Key="Update.Step.Install">Install</s:String>
-    <s:String x:Key="Update.Check.Running">checking the installed version and the AppX journal</s:String>
+    <s:String x:Key="Update.Check.Running">checking the installed version, the update feed and the AppX journal</s:String>
     <s:String x:Key="Update.Check.UpToDateFmt">Installed {0} — the version is up to date, nothing to install.</s:String>
     <s:String x:Key="Update.Check.AvailableFmt">Installed {0} → offered {1}</s:String>
-    <s:String x:Key="Update.Check.NoUrl">The package URL was not found in the AppX journal. Launch Claude Desktop: its updater leaves a fresh address in the journal about once an hour. Or paste the package address (.msix) below.</s:String>
+    <s:String x:Key="Update.Check.NoUrl">Neither the update feed nor the AppX journal offered a package address — the chain is probably down. Raise the chain and retry, or paste the package address (.msix) below.</s:String>
     <s:String x:Key="Update.Check.InvalidUrl">This address does not point to an .msix package — paste another one.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop is not installed as an MSIX package — there is nothing to update.</s:String>
     <s:String x:Key="Update.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>

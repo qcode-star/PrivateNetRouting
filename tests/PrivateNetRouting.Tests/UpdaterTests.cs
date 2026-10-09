@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
@@ -42,22 +43,29 @@ public class UpdaterTests : IDisposable
         _marker = new ActivityMarker(Path.Combine(_root, "activity"), TimeSpan.Zero);
     }
 
+    private FakeUrlFinder _journal = null!;
+
     private ClaudeUpdater Create(
         bool healthy = true,
         string? journalUrl = null,
+        IUpdateUrlFinder? feed = null,
         Func<bool>? health = null,
-        Func<string, long>? freeSpace = null) =>
-        new(
+        Func<string, long>? freeSpace = null)
+    {
+        _journal = new FakeUrlFinder(journalUrl ?? JournalUrl.ToString());
+        return new ClaudeUpdater(
             _config,
             _chain,
             _ => Task.FromResult(health is not null ? health() : healthy),
             _appx,
-            new FakeUrlFinder(journalUrl ?? JournalUrl.ToString()),
+            _journal,
+            feed,
             _downloader,
             _marker,
             _claude,
             _log,
             freeSpace);
+    }
 
     // --- Version check ---
 
@@ -108,6 +116,58 @@ public class UpdaterTests : IDisposable
         Assert.Contains("2.26460.0", check.PackageUrl);
     }
 
+    [Fact]
+    public async Task CheckPrefersFeedWhenProxyAlive()
+    {
+        var feed = new FakeUrlFinder("https://downloads.claude.ai/releases/win32/x64/2.26456.0/Claude-feed.msix");
+        var updater = Create(healthy: true, feed: feed);
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.Equal("2.26456.0", check.OfferedVersion);
+        Assert.Equal(1, feed.Calls);
+        Assert.Equal(0, _journal.Calls);
+    }
+
+    [Fact]
+    public async Task CheckSkipsFeedAndFallsBackToJournalWhenProxyDead()
+    {
+        var feed = new FakeUrlFinder("https://downloads.claude.ai/releases/win32/x64/2.26456.0/Claude-feed.msix");
+        var updater = Create(healthy: false, feed: feed);
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.Equal(0, feed.Calls);
+        Assert.Equal(1, _journal.Calls);
+        Assert.Equal("2.26455.1", check.OfferedVersion);
+    }
+
+    [Fact]
+    public async Task CheckFallsBackToJournalWhenFeedGivesNothing()
+    {
+        var updater = Create(healthy: true, feed: new FakeUrlFinder(url: null));
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.Equal(1, _journal.Calls);
+        Assert.Equal("2.26455.1", check.OfferedVersion);
+    }
+
+    [Fact]
+    public async Task ManualUrlConsultsNeitherFeedNorJournal()
+    {
+        var feed = new FakeUrlFinder("https://downloads.claude.ai/releases/win32/x64/2.26456.0/Claude-feed.msix");
+        var updater = Create(healthy: true, feed: feed);
+
+        var check = await updater.CheckAsync(
+            new UpdateOptions { ManualUrl = "https://downloads.claude.ai/releases/win32/x64/2.26460.0/Claude-new.msix" },
+            CancellationToken.None);
+
+        Assert.Equal(0, feed.Calls);
+        Assert.Equal(0, _journal.Calls);
+        Assert.Equal("2.26460.0", check.OfferedVersion);
+    }
+
     // --- Full cycle (CLI) ---
 
     [Fact]
@@ -125,16 +185,31 @@ public class UpdaterTests : IDisposable
     }
 
     [Fact]
-    public async Task MissingUrlFailsWithHintToLaunchClaude()
+    public async Task MissingUrlFailsAfterChainRaiseWithHintToPassUrl()
     {
         var updater = new ClaudeUpdater(
             _config, _chain, _ => Task.FromResult(true),
-            _appx, new FakeUrlFinder(url: null), _downloader, _marker, _claude, _log);
+            _appx, new FakeUrlFinder(url: null), feedUrlFinder: null, _downloader, _marker, _claude, _log);
 
         var error = await Assert.ThrowsAsync<IOException>(() =>
             updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
 
         Assert.Contains("package URL not found", error.Message);
+    }
+
+    [Fact]
+    public async Task RunRaisesChainToAskFeedWhenUrlMissing()
+    {
+        // both sources are silent on a dead chain (the feed is skipped, the journal is empty);
+        // the raise is needed for the URL itself — then the feed answers and the run proceeds
+        var feed = new FakeUrlFinder("https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-feed.msix");
+        var updater = Create(health: () => _chain.EnsureCalls > 0, journalUrl: null, feed: feed);
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.Installed, result.Outcome);
+        Assert.Equal(1, _chain.EnsureCalls); // the second EnsureChainAsync sees a live chain and is a no-op
+        Assert.Single(_downloader.Downloads);
     }
 
     [Fact]
@@ -384,6 +459,60 @@ public class UpdaterTests : IDisposable
         Assert.Equal(expected, PackageUrl.ParseOfferedVersion(url));
     }
 
+    [Fact]
+    public void FeedManifestYieldsCurrentReleaseUrl()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {"currentRelease":"2.31226.1","releases":[{"version":"2.31226.1","updateTo":{
+              "name":"Claude 2.31226.1","version":"2.31226.1","pub_date":"2026-10-09T18:47:13.771693",
+              "url":"https://downloads.claude.ai/releases/win32/x64/2.31226.1/Claude-abc.msix",
+              "notes":"Production Release - No Notes"}}]}
+            """);
+
+        Assert.Equal(
+            "https://downloads.claude.ai/releases/win32/x64/2.31226.1/Claude-abc.msix",
+            UpdateFeedUrlFinder.ExtractLatestUrl(doc.RootElement, "downloads.claude.ai"));
+    }
+
+    [Fact]
+    public void FeedManifestPrefersCurrentReleaseAmongMany()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {"currentRelease":"2.2","releases":[
+              {"version":"2.1","updateTo":{"url":"https://downloads.claude.ai/releases/win32/x64/2.1/Claude-one.msix"}},
+              {"version":"2.2","updateTo":{"url":"https://downloads.claude.ai/releases/win32/x64/2.2/Claude-two.msix"}}]}
+            """);
+
+        Assert.Equal(
+            "https://downloads.claude.ai/releases/win32/x64/2.2/Claude-two.msix",
+            UpdateFeedUrlFinder.ExtractLatestUrl(doc.RootElement, "downloads.claude.ai"));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"releases\":[]}")]
+    [InlineData("{\"releases\":[{\"version\":\"2.2\",\"updateTo\":{\"url\":\"https://evil.example.com/x.msix\"}}]}")]
+    [InlineData("{\"releases\":[{\"version\":\"2.2\",\"updateTo\":{\"url\":\"https://downloads.claude.ai/x.zip\"}}]}")]
+    [InlineData("{\"releases\":[{\"version\":\"2.2\"}]}")]
+    public void FeedManifestWithoutUsableUrlYieldsNull(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Null(UpdateFeedUrlFinder.ExtractLatestUrl(doc.RootElement, "downloads.claude.ai"));
+    }
+
+    [Fact]
+    public async Task FeedDisabledByEmptyUrlYieldsNothingWithoutRequests()
+    {
+        _config.Updater.UpdateFeedUrl = "";
+        using var http = new System.Net.Http.HttpClient();
+        var finder = new UpdateFeedUrlFinder(http, _config.Updater, _log);
+
+        Assert.Null(await finder.FindLatestPackageUrlAsync("2.26454.2.0", CancellationToken.None));
+    }
+
     [Theory]
     [InlineData("https://downloads.claude.ai/x/Claude-a.msix?sig=123", "Claude-a.msix")]
     [InlineData("https://downloads.claude.ai/x/Claude-a.zip", "")]
@@ -534,7 +663,13 @@ public class UpdaterTests : IDisposable
 
     private sealed class FakeUrlFinder(string? url) : IUpdateUrlFinder
     {
-        public Task<string?> FindLatestPackageUrlAsync(CancellationToken ct) => Task.FromResult(url);
+        public int Calls { get; private set; }
+
+        public Task<string?> FindLatestPackageUrlAsync(string? installedVersion, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(url);
+        }
     }
 
     private sealed class FakeDownloader : IMsixDownloader

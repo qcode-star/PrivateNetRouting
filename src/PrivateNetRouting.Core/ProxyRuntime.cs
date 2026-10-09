@@ -201,6 +201,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             ct => ChainHealthAsync(config, ct),
             new PowerShellAppxPackageSource(powershell, updaterLog),
             new PowerShellJournalUrlFinder(config.Updater, powershell, updaterLog),
+            new UpdateFeedUrlFinder(updaterHttp, config.Updater, updaterLog),
             new FragmentDownloader(updaterHttp, config.Updater, updaterLog),
             marker,
             new RunningClaudeProcessSource(),
