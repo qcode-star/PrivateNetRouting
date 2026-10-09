@@ -27,9 +27,9 @@
     <!-- Collapsed/expanded card states -->
     <s:String x:Key="Main.Card.Expand">Expand</s:String>
     <s:String x:Key="Main.Card.Collapse">Collapse</s:String>
-    <s:String x:Key="Main.Rail.Daemon">Sidecar daemon</s:String>
-    <s:String x:Key="Main.Rail.Keeper">Keeper</s:String>
-    <s:String x:Key="Main.Rail.Node">Tailscale node</s:String>
+    <s:String x:Key="Main.Rail.Daemon">tailscaled</s:String>
+    <s:String x:Key="Main.Rail.Keeper">tailscale watch-ipn</s:String>
+    <s:String x:Key="Main.Rail.Node">tailnet</s:String>
     <s:String x:Key="Main.Rail.Proxy">Forward proxy</s:String>
     <s:String x:Key="Main.Rail.Health">CONNECT check</s:String>
     <!-- Stage words while a bring-up runs in the chain card -->
@@ -38,7 +38,7 @@
     <s:String x:Key="Main.Rail.Ready">ready</s:String>
     <s:String x:Key="Main.Rail.Failed">failed</s:String>
     <s:String x:Key="Main.Chain.Skipped">already up</s:String>
-    <s:String x:Key="Main.Chain.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
+    <s:String x:Key="Main.Chain.Hint.Uac">Confirm the UAC prompt: tailscaled starts with administrator rights.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">listening</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">no listener</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">down</s:String>
@@ -168,7 +168,7 @@
     <s:String x:Key="Update.Check.NoUrl">Neither the update feed nor the AppX journal offered a package address — the chain is probably down. Raise the chain and retry, or paste the package address (.msix) below.</s:String>
     <s:String x:Key="Update.Check.InvalidUrl">This address does not point to an .msix package — paste another one.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop is not installed as an MSIX package — there is nothing to update.</s:String>
-    <s:String x:Key="Update.Hint.Uac">Confirm the UAC prompt: the sidecar daemon starts with administrator rights.</s:String>
+    <s:String x:Key="Update.Hint.Uac">Confirm the UAC prompt: tailscaled starts with administrator rights.</s:String>
     <s:String x:Key="Update.Download.RunningFmt">{0} of {1} · {2}/s · {3} left</s:String>
     <s:String x:Key="Update.Download.StalledFmt">No progress for {0} min — the downloader keeps retrying on its own.</s:String>
     <s:String x:Key="Update.Verify.OkFmt">Package verified: {0}; the publisher matches ({1}).</s:String>

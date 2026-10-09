@@ -27,9 +27,9 @@
     <!-- Collapsed/expanded card states -->
     <s:String x:Key="Main.Card.Expand">Развернуть</s:String>
     <s:String x:Key="Main.Card.Collapse">Свернуть</s:String>
-    <s:String x:Key="Main.Rail.Daemon">Демон sidecar</s:String>
-    <s:String x:Key="Main.Rail.Keeper">Кипер</s:String>
-    <s:String x:Key="Main.Rail.Node">Узел tailscale</s:String>
+    <s:String x:Key="Main.Rail.Daemon">tailscaled</s:String>
+    <s:String x:Key="Main.Rail.Keeper">tailscale watch-ipn</s:String>
+    <s:String x:Key="Main.Rail.Node">tailnet</s:String>
     <s:String x:Key="Main.Rail.Proxy">Локальный прокси</s:String>
     <s:String x:Key="Main.Rail.Health">Проверка CONNECT</s:String>
     <!-- Stage words while a bring-up runs in the chain card -->
@@ -38,7 +38,7 @@
     <s:String x:Key="Main.Rail.Ready">готово</s:String>
     <s:String x:Key="Main.Rail.Failed">ошибка</s:String>
     <s:String x:Key="Main.Chain.Skipped">уже работает</s:String>
-    <s:String x:Key="Main.Chain.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>
+    <s:String x:Key="Main.Chain.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">слушает</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">без слушателя</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">нет</s:String>
@@ -168,7 +168,7 @@
     <s:String x:Key="Update.Check.NoUrl">Адрес пакета не дали ни лента обновлений, ни журнал AppX — скорее всего, цепочка не поднята. Подними цепочку и повтори, или вставь адрес пакета (.msix) ниже.</s:String>
     <s:String x:Key="Update.Check.InvalidUrl">По этому адресу нет .msix-пакета — вставь другой.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop не установлен как MSIX-пакет — обновлять нечего.</s:String>
-    <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: демон sidecar запускается с правами администратора.</s:String>
+    <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
     <s:String x:Key="Update.Download.RunningFmt">{0} из {1} · {2}/с · осталось {3}</s:String>
     <s:String x:Key="Update.Download.StalledFmt">Нет прогресса {0} мин — докачка продолжит попытки сама.</s:String>
     <s:String x:Key="Update.Verify.OkFmt">Пакет проверен: {0}; Publisher совпадает ({1}).</s:String>
