@@ -518,7 +518,10 @@ internal static class Program
             Console.WriteLine(check.PackageUrl is null
                 ? "offered:    no package URL from the update feed or the AppX journal (raise the chain or pass --url)"
                 : $"offered:    {check.OfferedVersion}  ({check.PackageUrl})");
-            Console.WriteLine(check.UpToDate ? "up to date — nothing to do" : "update available");
+            // no address known is not "an update exists" — the same rule as the GUI startup check
+            Console.WriteLine(check.UpToDate ? "up to date — nothing to do"
+                : check.OfferedVersion is null ? "update state unknown — no address to compare against"
+                : "update available");
             return 0;
         }
 
