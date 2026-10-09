@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -21,7 +22,8 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Main window: chain status and control, UI language selection.
+/// Main window: chain status and control, the UI language selector (drawn flag + short code),
+/// the help menu of the "?" button (diagnostics, the logs folder, about).
 /// The chain is the single lifecycle object of the window: the chain buttons bring it up
 /// (idempotently — a partially up chain gets its missing links) and stop it. Chain state is polled
 /// less often than the status rows: each poll is a CLI call and a CONNECT roundtrip. All strings
@@ -50,6 +52,7 @@ public partial class MainWindow : Window
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
+    private AboutWindow? _aboutWindow;
     private bool _idleStopBusy;
     private bool _autoStartSyncing;
     private bool _chainCardExpanded;
@@ -694,15 +697,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnCheckChain(object sender, RoutedEventArgs e)
-    {
-        _viewModel.SetCheckResult("Main.Check.Running");
-        var alive = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
-        _viewModel.SetCheckResult(
-            alive ? "Main.Check.AliveFmt" : "Main.Check.DeadFmt",
-            _runtime.Config.ForwardProxy.Listen);
-    }
-
     private async void OnChainUp(object sender, RoutedEventArgs e) => await ChainUpAsync();
 
     private async void OnChainDown(object sender, RoutedEventArgs e) => await ChainDownAsync();
@@ -1110,8 +1104,63 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Diagnostics window, read-only: state summary and log
-    /// viewing; one per application, a repeated click activates the open one.
+    /// The help menu of the header "?" button: diagnostics, the logs folder, about. Built on
+    /// every open, so the words follow the current language. The menu hangs on the button's
+    /// ContextMenu property — a menu held only by a local variable does not survive while open.
+    /// </summary>
+    private void OnHelp(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu
+        {
+            PlacementTarget = HelpButton,
+            Placement = PlacementMode.Bottom,
+        };
+        menu.Items.Add(MakeHelpItem("Main.Help.Diagnostics", OnDiagnostics));
+        menu.Items.Add(MakeHelpItem("Main.Help.OpenLogs", OnOpenLogs));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(MakeHelpItem("Main.Help.About", OnAbout));
+        HelpButton.ContextMenu = menu;
+        menu.IsOpen = true;
+    }
+
+    private static MenuItem MakeHelpItem(string key, RoutedEventHandler onClick)
+    {
+        var item = new MenuItem { Header = Loc.S(key) };
+        item.Click += onClick;
+        return item;
+    }
+
+    /// <summary>Opens the logs folder in Explorer; failures land in the result line.</summary>
+    private void OnOpenLogs(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_runtime.Logs.Directory}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+    }
+
+    /// <summary>The About window: modeless (it holds no state worth blocking the window for),
+    /// one per application — a repeated click activates it.</summary>
+    private void OnAbout(object sender, RoutedEventArgs e)
+    {
+        if (_aboutWindow is not null)
+        {
+            _aboutWindow.Activate();
+            return;
+        }
+
+        _aboutWindow = new AboutWindow { Owner = this };
+        _aboutWindow.Closed += (_, _) => _aboutWindow = null;
+        _aboutWindow.Show();
+    }
+
+    /// <summary>
+    /// Diagnostics window, read-only: the live state summary; one per application,
+    /// a repeated click activates the open one.
     /// </summary>
     private void OnDiagnostics(object sender, RoutedEventArgs e)
     {
@@ -1126,21 +1175,19 @@ public partial class MainWindow : Window
         _diagnosticsWindow.Show();
     }
 
-    /// <summary>Fills the language selector: auto + supported; selection — by the config value.</summary>
+    /// <summary>
+    /// Fills the language selector: a drawn flag + the short code per language, then "system"
+    /// with the globe mark; selection — by the config value, tooltips carry the full names.
+    /// The items are plain data rendered by the item template.
+    /// </summary>
     private void FillLanguages(string preference)
     {
         _fillingLanguages = true;
         var wanted = preference?.Trim().ToLowerInvariant();
-        LanguageBox.Items.Clear();
-        LanguageBox.Items.Add(new ComboBoxItem { Tag = AppLanguage.Auto, Content = Loc.S("Main.Language.Auto") });
-        foreach (var code in AppLanguage.Supported)
-        {
-            LanguageBox.Items.Add(new ComboBoxItem { Tag = code, Content = LanguageDisplayName(code) });
-        }
-
-        LanguageBox.SelectedItem = LanguageBox.Items.OfType<ComboBoxItem>()
-            .FirstOrDefault(item => (string)item.Tag == wanted)
-            ?? LanguageBox.Items[0];
+        var options = new List<LanguageOption> { new(AppLanguage.Auto, "system", Loc.S("Main.Language.Auto")) };
+        options.AddRange(AppLanguage.Supported.Select(code => new LanguageOption(code, code, LanguageDisplayName(code))));
+        LanguageBox.ItemsSource = options;
+        LanguageBox.SelectedItem = options.FirstOrDefault(option => option.Code == wanted) ?? options[0];
         _fillingLanguages = false;
     }
 
@@ -1152,11 +1199,12 @@ public partial class MainWindow : Window
 
     private void OnLanguageSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (_fillingLanguages || LanguageBox.SelectedItem is not ComboBoxItem { Tag: string preference })
+        if (_fillingLanguages || LanguageBox.SelectedItem is not LanguageOption selected)
         {
             return;
         }
 
+        var preference = selected.Code;
         try
         {
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));

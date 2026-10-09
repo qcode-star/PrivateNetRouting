@@ -51,6 +51,15 @@
         <SolidColorBrush x:Key="Brush.ControlPress" Color="#2A2724"/>
         <SolidColorBrush x:Key="Brush.ControlBorder" Color="#423D37"/>
 
+        <!-- ============================= Flags =============================== -->
+        <!-- Identity colours of the drawn language flags (LanguageFlags): the flags' own colours,
+             not theme tokens — a palette change does not touch them -->
+        <SolidColorBrush x:Key="Brush.Flag.White" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="Brush.Flag.UnionBlue" Color="#012169"/>
+        <SolidColorBrush x:Key="Brush.Flag.UnionRed" Color="#C8102E"/>
+        <SolidColorBrush x:Key="Brush.Flag.RussiaBlue" Color="#0039A6"/>
+        <SolidColorBrush x:Key="Brush.Flag.RussiaRed" Color="#D52B1E"/>
+
         <!-- ============================ Typography =========================== -->
         <FontFamily x:Key="Font.Ui">Segoe UI Variable Text, Segoe UI</FontFamily>
         <FontFamily x:Key="Font.Mono">Cascadia Mono, Consolas</FontFamily>
@@ -582,7 +591,59 @@
             </Style.Triggers>
         </Style>
 
-        <!-- ============================= ToolTip ============================= -->
+        <!-- ========================== Context menu =========================== -->
+        <!-- The help menu of the header "?" button and any other popup menu: the same band
+             surface as the combo dropdown, items as flat rows (no submenus anywhere). -->
+        <Style TargetType="ContextMenu">
+            <Setter Property="Foreground" Value="{StaticResource Brush.Text}"/>
+            <Setter Property="FontSize" Value="{StaticResource Font.Body}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{StaticResource Brush.Band}"
+                                BorderBrush="{StaticResource Brush.ControlBorder}" BorderThickness="1"
+                                CornerRadius="{StaticResource Radius.Control}" Margin="6" Padding="4">
+                            <ItemsPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="{StaticResource Brush.Text}"/>
+            <Setter Property="FontSize" Value="{StaticResource Font.Body}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Face" Background="Transparent" CornerRadius="4" Padding="10,8">
+                            <ContentPresenter ContentSource="Header"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Face" Property="Background" Value="{StaticResource Brush.ControlHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Rectangle Height="1" Fill="{StaticResource Brush.Hairline}" Margin="8,4"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============================ ToolTip ============================= -->
         <Style TargetType="ToolTip">
             <Setter Property="Foreground" Value="{StaticResource Brush.Text}"/>
             <Setter Property="FontSize" Value="{StaticResource Font.Caption}"/>

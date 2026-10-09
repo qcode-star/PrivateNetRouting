@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
-using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Diagnostics;
@@ -12,18 +11,16 @@ using PrivateNetRouting.Core.Updater;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Diagnostics window, read-only: state summary (chain processes
-/// and port owners, counters, activity marker, detailed CONNECT roundtrip, policy and ban,
-/// watchdog) and log viewing — a list of files with the selected one's tail, rotation of the
-/// live log by its owner (FileLog.RotateNow). The tail is refreshed by a timer, the summary by a button.
+/// Diagnostics window, read-only: the state summary (chain processes and port owners, counters,
+/// activity marker, detailed CONNECT roundtrip, policy and ban, watchdog), rebuilt on demand —
+/// every probe is live traffic. The log files themselves are one click away: the button opens
+/// their folder in Explorer; the log list and rotation live in the CLI (pnr logs).
 /// </summary>
 public partial class DiagnosticsWindow : Window
 {
     private readonly ProxyRuntime _runtime;
-    private readonly DispatcherTimer _tailTimer;
     private DiagnosticsSummary? _lastSummary;
     private bool _busy;
-    private bool _fillingLogs;
 
     public DiagnosticsWindow(ProxyRuntime runtime)
     {
@@ -33,16 +30,11 @@ public partial class DiagnosticsWindow : Window
         _runtime = runtime;
         Loc.LanguageChanged += OnLanguageChanged;
         RenderTitles();
-        _tailTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _tailTimer.Tick += (_, _) => RefreshLogs();
-        _tailTimer.Start();
         _ = RefreshAsync();
-        RefreshLogs();
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _tailTimer.Stop();
         Loc.LanguageChanged -= OnLanguageChanged;
         base.OnClosed(e);
     }
@@ -61,9 +53,7 @@ public partial class DiagnosticsWindow : Window
         Title = Loc.S("Diag.Title");
         HeaderText.Text = Loc.S("Diag.Header");
         BtnRefresh.Content = Loc.S("Diag.Button.Refresh");
-        BtnOpenFolder.Content = Loc.S("Diag.Button.OpenFolder");
-        BtnRotate.Content = Loc.S("Diag.Button.Rotate");
-        LogsHeaderText.Text = Loc.S("Diag.Section.logs");
+        BtnOpenLogs.Content = Loc.S("Diag.Button.OpenLogs");
     }
 
     /// <summary>The summary is rebuilt on demand and on language change: every probe is live traffic.</summary>
@@ -101,7 +91,7 @@ public partial class DiagnosticsWindow : Window
         SectionsPanel.Children.Clear();
         if (summary.ChainStopped)
         {
-            SectionsPanel.Children.Add(MakeLine(null, Loc.S("Diag.ChainStopped"), DiagMark.Neutral, wrap: true));
+            SectionsPanel.Children.Add(MakeLine(null, Loc.S("Diag.ChainStopped"), DiagMark.Neutral));
             return;
         }
 
@@ -121,13 +111,13 @@ public partial class DiagnosticsWindow : Window
     }
 
     /// <summary>Summary line: a muted label and a monospace value carrying the mark of its state;
-    /// a line without a label is a note in prose.</summary>
-    private static TextBlock MakeLine(string? name, string value, DiagMark mark, bool wrap = false)
+    /// a line without a label is a note in prose. Lines wrap, so long values stay readable.</summary>
+    private static TextBlock MakeLine(string? name, string value, DiagMark mark)
     {
         var block = new TextBlock
         {
             Style = (Style)Application.Current.FindResource(name is null ? "Text.Body" : "Text.Mono"),
-            TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+            TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 3, 0, 3),
         };
         if (name is not null)
@@ -151,100 +141,18 @@ public partial class DiagnosticsWindow : Window
         _ => Theme.Text,
     };
 
-    /// <summary>List of log files preserving the selection; the tail — on selection and by timer.</summary>
-    private void RefreshLogs()
+    private void OnOpenLogs(object sender, RoutedEventArgs e)
     {
-        var selected = (LogsList.SelectedItem as ListBoxItem)?.Tag as LogFileInfo;
-        _fillingLogs = true;
-        LogsList.Items.Clear();
-        foreach (var file in _runtime.Logs.List())
+        try
         {
-            LogsList.Items.Add(new ListBoxItem { Tag = file, Content = MakeLogRow(file) });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_runtime.Logs.Directory}\"") { UseShellExecute = true });
         }
-
-        if (LogsList.Items.Count == 0)
+        catch (Exception ex)
         {
-            LogsList.Items.Add(new ListBoxItem
-            {
-                IsEnabled = false,
-                Content = new TextBlock
-                {
-                    Text = Loc.S("Diag.Logs.Empty"),
-                    Style = (Style)FindResource("Text.Note"),
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            });
-        }
-
-        var restore = LogsList.Items.OfType<ListBoxItem>()
-            .FirstOrDefault(item => item.Tag is LogFileInfo f && f.Name == selected?.Name)
-            ?? LogsList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag is not null);
-        LogsList.SelectedItem = restore;
-        _fillingLogs = false;
-        ShowTail();
-    }
-
-    /// <summary>File row: the name, then size and time as the monospace metadata of the list.</summary>
-    private Grid MakeLogRow(LogFileInfo file)
-    {
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var name = new TextBlock
-        {
-            Text = file.Name,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            ToolTip = file.Name,
-        };
-        var meta = new TextBlock
-        {
-            Text = $"{ByteSize.Format(file.Bytes)} · {file.LastWriteTime:HH:mm}",
-            Style = (Style)FindResource("Text.Mono"),
-            Margin = new Thickness(10, 0, 0, 0),
-        };
-        Grid.SetColumn(meta, 1);
-        row.Children.Add(name);
-        row.Children.Add(meta);
-        return row;
-    }
-
-    private void OnLogSelected(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_fillingLogs)
-        {
-            ShowTail();
+            StatusText.Foreground = Theme.Bad;
+            StatusText.Text = Loc.F("Main.ErrorFmt", ex.Message);
         }
     }
-
-    private void ShowTail()
-    {
-        if (LogsList.SelectedItem is not ListBoxItem { Tag: LogFileInfo info })
-        {
-            TailBox.Clear();
-            return;
-        }
-
-        var tail = _runtime.Logs.ReadTail(info.Name, 200);
-        TailBox.Text = tail is null ? "" : string.Join(Environment.NewLine, tail.Lines);
-        TailBox.ScrollToEnd();
-    }
-
-    /// <summary>Rotation of the selected log: a process's live log — in place, another file — by shifting.</summary>
-    private void OnRotateLog(object sender, RoutedEventArgs e)
-    {
-        if (LogsList.SelectedItem is not ListBoxItem { Tag: LogFileInfo info })
-        {
-            return;
-        }
-
-        var result = _runtime.RotateLog(info.Name);
-        StatusText.Foreground = result.Ok ? Theme.TextSecondary : Theme.Bad;
-        StatusText.Text = $"{info.Name}: {result.Detail}";
-        RefreshLogs();
-    }
-
-    private void OnOpenFolder(object sender, RoutedEventArgs e) =>
-        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_runtime.Logs.Directory}\"") { UseShellExecute = true });
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await RefreshAsync();
 }

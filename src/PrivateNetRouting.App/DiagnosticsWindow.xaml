@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Diagnostics"
-        Width="780" Height="700" MinWidth="620" MinHeight="520"
+        Width="780" Height="620" MinWidth="620" MinHeight="420"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize" ShowInTaskbar="False"
         Background="{StaticResource Brush.Window}" Foreground="{StaticResource Brush.Text}"
         FontFamily="{StaticResource Font.Ui}" FontSize="{StaticResource Font.Body}"
@@ -11,19 +11,23 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="230"/>
         </Grid.RowDefinitions>
 
-        <!-- Header: what the window shows and the two things it can do -->
+        <!-- Header: what the window shows on the left, what it can do on the right —
+             separate columns, so a long title and a busy status never overlap -->
         <Grid Grid.Row="0" Margin="0,0,0,14">
-            <TextBlock x:Name="HeaderText" Style="{StaticResource Text.Title}" VerticalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="HeaderText" Style="{StaticResource Text.Title}" VerticalAlignment="Center"
+                       Margin="0,0,12,0" TextTrimming="CharacterEllipsis"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="StatusText" Style="{StaticResource Text.Caption}" VerticalAlignment="Center"
-                           Margin="0,0,12,0" TextTrimming="CharacterEllipsis" MaxWidth="320"/>
+                           Margin="0,0,12,0" TextTrimming="CharacterEllipsis" MaxWidth="280"/>
                 <Button x:Name="BtnRefresh" MinWidth="110" Click="OnRefresh"/>
-                <Button x:Name="BtnOpenFolder" MinWidth="140" Margin="8,0,0,0" Style="{StaticResource GhostButton}"
-                        Click="OnOpenFolder"/>
+                <Button x:Name="BtnOpenLogs" MinWidth="140" Margin="8,0,0,0" Style="{StaticResource GhostButton}"
+                        Click="OnOpenLogs"/>
             </StackPanel>
         </Grid>
 
@@ -33,24 +37,5 @@
                 <StackPanel x:Name="SectionsPanel" Margin="0,0,8,0"/>
             </ScrollViewer>
         </Border>
-
-        <!-- Logs: the list header and rotation of the selected file -->
-        <Grid Grid.Row="2" Margin="0,16,0,8">
-            <TextBlock x:Name="LogsHeaderText" Style="{StaticResource Text.Section}" VerticalAlignment="Center"/>
-            <Button x:Name="BtnRotate" MinWidth="110" HorizontalAlignment="Right" Style="{StaticResource GhostButton}"
-                    Click="OnRotateLog"/>
-        </Grid>
-
-        <!-- Files (name, size, time) and the tail of the selected one -->
-        <Grid Grid.Row="3">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <ListBox x:Name="LogsList" SelectionChanged="OnLogSelected"/>
-            <TextBox x:Name="TailBox" Grid.Column="1" Margin="12,0,0,0" IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                     TextWrapping="NoWrap" FontFamily="{StaticResource Font.Mono}" FontSize="{StaticResource Font.Caption}"
-                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
-        </Grid>
     </Grid>
 </Window>

@@ -64,8 +64,6 @@
     <s:String x:Key="Main.IdleStop.StoppedManual">idle stop is off</s:String>
 
     <!-- Buttons -->
-    <s:String x:Key="Main.Button.CheckChain">Check chain</s:String>
-    <s:String x:Key="Main.Button.Diagnostics">Diagnostics…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Start</s:String>
     <s:String x:Key="Main.Button.ChainDown">Stop</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
@@ -73,9 +71,6 @@
     <s:String x:Key="Main.Button.UpdateClaude">Update Claude…</s:String>
 
     <!-- Operation results -->
-    <s:String x:Key="Main.Check.Running">checking (CONNECT roundtrip)...</s:String>
-    <s:String x:Key="Main.Check.AliveFmt">chain is alive: CONNECT via {0} succeeded</s:String>
-    <s:String x:Key="Main.Check.DeadFmt">chain is not responding: CONNECT via {0} failed</s:String>
     <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
     <s:String x:Key="Main.Chain.DownDone">chain is stopped</s:String>
     <s:String x:Key="Main.Chain.Busy">operation in progress (confirm UAC if prompted)...</s:String>
@@ -200,12 +195,24 @@
     <s:String x:Key="Main.Language">Language</s:String>
     <s:String x:Key="Main.Language.Auto">System default</s:String>
 
-    <!-- Diagnostics window (read-only state summary + log viewer) -->
+    <!-- Help menu of the "?" button in the header -->
+    <s:String x:Key="Main.Help">Help</s:String>
+    <s:String x:Key="Main.Help.Diagnostics">Diagnostics…</s:String>
+    <s:String x:Key="Main.Help.OpenLogs">Open logs</s:String>
+    <s:String x:Key="Main.Help.About">About</s:String>
+
+    <!-- About window (the "?" help menu) -->
+    <s:String x:Key="Main.About.Title">About PrivateNetRouting</s:String>
+    <s:String x:Key="Main.About.Header">PrivateNetRouting</s:String>
+    <s:String x:Key="Main.About.Tagline">Local proxy with DoH resolution, a proxy chain supervisor, a Claude launcher, idle auto-stop and direct-access guards.</s:String>
+    <s:String x:Key="Main.About.VersionFmt">version {0}</s:String>
+    <s:String x:Key="Main.About.Close">Close</s:String>
+
+    <!-- Diagnostics window (read-only live state summary) -->
     <s:String x:Key="Diag.Title">Diagnostics</s:String>
     <s:String x:Key="Diag.Header">State summary (read-only)</s:String>
     <s:String x:Key="Diag.Button.Refresh">Refresh</s:String>
-    <s:String x:Key="Diag.Button.OpenFolder">Open folder</s:String>
-    <s:String x:Key="Diag.Button.Rotate">Rotate</s:String>
+    <s:String x:Key="Diag.Button.OpenLogs">Open logs</s:String>
     <s:String x:Key="Diag.Busy">collecting (a live CONNECT roundtrip is included)...</s:String>
     <s:String x:Key="Diag.ChainStopped">The chain is stopped — this is normal while Claude is not needed. Raise it with the Claude shortcut or the Launch button.</s:String>
     <s:String x:Key="Diag.Section.chain">Chain</s:String>
@@ -213,6 +220,4 @@
     <s:String x:Key="Diag.Section.health">Health</s:String>
     <s:String x:Key="Diag.Section.guards">Guards</s:String>
     <s:String x:Key="Diag.Section.watchdog">Idle supervisor</s:String>
-    <s:String x:Key="Diag.Section.logs">Logs</s:String>
-    <s:String x:Key="Diag.Logs.Empty">No log files yet.</s:String>
 </ResourceDictionary>

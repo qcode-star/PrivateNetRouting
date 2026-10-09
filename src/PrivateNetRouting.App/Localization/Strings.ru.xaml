@@ -64,8 +64,6 @@
     <s:String x:Key="Main.IdleStop.StoppedManual">автостоп остановлен</s:String>
 
     <!-- Buttons -->
-    <s:String x:Key="Main.Button.CheckChain">Проверить цепочку</s:String>
-    <s:String x:Key="Main.Button.Diagnostics">Диагностика…</s:String>
     <s:String x:Key="Main.Button.ChainUp">Поднять</s:String>
     <s:String x:Key="Main.Button.ChainDown">Остановить</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
@@ -73,9 +71,6 @@
     <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude…</s:String>
 
     <!-- Operation results -->
-    <s:String x:Key="Main.Check.Running">проверяю (CONNECT-roundtrip)...</s:String>
-    <s:String x:Key="Main.Check.AliveFmt">цепочка жива: CONNECT через {0} прошёл</s:String>
-    <s:String x:Key="Main.Check.DeadFmt">цепочка не отвечает: CONNECT через {0} не прошёл</s:String>
     <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>
     <s:String x:Key="Main.Chain.DownDone">цепочка остановлена</s:String>
     <s:String x:Key="Main.Chain.Busy">выполняется операция (подтверди UAC, если появится)...</s:String>
@@ -200,12 +195,24 @@
     <s:String x:Key="Main.Language">Язык</s:String>
     <s:String x:Key="Main.Language.Auto">Как в системе</s:String>
 
-    <!-- Diagnostics window (read-only state summary + log viewer) -->
+    <!-- Help menu of the "?" button in the header -->
+    <s:String x:Key="Main.Help">Справка</s:String>
+    <s:String x:Key="Main.Help.Diagnostics">Диагностика…</s:String>
+    <s:String x:Key="Main.Help.OpenLogs">Открыть логи</s:String>
+    <s:String x:Key="Main.Help.About">О программе</s:String>
+
+    <!-- About window (the "?" help menu) -->
+    <s:String x:Key="Main.About.Title">О PrivateNetRouting</s:String>
+    <s:String x:Key="Main.About.Header">PrivateNetRouting</s:String>
+    <s:String x:Key="Main.About.Tagline">Локальный прокси с DoH-разрешением имён, супервизор прокси-цепочки, запуск Claude, автостоп по простою и контроль прямого доступа.</s:String>
+    <s:String x:Key="Main.About.VersionFmt">версия {0}</s:String>
+    <s:String x:Key="Main.About.Close">Закрыть</s:String>
+
+    <!-- Diagnostics window (read-only live state summary) -->
     <s:String x:Key="Diag.Title">Диагностика</s:String>
     <s:String x:Key="Diag.Header">Сводка состояния (только чтение)</s:String>
     <s:String x:Key="Diag.Button.Refresh">Обновить</s:String>
-    <s:String x:Key="Diag.Button.OpenFolder">Открыть папку</s:String>
-    <s:String x:Key="Diag.Button.Rotate">Ротация</s:String>
+    <s:String x:Key="Diag.Button.OpenLogs">Открыть логи</s:String>
     <s:String x:Key="Diag.Busy">собираю (входит живой CONNECT-roundtrip)...</s:String>
     <s:String x:Key="Diag.ChainStopped">Цепочка остановлена — это норма, пока Claude не нужен. Подъём — ярлыком Claude или кнопкой запуска.</s:String>
     <s:String x:Key="Diag.Section.chain">Цепочка</s:String>
@@ -213,6 +220,4 @@
     <s:String x:Key="Diag.Section.health">Здоровье</s:String>
     <s:String x:Key="Diag.Section.guards">Гарды</s:String>
     <s:String x:Key="Diag.Section.watchdog">Сторож автостопа</s:String>
-    <s:String x:Key="Diag.Section.logs">Логи</s:String>
-    <s:String x:Key="Diag.Logs.Empty">Файлов логов пока нет.</s:String>
 </ResourceDictionary>

@@ -12,8 +12,26 @@
         FontSize="{StaticResource Font.Body}"
         SnapsToDevicePixels="True" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <!-- The language selector's option: a drawn flag mark + the short code; the dropdown and
+             the closed selection box each build their own visuals from this template (a shared
+             UIElement as item content measures wrong). Tooltips live on the item container. -->
+        <DataTemplate x:Key="LanguageOptionTemplate">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="23" Height="16" CornerRadius="2" Background="{StaticResource Brush.Code}"
+                        BorderBrush="{StaticResource Brush.CardBorder}" BorderThickness="1"
+                        VerticalAlignment="Center">
+                    <app:LanguageFlag Code="{Binding Code}"/>
+                </Border>
+                <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+        </DataTemplate>
+        <Style x:Key="LanguageItemStyle" TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <Setter Property="ToolTip" Value="{Binding Hint}"/>
+        </Style>
+    </Window.Resources>
     <!--
-        Reading order: header (subject + language) → the chain (five stages in bring-up order,
+        Reading order: header (subject + language + help) → the chain (five stages in bring-up order,
         its control, the status rows: the proxy listeners with connection counters, the sidecar
         listeners, the config with its actions, the idle stopper) → guards → the launch actions
         → the result line. The body scrolls; the actions and the result line stay put.
@@ -30,7 +48,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header: the subject of the window and the UI language -->
+        <!-- Header: the subject of the window, the UI language (flag + short code, the full
+             name in the tooltip) and the "?" help menu: diagnostics, the logs folder, about -->
         <Border Grid.Row="0" Background="{StaticResource Brush.Band}"
                 BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
             <Grid Margin="24,14">
@@ -46,8 +65,15 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{DynamicResource Main.Language}" Style="{StaticResource Text.Caption}"
                                VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <ComboBox x:Name="LanguageBox" MinWidth="150" SelectionChanged="OnLanguageSelected"
-                              AutomationProperties.Name="{DynamicResource Main.Language}"/>
+                    <ComboBox x:Name="LanguageBox" MinWidth="132" SelectionChanged="OnLanguageSelected"
+                              AutomationProperties.Name="{DynamicResource Main.Language}"
+                              ItemTemplate="{StaticResource LanguageOptionTemplate}"
+                              ItemContainerStyle="{StaticResource LanguageItemStyle}"/>
+                    <Button x:Name="HelpButton" Style="{StaticResource IconButton}" Margin="10,0,0,0"
+                            Click="OnHelp" ToolTip="{DynamicResource Main.Help}"
+                            AutomationProperties.Name="{DynamicResource Main.Help}">
+                        <TextBlock Text="?" FontWeight="SemiBold" FontSize="14"/>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -138,8 +164,7 @@
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="{DynamicResource Main.Listeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Endpoints}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Endpoints}"
-                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                       TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
                                         Margin="0,0,0,8">
                                 <TextBlock Style="{StaticResource Text.Mono}" Text="{DynamicResource Main.Metric.Connections}"
@@ -162,8 +187,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.TailscaleListeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TailscaleListeners}" Style="{StaticResource Text.Mono}"
-                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding TailscaleListeners}"
-                                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                       TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,8"/>
                             <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding TailscaleState}"
                                        Foreground="{Binding TailscaleBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
@@ -274,7 +298,7 @@
                                        Style="{StaticResource Text.Body}" MinWidth="128" VerticalAlignment="Center" Margin="0,0,14,10"/>
                             <TextBlock Grid.Row="0" Grid.Column="2" x:Name="BanState" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" MinWidth="68" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                            <TextBlock Grid.Row="0" Grid.Column="3" x:Name="BanDetail" Text="…" TextTrimming="CharacterEllipsis"
+                            <TextBlock Grid.Row="0" Grid.Column="3" x:Name="BanDetail" Text="…" TextWrapping="Wrap"
                                        Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
                             <StackPanel Grid.Row="0" Grid.Column="4" Orientation="Horizontal" Margin="0,0,0,10">
                                 <Button x:Name="BanOnButton" Content="{DynamicResource Main.Guard.Button.On}" MinWidth="72"
@@ -291,7 +315,7 @@
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
                             <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PolicyState" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="PolicyDetail" Text="…" TextTrimming="CharacterEllipsis"
+                            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="PolicyDetail" Text="…" TextWrapping="Wrap"
                                        Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
                             <StackPanel Grid.Row="1" Grid.Column="4" Orientation="Horizontal" Margin="0,0,0,10">
                                 <Button x:Name="PolicyOnButton" Content="{DynamicResource Main.Guard.Button.On}" MinWidth="72"
@@ -308,7 +332,7 @@
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
                             <TextBlock Grid.Row="2" Grid.Column="2" x:Name="SettingsState" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                            <TextBlock Grid.Row="2" Grid.Column="3" x:Name="SettingsDetail" Text="…" TextTrimming="CharacterEllipsis"
+                            <TextBlock Grid.Row="2" Grid.Column="3" x:Name="SettingsDetail" Text="…" TextWrapping="Wrap"
                                        Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
                             <Button Grid.Row="2" Grid.Column="4" x:Name="SettingsSyncButton" MinWidth="150" Margin="0,0,0,10"
                                     Content="{DynamicResource Main.Guard.Button.Sync}" Style="{StaticResource AccentGhostButton}"
@@ -321,7 +345,7 @@
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,0"/>
                             <TextBlock Grid.Row="3" Grid.Column="2" x:Name="WslState" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <TextBlock Grid.Row="3" Grid.Column="3" x:Name="WslDetail" Text="…" TextTrimming="CharacterEllipsis"
+                            <TextBlock Grid.Row="3" Grid.Column="3" x:Name="WslDetail" Text="…" TextWrapping="Wrap"
                                        Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,0"/>
                             <Button Grid.Row="3" Grid.Column="4" x:Name="WslSyncButton" MinWidth="150"
                                     Content="{DynamicResource Main.Guard.Button.Sync}" Style="{StaticResource AccentGhostButton}"
@@ -334,8 +358,9 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Launch actions: the primary one, then the update; the note next to them is the signal
-             about an update found at startup. The read-only checks sit opposite. -->
+        <!-- Launch actions: the primary one, then the update; the note under them is the signal
+             about an update found at startup. Diagnostics and the logs folder live in the help
+             menu of the "?" button in the header. -->
         <StackPanel Grid.Row="2" Margin="24,16,24,0">
             <StackPanel Orientation="Horizontal">
                 <Button Content="{DynamicResource Main.Button.LaunchClaude}" MinWidth="200" Click="OnLaunchClaude"
@@ -345,17 +370,8 @@
                 <Button Content="{DynamicResource Main.Button.UpdateClaude}" MinWidth="160" Margin="8,0,0,0"
                         Style="{StaticResource SecondaryButton}" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"/>
             </StackPanel>
-            <Grid Margin="0,10,0,0">
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="{DynamicResource Main.Button.CheckChain}" MinWidth="130"
-                            Style="{StaticResource GhostButton}" Click="OnCheckChain"/>
-                    <Button Content="{DynamicResource Main.Button.Diagnostics}" MinWidth="130" Margin="8,0,0,0"
-                            Style="{StaticResource GhostButton}" Click="OnDiagnostics"/>
-                </StackPanel>
-                <TextBlock Text="{Binding UpdateNotice}" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold"
-                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="16,0,0,0"
-                           TextWrapping="Wrap" MaxWidth="300"/>
-            </Grid>
+            <TextBlock Text="{Binding UpdateNotice}" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold"
+                       HorizontalAlignment="Right" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="420"/>
         </StackPanel>
 
         <!-- Result line of the last operation -->

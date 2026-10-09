@@ -16,8 +16,8 @@ and read-only diagnostics. It provides a GUI and a headless CLI. Development rul
 | Watchdog | Idle auto-stop: watches Claude processes, proxy connections and the activity marker; on idle it stops the WSL Claude host and then the chain. Started only explicitly (the toggle in the chain card spawns a detached background worker that keeps working after the application is closed and switches itself off after firing, or run `pnr watchdog` in a terminal). The auto-start flag (on by default) re-arms the stopper after every chain bring-up. |
 | Updater | Manual MSIX update of Claude Desktop: version check before bring-up, package URL from Claude's own update feed (asked through the already-live proxy) with the AppX journal as the fallback, multi-threaded chunked download through the proxy, Publisher verification, `Add-AppxPackage`. A startup check shows an "update available" line in the main window, which the update window's own check or a finished installation clears; the window closes itself 30 s after a successful installation, with a visible countdown. |
 | Guards | Direct-access control: the managed `egressProxyUrl` policy, a local ban (hosts + one NRPT rule + firewall subnet block), Claude Code env on Windows and in WSL, and the WinINET system proxy. Status is read-only; changes go through an elevated helper. |
-| Diagnostics | Read-only state summary (port owners, chain processes, WSL bind, counters, marker, CONNECT roundtrip, guards) plus log list/tail/rotation. |
-| Localization | UI string dictionaries with on-the-fly switching (en/ru; `ui.language` in the config). |
+| Diagnostics | Read-only state summary (port owners, chain processes, WSL bind, counters, marker, CONNECT roundtrip, guards) in a window of its own; the log list/tail/rotation live in the CLI, the window has an "Open logs" button. |
+| Localization | UI string dictionaries with on-the-fly switching (en/ru; `ui.language` in the config); the selector shows a drawn flag mark and the short code (en/ru/system). |
 
 ## Build
 
