@@ -17,7 +17,7 @@ public sealed record BanLiveChecks(
 
 public sealed record BanApplyResult(string Detail, BanLiveChecks Live);
 
-public sealed record SettingsSyncResult(string? BackupPath, string ProxyUrl, string NoProxy);
+public sealed record SettingsSyncResult(bool Written, string? BackupPath, string ProxyUrl, string NoProxy);
 
 public sealed record GuardSnapshot(
     LocalBanStatus Ban,
@@ -207,12 +207,15 @@ public sealed class GuardService(
     public Task<SettingsSyncResult> SyncSettingsAsync(CancellationToken ct) =>
         Task.Run(() =>
         {
-            var backup = settings.Sync();
+            var sync = settings.Sync();
             var outcome = new SettingsSyncResult(
-                backup,
+                sync.Written,
+                sync.BackupPath,
                 ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
                 ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
-            log.Info($"guard settings sync: env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {backup ?? "none"})");
+            log.Info(outcome.Written
+                ? $"guard settings sync: env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
+                : $"guard settings sync: env already up to date (proxy {outcome.ProxyUrl})");
             return outcome;
         }, ct);
 
@@ -227,9 +230,24 @@ public sealed class GuardService(
         {
             foreach (var distro in result.Distros)
             {
-                log.Info(distro.Skipped
-                    ? $"guard wsl sync: {distro.Distro} skipped ({distro.Reason})"
-                    : $"guard wsl sync: {distro.Distro} proxy {distro.ProxyUrl}, settings+script written");
+                if (distro.Skipped)
+                {
+                    log.Info($"guard wsl sync: {distro.Distro} skipped ({distro.Reason})");
+                    continue;
+                }
+
+                var what = (distro.SettingsWritten, distro.ScriptWritten) switch
+                {
+                    (true, true) => "settings+script written",
+                    (true, false) => "settings written, script already up to date",
+                    (false, true) => "settings already up to date, script written",
+                    _ => "settings+script already up to date",
+                };
+                var backups = new[] { distro.SettingsBackup, distro.ScriptBackup }
+                    .Where(b => b is not null)
+                    .ToList();
+                log.Info($"guard wsl sync: {distro.Distro} proxy {distro.ProxyUrl}, {what}" +
+                         (backups.Count > 0 ? $" (backup: {string.Join(", ", backups)})" : ""));
             }
         }
 

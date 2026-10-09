@@ -45,9 +45,11 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// Per distro from guard.wsl.distros there is a separate choice of whether to sync into it:
 /// sync=true — startup script (proxy address = IP of the Windows side of WSL NAT + application port;
 /// NO_PROXY is not touched — it is managed by the sync) and the full env in ~/.claude/settings.json
-/// (proxy + NO_PROXY), with backups; sync=false — status only.
-/// Status is read-only and only in running distros (they are not started just for a check);
-/// sync does not start a distro — it skips it with a reason.
+/// (proxy + NO_PROXY); sync=false — status only. A file is rewritten only when its content actually
+/// changes; before a rewrite the previous version is copied to a `.pnr-bak-<timestamp>` name, and
+/// at most three such copies are kept (the legacy `.bak-<timestamp>` naming is cleaned up on
+/// every sync). Status is read-only and only in running distros (they are not started just for a
+/// check); sync does not start a distro — it skips it with a reason.
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -207,7 +209,8 @@ public sealed class WslConfigGuard(
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
 
-        // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved
+        // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
+        // the backup is made only when the content actually changes
         var root = read.SettingsRoot ?? [];
         var env = root["env"] as JsonObject ?? [];
         env["HTTPS_PROXY"] = proxy;
@@ -217,28 +220,86 @@ public sealed class WslConfigGuard(
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
         var settingsScript = $"""
-            mkdir -p ~/.claude
-            if [ -f ~/.claude/settings.json ]; then cp -p ~/.claude/settings.json ~/.claude/settings.json.bak-{stamp}; echo BACKUP=settings.json.bak-{stamp}; fi
-            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}' | base64 -d > ~/.claude/settings.json
+            SETTINGS="$HOME/.claude/settings.json"
+            NEW="/tmp/.pnr-settings-{stamp}"
+            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}' | base64 -d > "$NEW"
+            if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
+                echo SETTINGS=unchanged
+            else
+                if [ -f "$SETTINGS" ]; then cp -p "$SETTINGS" "$SETTINGS.pnr-bak-{stamp}" && echo BACKUP=settings.json.pnr-bak-{stamp}; fi
+                cat "$NEW" > "$SETTINGS"
+                echo SETTINGS=written
+            fi
+            rm -f "$NEW"
+            ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+            find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+            echo PNR=ok
             """;
-        await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
+        var settingsOutput = await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
+        RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
         // startup script: refreshes the proxy address on every distro start
         var scriptPath = config.Guard.WslStartupScript;
         var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config.ForwardProxy));
         var rootScript = $"""
-            if [ -f {scriptPath} ]; then cp -p {scriptPath} {scriptPath}.bak-{stamp}; echo BACKUP={scriptPath}.bak-{stamp}; fi
-            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}' | base64 -d > {scriptPath}
-            chmod 755 {scriptPath}
+            SCRIPT="{scriptPath}"
+            NEW="/tmp/.pnr-startup-{stamp}"
+            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}' | base64 -d > "$NEW"
+            mkdir -p "$(dirname "$SCRIPT")"
+            if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
+                echo SCRIPT=unchanged
+            else
+                if [ -f "$SCRIPT" ]; then cp -p "$SCRIPT" "$SCRIPT.pnr-bak-{stamp}" && echo BACKUP={scriptPath}.pnr-bak-{stamp}; fi
+                cat "$NEW" > "$SCRIPT"
+                chmod 755 "$SCRIPT"
+                echo SCRIPT=written
+            fi
+            rm -f "$NEW"
+            ls -1t {scriptPath}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+            find "$(dirname "{scriptPath}")" -maxdepth 1 -name '{Path.GetFileName(scriptPath)}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+            echo PNR=ok
             """;
-        await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
+        var scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
+        RequireCompleted(scriptOutput, $"startup script sync in '{distro.Name}'");
 
+        var settingsWritten = settingsOutput.Contains("SETTINGS=written", StringComparison.Ordinal);
+        var scriptWritten = scriptOutput.Contains("SCRIPT=written", StringComparison.Ordinal);
         return new WslDistroSyncResult(
             distro.Name,
-            false, null, proxy,
-            SettingsWritten: true, SettingsBackup: read.SettingsPresent ? $"~/.claude/settings.json.bak-{stamp}" : null,
-            ScriptWritten: true, ScriptBackup: read.ScriptPresent ? $"{scriptPath}.bak-{stamp}" : null);
+            Skipped: false, Reason: null, proxy,
+            SettingsWritten: settingsWritten,
+            SettingsBackup: settingsWritten ? FindBackupName(settingsOutput) : null,
+            ScriptWritten: scriptWritten,
+            ScriptBackup: scriptWritten ? FindBackupName(scriptOutput) : null);
     }
+
+    /// <summary>
+    /// bash failures inside the distro are invisible to wsl.exe exit codes (a CRLF checkout once
+    /// killed every script on the first line with a syntax error while the sync reported success),
+    /// so the scripts end with a marker line and its absence is an error carrying the output.
+    /// </summary>
+    private static void RequireCompleted(string output, string what)
+    {
+        if (output.Contains("PNR=ok", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var detail = string.Join(" | ", output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0));
+        if (detail.Length > 400)
+        {
+            detail = detail[..400] + "...";
+        }
+
+        throw new IOException($"{what}: the script did not run to the end: {detail}");
+    }
+
+    private static string? FindBackupName(string output) =>
+        output.Split('\n')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("BACKUP=", StringComparison.Ordinal)) is { } line
+            ? line["BACKUP=".Length..].Trim()
+            : null;
 
     private async Task<IReadOnlyList<string>> ListDistrosAsync(string listFlag, CancellationToken ct)
     {
@@ -278,8 +339,10 @@ public sealed class WslConfigGuard(
             else
                 echo SETTINGS=missing
             fi
+            echo PNR=ok
             """;
         var output = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], probe, Encoding.UTF8, ct);
+        RequireCompleted(output, $"state read of '{distro.Name}'");
         return ParseRead(output);
     }
 

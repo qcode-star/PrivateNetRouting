@@ -619,7 +619,9 @@ internal static class Program
                 }
 
                 var settings = await runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-                Console.WriteLine($"settings.json: env proxy {settings.ProxyUrl}, NO_PROXY written (backup: {settings.BackupPath ?? "none"})");
+                Console.WriteLine(settings.Written
+                    ? $"settings.json: env proxy {settings.ProxyUrl}, NO_PROXY written (backup: {settings.BackupPath ?? "none"})"
+                    : $"settings.json: env already up to date (proxy {settings.ProxyUrl})");
                 return 0;
 
             case "wsl":
@@ -638,9 +640,15 @@ internal static class Program
 
                 foreach (var distro in wsl.Distros)
                 {
-                    Console.WriteLine(distro.Skipped
-                        ? $"{distro.Distro}: skipped ({distro.Reason})"
-                        : $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script written");
+                    if (distro.Skipped)
+                    {
+                        Console.WriteLine($"{distro.Distro}: skipped ({distro.Reason})");
+                        continue;
+                    }
+
+                    Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten
+                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script written"
+                        : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                 }
 
                 return 0;

@@ -43,8 +43,10 @@ public static class ClaudeEnvValues
 /// <summary>
 /// env in settings.json of Claude Code, Windows: the Claude Code
 /// engine (CLI and the one built into Desktop) applies env both to sessions and to commands inside
-/// them. Existing keys (env and root) are preserved; a timestamped backup is made before writing.
-/// Requires no special rights.
+/// them. Existing keys (env and root) are preserved; the file is rewritten only when the env
+/// actually differs, and before a rewrite the previous version is copied to a `.pnr-bak-<timestamp>`
+/// name (at most three such copies are kept; the legacy `.bak-<timestamp>` naming is cleaned up on
+/// every sync). Requires no special rights.
 /// </summary>
 public sealed class ClaudeSettingsGuard(AppConfig config)
 {
@@ -76,19 +78,34 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         }
     }
 
-    /// <summary>Writes env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); returns the backup path (null — the file did not exist).</summary>
-    public string? Sync()
+    /// <summary>Outcome of a settings sync: whether the file was rewritten and which backup was made.</summary>
+    public sealed record ClaudeSettingsSyncResult(bool Written, string? BackupPath);
+
+    /// <summary>Writes env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); the file is touched only on an actual change.</summary>
+    public ClaudeSettingsSyncResult Sync()
     {
         var path = config.Guard.ClaudeSettingsPath;
-        var backup = Backup(path);
         var root = ReadRootOrEmpty(path);
         var env = root["env"] as JsonObject ?? [];
-        env["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
-        env["HTTP_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
-        env["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
-        root["env"] = env;
-        Write(path, root);
-        return backup;
+        var proxy = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
+        var noProxy = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
+        string? backup = null;
+        var written = !(env["HTTPS_PROXY"]?.GetValue<string>() == proxy
+            && env["HTTP_PROXY"]?.GetValue<string>() == proxy
+            && env["NO_PROXY"]?.GetValue<string>() == noProxy);
+        if (written)
+        {
+            backup = Backup(path);
+            env["HTTPS_PROXY"] = proxy;
+            env["HTTP_PROXY"] = proxy;
+            env["NO_PROXY"] = noProxy;
+            root["env"] = env;
+            Write(path, root);
+        }
+
+        // after the new copy exists, so "at most three" counts it
+        PruneBackups(path);
+        return new ClaudeSettingsSyncResult(written, backup);
     }
 
     internal static JsonObject ReadRootOrEmpty(string path)
@@ -114,6 +131,7 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         ? ReadEnvOf(ReadRootOrEmpty(config.Guard.ClaudeSettingsPath))
         : null;
 
+    /// <summary>Copies the file to a `.pnr-bak-<timestamp>` name (null — the file did not exist).</summary>
     internal static string? Backup(string path)
     {
         if (!File.Exists(path))
@@ -121,9 +139,26 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
             return null;
         }
 
-        var backupPath = $"{path}.bak-{DateTime.Now:yyyyMMdd-HHmmss}";
+        var backupPath = $"{path}.pnr-bak-{DateTime.Now:yyyyMMdd-HHmmss}";
         File.Copy(path, backupPath, overwrite: true);
         return backupPath;
+    }
+
+    /// <summary>Keeps the three newest `.pnr-bak-` copies; removes the legacy `.bak-<timestamp>` naming.</summary>
+    internal static void PruneBackups(string path)
+    {
+        var dir = Path.GetDirectoryName(path) ?? ".";
+        var name = Path.GetFileName(path);
+        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*").OrderDescending().ToList();
+        foreach (var stale in backups.Skip(3))
+        {
+            File.Delete(stale);
+        }
+
+        foreach (var stale in Directory.GetFiles(dir, $"{name}.bak-2*"))
+        {
+            File.Delete(stale);
+        }
     }
 
     private static void Write(string path, JsonObject root)

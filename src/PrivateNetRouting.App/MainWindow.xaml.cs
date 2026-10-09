@@ -644,14 +644,21 @@ public partial class MainWindow : Window
         _viewModel.SetCheckResult("Main.Guard.Policy.OffDone");
     });
 
-    /// <summary>Writing env (proxy + NO_PROXY) into Claude Code settings.json; a backup next to the file.</summary>
+    /// <summary>Writing env (proxy + NO_PROXY) into Claude Code settings.json; a backup only when the content changes.</summary>
     private async void OnGuardSettingsSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-        _viewModel.SetCheckResult(
-            "Main.Guard.Settings.DoneFmt",
-            result.ProxyUrl,
-            result.BackupPath ?? Loc.S("Main.Guard.Backup.None"));
+        if (result.Written)
+        {
+            _viewModel.SetCheckResult(
+                "Main.Guard.Settings.DoneFmt",
+                result.ProxyUrl,
+                result.BackupPath ?? Loc.S("Main.Guard.Backup.None"));
+        }
+        else
+        {
+            _viewModel.SetCheckResult("Main.Guard.Settings.UpToDateFmt", result.ProxyUrl);
+        }
     });
 
     /// <summary>Updating the WSL startup script and distro settings.json (does not start them).</summary>
@@ -666,7 +673,9 @@ public partial class MainWindow : Window
 
         var lines = result.Distros.Select(d => d.Skipped
             ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
-            : Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? ""));
+            : d.SettingsWritten || d.ScriptWritten
+                ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "")
+                : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? ""));
         _viewModel.SetCheckText(string.Join("; ", lines));
     });
 

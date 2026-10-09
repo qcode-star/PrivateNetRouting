@@ -103,8 +103,11 @@ internal sealed class FakeWslRunner : IWslProcessRunner
 
     public List<string> Installed { get; set; } = [];
 
-    /// <summary>Answer of the root pass (state read) by distro name.</summary>
+    /// <summary>Answer of the root pass (state read) by distro name; the completion marker is appended.</summary>
     public Func<string, string> ProbeOutput { get; set; } = _ => "SCRIPT=missing\nSETTINGS=missing\n";
+
+    /// <summary>Output returned for the writing scripts (settings/startup); without the marker the sync must fail.</summary>
+    public string WriteOutput { get; set; } = "SETTINGS=written\nSCRIPT=written\nPNR=ok\n";
 
     /// <summary>stdin of scripts passed to the distro: (distro, user, script).</summary>
     public List<(string Distro, string? User, string Script)> Scripts { get; } = [];
@@ -122,18 +125,18 @@ internal sealed class FakeWslRunner : IWslProcessRunner
         var user = arguments[IndexOf(arguments, "-u") + 1];
         if (standardInput is not null)
         {
-            // the reading probe (echo SCRIPT=…) answers with the canned output;
+            // the reading probe (… echo SETTINGS=END) answers with the canned output;
             // the writing scripts (settings/startup) are only recorded
-            if (standardInput.Contains("echo SCRIPT="))
+            if (standardInput.Contains("echo SETTINGS=END"))
             {
-                return Task.FromResult(ProbeOutput(distro));
+                return Task.FromResult(ProbeOutput(distro) + "PNR=ok\n");
             }
 
             Scripts.Add((distro, user, standardInput));
-            return Task.FromResult("");
+            return Task.FromResult(WriteOutput);
         }
 
-        return Task.FromResult(ProbeOutput(distro));
+        return Task.FromResult(ProbeOutput(distro) + "PNR=ok\n");
     }
 
     private static int IndexOf(IReadOnlyList<string> arguments, string value)
@@ -291,10 +294,12 @@ public class GuardTests : IDisposable
             """);
 
         var guard = new ClaudeSettingsGuard(config);
-        var backup = guard.Sync();
+        var result = guard.Sync();
 
-        Assert.NotNull(backup);
-        Assert.True(File.Exists(backup));
+        Assert.True(result.Written);
+        Assert.NotNull(result.BackupPath);
+        Assert.Contains(".pnr-bak-", result.BackupPath);
+        Assert.True(File.Exists(result.BackupPath));
         var status = guard.Read();
         Assert.Equal(GuardState.On, status.State);
 
@@ -304,6 +309,36 @@ public class GuardTests : IDisposable
         Assert.Equal("http://127.0.0.1:18082", (string?)json["env"]!["HTTPS_PROXY"]);
         Assert.Equal("http://127.0.0.1:18082", (string?)json["env"]!["HTTP_PROXY"]);
         Assert.Equal("localhost,127.0.0.1,.local,corp.example.com,.corp.example.com", (string?)json["env"]!["NO_PROXY"]);
+
+        // the second sync finds the env already correct: no rewrite, no backup
+        var again = guard.Sync();
+        Assert.False(again.Written);
+        Assert.Null(again.BackupPath);
+    }
+
+    [Fact]
+    public void SettingsSyncPrunesBackupsAndLegacyNaming()
+    {
+        var config = SettingsConfig();
+        File.WriteAllText(config.Guard.ClaudeSettingsPath, """{ "env": { "HTTPS_PROXY": "http://old:1" } }""");
+        var dir = Path.GetDirectoryName(config.Guard.ClaudeSettingsPath)!;
+        var name = Path.GetFileName(config.Guard.ClaudeSettingsPath);
+        for (var i = 1; i <= 5; i++)
+        {
+            File.WriteAllText(Path.Combine(dir, $"{name}.pnr-bak-2026010{i}-000000"), "old");
+        }
+
+        var legacy = Path.Combine(dir, $"{name}.bak-20260101-000000");
+        File.WriteAllText(legacy, "previous naming");
+
+        var guard = new ClaudeSettingsGuard(config);
+        var result = guard.Sync();
+
+        Assert.True(result.Written);
+        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*").OrderDescending().ToList();
+        Assert.Equal(3, backups.Count); // the fresh one plus the two newest — no more
+        Assert.Contains(result.BackupPath, backups);
+        Assert.False(File.Exists(legacy));
     }
 
     [Fact]
@@ -484,13 +519,16 @@ public class GuardTests : IDisposable
 
         // d1: two passes, settings as the user and the script as root
         var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1");
-        Assert.Contains("base64 -d > ~/.claude/settings.json", settings.Script);
+        Assert.Contains("SETTINGS=\"$HOME/.claude/settings.json\"", settings.Script);
+        Assert.Contains("pnr-bak", settings.Script);
         var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root");
         Assert.Contains("/etc/wsl.d/startup/10-claude-proxy.sh", root.Script);
         Assert.DoesNotContain("chmod 755", settings.Script);
+        Assert.True(d1.SettingsWritten);
+        Assert.True(d1.ScriptWritten);
 
         // startup script contents: the app port and the distro user
-        var payload = ExtractBase64Payload(root.Script, "/etc/wsl.d/startup/10-claude-proxy.sh");
+        var payload = ExtractBase64Payload(root.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"");
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
         Assert.Contains("USER_NAME='u1'", script);
         Assert.Contains("PORT=18082", script);
@@ -507,6 +545,78 @@ public class GuardTests : IDisposable
         var result = await guard.SyncAsync(CancellationToken.None);
         Assert.True(result.LayerDisabled);
         Assert.Empty(runner.Scripts);
+    }
+
+    [Fact]
+    public async Task WslSyncReadsBackupsAndUnchangedFlagsFromDistroOutput()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            WriteOutput = """
+                SETTINGS=written
+                BACKUP=settings.json.pnr-bak-20261012-190000
+                SCRIPT=unchanged
+                PNR=ok
+                """,
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.False(d1.Skipped);
+        Assert.True(d1.SettingsWritten);
+        Assert.Equal("settings.json.pnr-bak-20261012-190000", d1.SettingsBackup);
+        Assert.False(d1.ScriptWritten); // the distro confirmed the script was already current
+        Assert.Null(d1.ScriptBackup);
+    }
+
+    [Fact]
+    public async Task WslSyncReportsUnchangedWhenDistroConfirmsNoChange()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            WriteOutput = "SETTINGS=unchanged\nSCRIPT=unchanged\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.False(d1.SettingsWritten);
+        Assert.False(d1.ScriptWritten);
+        Assert.Null(d1.SettingsBackup);
+        Assert.Null(d1.ScriptBackup);
+    }
+
+    [Fact]
+    public async Task WslSyncFailsLoudlyWhenDistroScriptDidNotRun()
+    {
+        // a bash syntax error inside the distro does not change the wsl.exe exit code
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            WriteOutput = "bash: line 3: syntax error near unexpected token\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => guard.SyncAsync(CancellationToken.None));
+        Assert.Contains("did not run to the end", ex.Message);
+        Assert.Contains("syntax error", ex.Message);
     }
 
     private static string ExtractBase64Payload(string script, string afterMarker)

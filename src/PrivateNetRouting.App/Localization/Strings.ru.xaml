@@ -131,6 +131,7 @@
     <s:String x:Key="Main.Guard.Settings.NoFile">settings.json не найден</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">HTTPS_PROXY={0}, NO_PROXY={1} — отличается от конфига</s:String>
     <s:String x:Key="Main.Guard.Settings.DoneFmt">settings.json обновлён: прокси {0} (бэкап: {1})</s:String>
+    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">settings.json уже актуален (прокси {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">без бэкапа (файл создан с нуля)</s:String>
     <s:String x:Key="Main.Guard.Wsl">Конфиг WSL</s:String>
     <s:String x:Key="Main.Guard.Wsl.Off.Mode">слой выключен (guard.wsl.mode=off)</s:String>
@@ -143,6 +144,7 @@
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">Синхронизация WSL пропущена: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: пропущен — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: записан прокси {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: уже актуален (прокси {1})</s:String>
 
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Показать окно</s:String>

@@ -131,6 +131,7 @@
     <s:String x:Key="Main.Guard.Settings.NoFile">settings.json was not found</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
     <s:String x:Key="Main.Guard.Settings.DoneFmt">settings.json updated: proxy {0} (backup: {1})</s:String>
+    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">settings.json already up to date (proxy {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">no backup (file was created)</s:String>
     <s:String x:Key="Main.Guard.Wsl">WSL config</s:String>
     <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (guard.wsl.mode=off)</s:String>
@@ -143,6 +144,7 @@
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: skipped — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: already up to date (proxy {1})</s:String>
 
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Show window</s:String>
