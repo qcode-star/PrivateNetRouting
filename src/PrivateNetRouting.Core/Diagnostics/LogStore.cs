@@ -15,7 +15,7 @@ public sealed record LogRotationResult(string Name, bool Ok, string Detail)
 
 /// <summary>
 /// Viewing the logs of the logging.directory and external rotation (shifting files). Reading is
-/// always allowed: writers hold files with FileShare.Read. External rotation works only for
+/// always allowed: writers hold files with FileShare.ReadWrite. External rotation works only for
 /// files not opened by another process: a file held by the GUI or a live command is
 /// rotated by its owner (FileLog.RotateNow), busy ones are honestly reported here
 /// as locked.

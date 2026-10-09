@@ -155,9 +155,12 @@ Architecture notes:
   stopper started from the GUI — a separate worker (`--watchdog-worker`) that outlives the exit on
   its own and disappears after the idle stop (the CLI form `pnr watchdog` — foreground, in the
   terminal).
-- Logs: two writers into one file are not allowed (interleaving corrupts the contents) — if the log
-  is already held by another process (the GUI in the tray + `pnr` from a terminal), the second one
-  writes to `<name>.<pid>.log`; rotation is by size at start, manually — by the file owner in place.
+- Logs: one canonical file per log — all writers (the GUI in the tray + `pnr` from a terminal,
+  detached workers) open the same `<name>.log` with FileShare.ReadWrite and seek to the end
+  before every line; rotation is by size — at start and before the next record into an overgrown
+  file (a chain held by another process postpones the rotation until the owner's RotateNow or the
+  next start), manually — from diagnostics (the live log of the process — in place, a free file —
+  by shifting, a held one — honestly "locked").
 - Updater: the version check phase runs before the chain bring-up (no extra UAC is needed);
   installation is not interrupted; during long phases keep the activity marker fresh so that
   auto-stop does not shut the chain down under the download.
@@ -238,9 +241,9 @@ src/
                              # ui.chainCardExpanded, ui.guardsCardExpanded),
                              # AppLanguage (auto → system → en),
                              # loading from %APPDATA% (the template is config/*.example.json)
-    Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info) +
-                             # rotation by size once at start and manual RotateNow;
-                             # a file held by another process → fallback to <name>.<pid>.log
+    Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info); one
+                             # shared file per log (no PID fallback); size rotation at start and
+                             # during writes (postponed while the chain is held) + manual RotateNow
     AppUpdate/               # app self-update: AppUpdateChecker (the running version vs the
                              # latest release of the repository) + GitHubAppReleaseFeed
                              # (anonymous api.github.com — the repository is public); the
@@ -320,8 +323,8 @@ tests/
                              # Publisher, closing Claude, the full cycle), diagnostics on fakes
                              # (summary: stopped chain/port owners/WSL bind/health/guards/watchdog,
                              # the core of the guards without WSL, ProbeAsync on a live TcpListener),
-                             # logs (list/tail/rotation/busy file/fallback to a per-process
-                             # file/RotateNow), the cmd argument form
+                             # logs (list/tail/rotation/busy file/shared single file/size
+                             # rotation during writes/postponed rotation/RotateNow), the cmd argument form
 config/
   appsettings.example.json   # user config template with placeholders
 packaging/

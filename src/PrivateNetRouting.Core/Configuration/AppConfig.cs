@@ -399,7 +399,7 @@ public sealed class LoggingConfig
     /// </summary>
     public string Level { get; set; } = "info";
 
-    /// <summary>Rotation threshold; the rotation itself is performed once at process start.</summary>
+    /// <summary>Rotation threshold: an overgrown file shifts the age chain at start and before the next record.</summary>
     public int MaxBytes { get; set; } = 1_000_000;
 
     /// <summary>How many old files (.1, .2, ...) to keep.</summary>

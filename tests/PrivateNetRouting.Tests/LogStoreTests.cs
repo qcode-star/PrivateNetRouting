@@ -138,7 +138,7 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
-    public void FileLogFallsBackToPerProcessFileWhenPrimaryIsHeld()
+    public void FileLogWritersShareTheSingleFile()
     {
         var path = Path.Combine(_tempDir, "chain.log");
         using var first = new FileLog(path);
@@ -148,11 +148,47 @@ public class LogStoreTests : IDisposable
         second.Info("from second");
 
         Assert.Equal(path, first.FilePath);
-        Assert.NotEqual(path, second.FilePath);
-        Assert.EndsWith($".{Environment.ProcessId}.log", second.FilePath); // GUI in the tray + pnr from a terminal
+        Assert.Equal(path, second.FilePath); // GUI in the tray + pnr from a terminal — one file, no PID copies
         Assert.Contains("from first", ReadShared(path));
-        Assert.Contains("from second", ReadShared(second.FilePath));
-        Assert.Contains("held by another process", ReadShared(second.FilePath));
+        Assert.Contains("from second", ReadShared(path));
+    }
+
+    [Fact]
+    public void FileLogRotatesBySizeDuringWrites()
+    {
+        var path = Path.Combine(_tempDir, "proxy.log");
+        using var log = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2);
+
+        log.Info(new string('a', 60)); // over the threshold from the first record
+        log.Info("after rotation");
+
+        Assert.Contains(new string('a', 60), ReadShared(path + ".1")); // the overgrown file shifted...
+        Assert.Contains("after rotation", ReadShared(path)); // ...writing continued in a fresh one
+        Assert.DoesNotContain("after rotation", ReadShared(path + ".1"));
+    }
+
+    [Fact]
+    public void FileLogPostponesSizeRotationWhileChainIsHeld()
+    {
+        var path = Path.Combine(_tempDir, "watchdog.log");
+        using (var holder = new FileLog(path))
+        {
+            using var writer = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2);
+            writer.Info(new string('b', 60)); // over the threshold, but .1 is impossible — holder keeps the file
+            writer.Info("appended anyway");
+
+            var text = ReadShared(path); // no rotation — writing continues to the same file
+            Assert.Contains(new string('b', 60), text);
+            Assert.Contains("appended anyway", text);
+            Assert.False(File.Exists(path + ".1"));
+        }
+
+        using (var retry = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2))
+        {
+            retry.Info("again"); // a new process start retries the postponed rotation
+        }
+
+        Assert.True(File.Exists(path + ".1"));
     }
 
     /// <summary>Read a file opened by a writer (FileLog grants only FileShare.Read).</summary>

@@ -6,8 +6,8 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// The body of the forward-proxy detached worker — a single entry point for both hosts
 /// (pnr --proxy-worker and PrivateNetRouting.App --proxy-worker; the argument is handled before
 /// everything else — in App before the single-instance mutex and before the UI). It lives until the
-/// chain shutdown kills it; the log is forward-proxy.log (or a personal
-/// &lt;name&gt;.&lt;pid&gt;.log if the file is already held by another process).
+/// chain shutdown kills it; the log is forward-proxy.log (shared with the GUI and other
+/// writers — everyone writes to the same single file).
 /// </summary>
 public static class ProxyWorker
 {

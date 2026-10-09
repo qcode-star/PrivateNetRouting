@@ -2,8 +2,8 @@ namespace PrivateNetRouting.Core.Logging;
 
 /// <summary>
 /// Shifting the rotation age files: current → .1, .1 → .2, ..., beyond keep — deleted.
-/// Shared logic of the startup (by size) and manual rotation; the caller decides
-/// whether errors are critical (startup — swallows them, manual — reports).
+/// Shared logic of the startup, size-based and manual rotation; the caller decides
+/// whether errors are critical (startup/size — swallow them, manual — reports).
 /// </summary>
 internal static class LogRotation
 {
@@ -40,7 +40,7 @@ internal static class LogRotation
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // rotation is not critical: keep writing to the old file
+            // rotation is not critical: the first record will retry by size
         }
     }
 }
@@ -49,16 +49,20 @@ internal static class LogRotation
 /// Simple thread-safe file log with levels (logging.level of the config, default
 /// Info). Logging policy: Info — one-off events (start/stop/warnings/errors),
 /// periodic and per-request details (timers, connects, resolves) — Debug and silent in normal
-/// operation; size-based rotation is performed once at process start, manual —
-/// on a diagnostics request (at that moment the file belongs only to this process).
-/// If the file is already held by another process (GUI in the tray + pnr from a terminal), the log goes
-/// to a personal file &lt;name&gt;.&lt;pid&gt;.log — two writers to one file are not allowed.
+/// operation. All writers (the GUI in the tray + pnr from a terminal, detached workers) write
+/// to the same single file &lt;name&gt;.log: handles are opened with FileShare.ReadWrite and the
+/// stream seeks to the end before every line, so the records do not push each other out.
+/// Size rotation happens not only at start: before a record into an overgrown file (maxBytes)
+/// the age chain shifts (current → .1 → ... beyond keep — deleted); if the chain is held by
+/// another process, the rotation is postponed until RotateNow or the next process start.
 /// </summary>
 public sealed class FileLog : IDisposable
 {
     private readonly object _gate = new();
+    private readonly int _maxBytes;
     private readonly int _keep;
     private StreamWriter _writer;
+    private bool _sizeRotationPostponed;
 
     public string FilePath { get; }
 
@@ -67,10 +71,12 @@ public sealed class FileLog : IDisposable
     public FileLog(string path, LogLevel level = LogLevel.Info, int maxBytes = 1_000_000, int keep = 2)
     {
         Level = level;
+        _maxBytes = maxBytes;
         _keep = keep;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         LogRotation.RotateAtStartup(path, maxBytes, keep);
-        (_writer, FilePath) = OpenWriter(path);
+        _writer = CreateWriter(path);
+        FilePath = path;
     }
 
     public bool IsDebugEnabled => Level <= LogLevel.Debug;
@@ -85,54 +91,30 @@ public sealed class FileLog : IDisposable
 
     /// <summary>
     /// Manual rotation of the live log: the current file goes to .1, writing continues in a new one.
-    /// It works only for the file owner: a file opened by another process cannot be shifted
-    /// (external rotation — LogStore, it honestly reports locked files).
+    /// It works while no other process holds the file or its age chain (external rotation —
+    /// LogStore, it honestly reports locked files).
     /// </summary>
     public void RotateNow()
     {
         lock (_gate)
         {
             _writer.Dispose();
-            try
-            {
-                LogRotation.Shift(FilePath, _keep);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // the shift failed (e.g. .1 is held by someone else) — keep writing to the same file
-            }
-
-            _writer = OpenWriter(FilePath).Writer;
+            ShiftChain();
+            _writer = CreateWriter(FilePath);
             _writer.Flush();
         }
     }
 
     /// <summary>
-    /// Opens the log for writing; if the file is held by another process — fallback to a personal
-    /// file &lt;name&gt;.&lt;pid&gt;.log (a second writer to the same file would corrupt the content).
+    /// Opens the log for writing. The file is shared: another writer (the GUI + pnr) opens the
+    /// same file rather than a copy, and readers (LogStore tail, rotation checks) are admitted too.
     /// </summary>
-    private static (StreamWriter Writer, string Path) OpenWriter(string path)
+    private static StreamWriter CreateWriter(string path)
     {
-        try
-        {
-            return (CreateWriter(path), path);
-        }
-        catch (IOException)
-        {
-            var alternative = Path.Combine(
-                Path.GetDirectoryName(Path.GetFullPath(path))!,
-                $"{Path.GetFileNameWithoutExtension(path)}.{Environment.ProcessId}{Path.GetExtension(path)}");
-            var writer = CreateWriter(alternative);
-            writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} INFO log: {Path.GetFileName(path)} is held by another process, writing to {Path.GetFileName(alternative)}");
-            writer.Flush();
-            return (writer, alternative);
-        }
+        var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+        stream.Seek(0, SeekOrigin.End);
+        return new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
-
-    private static StreamWriter CreateWriter(string path) =>
-        new(
-            new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read),
-            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
     private void Write(LogLevel level, string message)
     {
@@ -143,8 +125,43 @@ public sealed class FileLog : IDisposable
 
         lock (_gate)
         {
+            RotateBySize();
+            // re-seek for a fellow writer that appended while we were idle
+            _writer.BaseStream.Seek(0, SeekOrigin.End);
             _writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {LevelTag(level)} {message}");
             _writer.Flush();
+        }
+    }
+
+    /// <summary>
+    /// Size rotation during operation: before the next record an overgrown file shifts the age
+    /// chain. A chain held by another process cannot be shifted — the rotation is postponed
+    /// (one attempt per process, not one per record) until RotateNow or the next start.
+    /// </summary>
+    private void RotateBySize()
+    {
+        if (_sizeRotationPostponed || _writer.BaseStream.Length < _maxBytes)
+        {
+            return;
+        }
+
+        _writer.Dispose();
+        ShiftChain();
+        _writer = CreateWriter(FilePath);
+        _writer.Flush();
+    }
+
+    private void ShiftChain()
+    {
+        try
+        {
+            LogRotation.Shift(FilePath, _keep);
+            _sizeRotationPostponed = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // the file or its age chain is held by another process — keep appending to the same file
+            _sizeRotationPostponed = true;
         }
     }
 

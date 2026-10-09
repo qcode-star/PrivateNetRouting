@@ -287,7 +287,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     /// <summary>
     /// Log rotation by file name: this process's live log is rotated in place
-    /// (FileLog.RotateNow — always works); a file nobody holds is rotated by shifting;
+    /// (FileLog.RotateNow); a file nobody holds is rotated by shifting;
     /// one held by another process is reported as locked.
     /// </summary>
     public LogRotationResult RotateLog(string fileName)
