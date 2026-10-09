@@ -49,7 +49,10 @@ public class AppConfigTests : IDisposable
 
         var config = AppConfigStore.LoadOrCreate(_path);
 
-        Assert.Equal(Path.Combine(Path.GetTempPath(), "marker-file"), config.ForwardProxy.ActivityMarkerPath);
+        // The expectation goes through the same %VAR% expansion as the code: on some machines
+        // %TEMP% is the 8.3 short form (CI runners) and Path.GetTempPath() returns the long one.
+        var temp = Environment.ExpandEnvironmentVariables("%TEMP%");
+        Assert.Equal(Path.Combine(temp, "marker-file"), config.ForwardProxy.ActivityMarkerPath);
         var expectedLogDir = Path.Combine(
             Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%"), "PrivateNetRouting", "logs");
         Assert.Equal(expectedLogDir, config.Logging.Directory);
@@ -107,7 +110,9 @@ public class AppConfigTests : IDisposable
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.Equal(BrowserKind.Chromium, loaded.Browser.EffectiveType);
-        Assert.Equal(Path.Combine(Path.GetTempPath(), "ff-profile"), loaded.Browser.Firefox.ProfileDir);
+        Assert.Equal(
+            Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "ff-profile"),
+            loaded.Browser.Firefox.ProfileDir);
         Assert.Equal(@"C:\fake\chrome.exe", loaded.Browser.Chromium.Path);
     }
 
@@ -142,7 +147,9 @@ public class AppConfigTests : IDisposable
         Assert.Contains("%TEMP%", File.ReadAllText(_path)); // %VAR% is stored unexpanded
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.Equal("ru", loaded.Ui.Language);
-        Assert.Equal(Path.Combine(Path.GetTempPath(), "marker-file"), loaded.ForwardProxy.ActivityMarkerPath);
+        Assert.Equal(
+            Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "marker-file"),
+            loaded.ForwardProxy.ActivityMarkerPath);
     }
 
     public void Dispose()
