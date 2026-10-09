@@ -16,7 +16,9 @@ namespace PrivateNetRouting.App;
 /// <summary>
 /// Claude Desktop update window: steps "Check versions →
 /// Proxy chain → Download → Install", version check before the chain bring-up (without
-/// an extra UAC), a progress bar with speed/ETA by samples, a pause before installation when
+/// an extra UAC; when no source has a package address, raising the chain is offered once
+/// and the check repeats over the live chain), a progress bar with speed/ETA by samples,
+/// a pause before installation when
 /// Claude is running, deferred installation and "Retry". Installation is not interrupted:
 /// "Stop" and closing are unavailable at this step. All core calls are await,
 /// the window is not blocked; progress comes via Progress&lt;T&gt; to the UI thread.
@@ -142,7 +144,6 @@ public partial class UpdateWindow : Window
         {
             // Version check — before the chain: "nothing to install" brings up nothing and asks no UAC
             SetPhase(UpdatePhase.Check);
-            SetStep(0, ChainStepStatus.Active);
             SetDetailKey("Update.Check.Running");
 
             if (manualUrl is not null && !PackageUrl.IsValidPackageUrl(manualUrl))
@@ -155,39 +156,67 @@ public partial class UpdateWindow : Window
                 return; // waiting for another address from the user
             }
 
-            var check = await _runtime.Updater.CheckAsync(new UpdateOptions { ManualUrl = manualUrl }, ct);
-            if (check.Installed is null)
+            UpdateCheckResult check;
+            var chainRaised = false;
+            while (true)
             {
-                SetStep(0, ChainStepStatus.Failed);
-                SetDetailKey("Update.Check.NotInstalled");
-                VersionStateResolved?.Invoke(check);
-                Finish(success: false);
-                return;
-            }
-
-            _beforeVersion = check.Installed.Version;
-            SetStep(0, ChainStepStatus.Done, check.Installed.Version);
-            VersionStateResolved?.Invoke(check);
-
-            if (check.UpToDate)
-            {
-                for (var i = 1; i < StepOrder.Length; i++)
+                SetStep(0, ChainStepStatus.Active);
+                check = await _runtime.Updater.CheckAsync(new UpdateOptions { ManualUrl = manualUrl }, ct);
+                if (check.Installed is null)
                 {
-                    SetStep(i, ChainStepStatus.Skipped);
+                    SetStep(0, ChainStepStatus.Failed);
+                    SetDetailKey("Update.Check.NotInstalled");
+                    VersionStateResolved?.Invoke(check);
+                    Finish(success: false);
+                    return;
                 }
 
-                SetDetailKey("Update.Check.UpToDateFmt", check.Installed.Version);
-                Finish(success: true);
-                return;
-            }
+                _beforeVersion = check.Installed.Version;
+                SetStep(0, ChainStepStatus.Done, check.Installed.Version);
+                VersionStateResolved?.Invoke(check);
 
-            if (check.PackageUrl is null)
-            {
-                UrlPanel.Visibility = Visibility.Visible;
-                SetDetailKey("Update.Check.NoUrl");
-                _clock.Stop();
-                UrlBox.Focus();
-                return; // the address is entered manually
+                if (check.UpToDate)
+                {
+                    for (var i = 1; i < StepOrder.Length; i++)
+                    {
+                        SetStep(i, ChainStepStatus.Skipped);
+                    }
+
+                    SetDetailKey("Update.Check.UpToDateFmt", check.Installed.Version);
+                    Finish(success: true);
+                    return;
+                }
+
+                if (check.PackageUrl is not null)
+                {
+                    break;
+                }
+
+                // No address from any source: the feed answers only through the chain, the journal
+                // may be silent. The bring-up is offered once (it can ask for UAC) — the same pass
+                // the CLI run makes without asking; a refusal, like a second empty answer, leaves
+                // the manual address entry.
+                var raise = !chainRaised && MessageBox.Show(
+                    this,
+                    Loc.S("Update.ConfirmRaiseChain"),
+                    Loc.S("Update.Title"),
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question) == MessageBoxResult.Yes;
+                if (!raise)
+                {
+                    UrlPanel.Visibility = Visibility.Visible;
+                    SetDetailKey("Update.Check.NoUrl");
+                    _clock.Stop();
+                    UrlBox.Focus();
+                    return; // the address is entered manually
+                }
+
+                chainRaised = true;
+                SetPhase(UpdatePhase.Chain);
+                SetStep(1, ChainStepStatus.Active);
+                await _runtime.Updater.EnsureChainAsync(new Progress<ChainStep>(OnChainStep), null, ct);
+                SetHintDirect("");
+                SetPhase(UpdatePhase.Check);
             }
 
             SetDetailKey("Update.Check.AvailableFmt", check.Installed.Version, check.OfferedVersion ?? "?");

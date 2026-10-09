@@ -165,7 +165,7 @@
     <s:String x:Key="Update.Check.Running">смотрю установленную версию, ленту обновлений и журнал AppX</s:String>
     <s:String x:Key="Update.Check.UpToDateFmt">Установлено {0} — версия актуальна, ставить нечего.</s:String>
     <s:String x:Key="Update.Check.AvailableFmt">Установлено {0} → предлагается {1}</s:String>
-    <s:String x:Key="Update.Check.NoUrl">Адрес пакета не дали ни лента обновлений, ни журнал AppX — скорее всего, цепочка не поднята. Подними цепочку и повтори, или вставь адрес пакета (.msix) ниже.</s:String>
+    <s:String x:Key="Update.Check.NoUrl">Адрес пакета не дали ни лента обновлений, ни журнал AppX — вставь адрес пакета (.msix) ниже.</s:String>
     <s:String x:Key="Update.Check.InvalidUrl">По этому адресу нет .msix-пакета — вставь другой.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop не установлен как MSIX-пакет — обновлять нечего.</s:String>
     <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
@@ -192,6 +192,7 @@
     <s:String x:Key="Update.Button.Defer">Отложить</s:String>
     <s:String x:Key="Update.Button.ContinueWithUrl">Продолжить с этим URL</s:String>
     <s:String x:Key="Update.ConfirmClose">Остановить обновление и закрыть?</s:String>
+    <s:String x:Key="Update.ConfirmRaiseChain">Ни лента обновлений, ни журнал AppX не дали адрес пакета — лента отвечает только через прокси-цепочку. Поднять цепочку и поискать адрес снова?</s:String>
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Язык</s:String>
