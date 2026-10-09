@@ -241,7 +241,10 @@ public partial class App : Application
         {
             await Task.Delay(TimeSpan.FromSeconds(2));
             var check = await _runtime.Updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
-            if (check.Installed is null || check.UpToDate)
+            // an update is announced only with a concrete offered version: with the chain down
+            // the feed is unreachable and the journal may be silent — "no address known" is not
+            // "an update exists", and claiming one contradicts the updater's own "up to date"
+            if (check.Installed is null || check.UpToDate || check.OfferedVersion is null)
             {
                 return;
             }
