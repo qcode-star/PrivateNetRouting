@@ -79,3 +79,8 @@ Everything environment-specific (endpoint addresses, ports, bypass domain lists,
 lives in the application's user config and never reaches git. The repository holds only templates
 with placeholders in `config/*.example.json`. The repository is public and anonymous: no real
 addresses, domains, names, or secrets (rule #2 in AGENTS.md).
+
+## License
+
+[Unlicense](LICENSE) — public domain: use, modify and distribute without any restrictions, in open
+and closed projects alike, no attribution required.
