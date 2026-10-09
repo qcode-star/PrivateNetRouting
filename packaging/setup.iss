@@ -52,3 +52,43 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Run]
 ; Nothing starts by itself: the launch checkbox is off by default and silent installs never launch.
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent unchecked
+
+[Code]
+// The background workers (PrivateNetRouting.App.exe / pnr.exe with --proxy-worker /
+// --watchdog-worker in the command line, plus any CLI process running from the install
+// directory, e.g. the foreground `pnr watchdog`) have no window, so the Restart Manager behind
+// CloseApplications cannot close them and the install stops on the "unable to automatically
+// close all applications" error. They are terminated here — before the files are copied and
+// before the uninstall — using the same identification the application's own supervisors use
+// (the marker in the command line). The GUI (a windowed process) is left to AppMutex and the
+// Restart Manager: it closes gracefully on session end and spawns nothing on that path.
+procedure TerminateBackgroundProcesses;
+var
+  cliPath, escapedCliPath, psCommand, params: String;
+  resultCode: Integer;
+begin
+  cliPath := ExpandConstant('{app}\pnr.exe');
+  escapedCliPath := cliPath;
+  StringChangeEx(escapedCliPath, '''', '''''', True); // a PowerShell string literal: quotes doubled
+  psCommand :=
+    'Get-CimInstance Win32_Process | Where-Object { ' +
+    '($_.Name -eq ''PrivateNetRouting.App.exe'' -or $_.Name -eq ''pnr.exe'') -and ' +
+    '($_.CommandLine -like ''*--proxy-worker*'' -or $_.CommandLine -like ''*--watchdog-worker*'' ' +
+    '-or $_.ExecutablePath -eq ''' + escapedCliPath + ''') } ' +
+    '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
+  params := '-NoProfile -ExecutionPolicy Bypass -Command "' + psCommand + '"';
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), params, '',
+       SW_HIDE, ewWaitUntilTerminated, resultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  TerminateBackgroundProcesses;
+  Result := '';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    TerminateBackgroundProcesses;
+end;

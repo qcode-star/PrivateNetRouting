@@ -166,7 +166,10 @@ Architecture notes:
   `packaging/make-release.ps1` (both projects self-contained into one folder, the portable zip,
   the Inno Setup installer) — and attaches zip + setup to a GitHub release with generated notes.
   The installer is per-user (`%LOCALAPPDATA%\Programs\PrivateNetRouting`, no elevation), recognizes
-  the running GUI by the single-instance mutex, and writes no autostart entries (rule #4).
+  the running GUI by the single-instance mutex, terminates the background workers before touching
+  the files (they have no window, so the Restart Manager cannot close them — the install and the
+  uninstall would stop on the "unable to automatically close all applications" error), and writes
+  no autostart entries (rule #4).
 - Guard: the ban rule identifiers (hosts block markers, the NRPT rule DisplayName, the firewall
   rule Group) are in the config; the application maintains a ban with these identifiers, not a
   parallel one. The guard status is read-only; after applying or removing a ban — live probes,
