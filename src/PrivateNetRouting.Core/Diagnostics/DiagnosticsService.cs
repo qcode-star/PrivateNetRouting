@@ -25,9 +25,10 @@ public sealed record DiagLine(string Name, string Value, DiagMark Mark = DiagMar
 public sealed record DiagSection(string Key, IReadOnlyList<DiagLine> Lines);
 
 /// <summary>
-/// State summary. ChainStopped is the edge case where neither the daemon
-/// nor a forward proxy listener exists at all — that is normal while Claude is not needed (a short
-/// message instead of the full picture).
+/// State summary. ChainStopped is the edge case where no listener of the chain exists at all —
+/// the daemon's in the tailscale mode, the proxy's in the socks5 mode — and the proxy is not
+/// running either; that is normal while Claude is not needed (a short message instead of the
+/// full picture).
 /// </summary>
 public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSection> Sections);
 
@@ -53,23 +54,25 @@ public sealed class DiagnosticsService(
     public async Task<DiagnosticsSummary> GetSummaryAsync(CancellationToken ct)
     {
         var chainConfig = config.Chain;
+        var socks5 = chainConfig.EffectiveMode == ChainMode.Socks5;
         var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.DaemonHttpListen).Port;
         var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.DaemonSocksListen).Port;
         var proxyPort = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen).Port;
 
         var state = await chain.GetStateAsync(ct);
-        var daemonListeners = tcpTable.GetListeners(daemonHttpPort);
         var proxyListeners = tcpTable.GetListeners(proxyPort);
+        // in the socks5 mode the daemon ports are foreign — they say nothing about our chain
+        IReadOnlyList<TcpListenerEntry> daemonListeners = socks5 ? [] : tcpTable.GetListeners(daemonHttpPort);
         if (daemonListeners.Count == 0 && proxyListeners.Count == 0 && !proxy.IsRunning)
         {
             return new DiagnosticsSummary(ChainStopped: true, Sections: []);
         }
 
-        var daemonSocksListeners = tcpTable.GetListeners(daemonSocksPort);
+        IReadOnlyList<TcpListenerEntry> daemonSocksListeners = socks5 ? [] : tcpTable.GetListeners(daemonSocksPort);
         var guard = await guardCore(ct);
         var sections = new List<DiagSection>
         {
-            ChainSection(state, daemonListeners, daemonSocksListeners),
+            socks5 ? EgressSection(state) : ChainSection(state, daemonListeners, daemonSocksListeners),
             ProxySection(proxy, proxyListeners, proxyPort),
             await HealthSectionAsync(proxy.IsRunning || proxyListeners.Count > 0, ct),
             GuardsSection(guard.Ban, guard.Policy),
@@ -77,6 +80,22 @@ public sealed class DiagnosticsService(
             LogsSection(),
         };
         return new DiagnosticsSummary(ChainStopped: false, Sections: sections);
+    }
+
+    /// <summary>socks5 egress: the configured external upstream (with its user, never the password) and whether it answers.</summary>
+    private DiagSection EgressSection(ChainState state)
+    {
+        var fp = config.ForwardProxy;
+        var display = string.IsNullOrEmpty(fp.Socks5UpstreamUser)
+            ? fp.Socks5Upstream
+            : $"{fp.Socks5UpstreamUser}@{fp.Socks5Upstream}";
+        var line = state.UpstreamReachable switch
+        {
+            true => new DiagLine($"egress ({display})", "reachable", DiagMark.Good),
+            false => new DiagLine($"egress ({display})", "no route", DiagMark.Bad),
+            _ => new DiagLine($"egress ({display})", "not checked", DiagMark.Neutral),
+        };
+        return new DiagSection("chain", [line]);
     }
 
     private DiagSection ChainSection(

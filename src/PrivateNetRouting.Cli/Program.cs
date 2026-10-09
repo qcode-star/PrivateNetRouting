@@ -138,9 +138,20 @@ internal static class Program
         {
             case "status":
                 var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
-                Console.WriteLine($"daemon:    listener {(state.DaemonHttpListening ? "up" : "down")}, process {(state.DaemonProcessAlive ? "alive" : "not found")}");
-                Console.WriteLine($"keeper:    {(state.KeeperRunning ? "running" : "not found")}");
-                Console.WriteLine($"node:      BackendState={state.BackendState ?? "no response"}");
+                if (config.Chain.EffectiveMode == ChainMode.Socks5)
+                {
+                    var upstream = string.IsNullOrEmpty(config.ForwardProxy.Socks5UpstreamUser)
+                        ? config.ForwardProxy.Socks5Upstream
+                        : $"{config.ForwardProxy.Socks5UpstreamUser}@{config.ForwardProxy.Socks5Upstream}";
+                    Console.WriteLine($"upstream:  {upstream}, {(state.UpstreamReachable is true ? "reachable" : state.UpstreamReachable is false ? "no route" : "not checked")}");
+                }
+                else
+                {
+                    Console.WriteLine($"daemon:    listener {(state.DaemonHttpListening ? "up" : "down")}, process {(state.DaemonProcessAlive ? "alive" : "not found")}");
+                    Console.WriteLine($"keeper:    {(state.KeeperRunning ? "running" : "not found")}");
+                    Console.WriteLine($"node:      BackendState={state.BackendState ?? "no response"}");
+                }
+
                 Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
                 Console.WriteLine(state.IsFullyUp ? "chain: fully up" : "chain: partial");
                 return 0;
@@ -757,9 +768,12 @@ internal static class Program
                                  --detached starts the detached worker instead and
                                  returns — the worker survives this command
                                  (forwardProxy.detached)
-            pnr chain status     chain state (daemon/keeper/node/proxy/health)
-            pnr chain up         bring the chain up (daemon -> keeper -> node -> proxy; UAC)
-            pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC)
+            pnr chain status     chain state; tailscale mode: daemon/keeper/node/proxy/health,
+                                 socks5 mode: upstream/proxy/health (chain.mode)
+            pnr chain up         bring the chain up (tailscale: daemon -> keeper -> node -> proxy;
+                                 socks5: egress check -> proxy; UAC only in the tailscale mode)
+            pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC; in the
+                                 socks5 mode only the proxy stops)
             pnr check            check the chain with a CONNECT-roundtrip
             pnr status           read-only state summary:
                                  chain processes and port owners (pid), WSL bind, proxy

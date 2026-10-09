@@ -172,6 +172,61 @@ public class DiagnosticsTests : IDisposable
         Assert.Equal("skipped: proxy is not listening", Section(summary, "health").Single().Value);
     }
 
+    // ----- socks5 mode: the chain section is one egress line -----
+
+    [Fact]
+    public async Task Socks5ModeShowsEgressInsteadOfTailscaleLinks()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _,
+            mode: "socks5", upstreamReachable: true);
+        config.ForwardProxy.Socks5UpstreamUser = "alice";
+        var proxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[proxyPort] = [new TcpListenerEntry(IPAddress.Loopback, proxyPort, Environment.ProcessId, "testhost")];
+        proxy.IsRunning = true;
+        probe.Result = HealthProbeResult.OkIn(120, "HTTP/1.1 200 Connection Established");
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.False(summary.ChainStopped);
+        Assert.Equal(["chain", "proxy", "health", "guards", "watchdog", "logs"], summary.Sections.Select(s => s.Key));
+
+        var egress = Section(summary, "chain").Single();
+        Assert.Equal($"egress (alice@{config.ForwardProxy.Socks5Upstream})", egress.Name);
+        Assert.Equal("reachable", egress.Value);
+        Assert.Equal(DiagMark.Good, egress.Mark);
+    }
+
+    [Fact]
+    public async Task Socks5UnreachableEgressIsMarkedBad()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out _, out _,
+            mode: "socks5", upstreamReachable: false);
+        var proxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[proxyPort] = [new TcpListenerEntry(IPAddress.Loopback, proxyPort, Environment.ProcessId, "testhost")];
+        proxy.IsRunning = true;
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        var egress = Section(summary, "chain").Single();
+        Assert.Equal($"egress ({config.ForwardProxy.Socks5Upstream})", egress.Name);
+        Assert.Equal("no route", egress.Value);
+        Assert.Equal(DiagMark.Bad, egress.Mark);
+    }
+
+    [Fact]
+    public async Task Socks5StoppedChainIgnoresForeignDaemonListeners()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out _, out _, mode: "socks5");
+        proxy.IsRunning = false;
+        var daemonHttp = ParsePort(config.Chain.DaemonHttpListen);
+        table.Listeners[daemonHttp] = [new TcpListenerEntry(IPAddress.Loopback, daemonHttp, 100, "tailscaled")];
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.True(summary.ChainStopped); // a daemon listener means nothing in the socks5 mode
+        Assert.Empty(summary.Sections);
+    }
+
     // ----- guard core for diagnostics: without settings.json and WSL -----
 
     [Fact]
@@ -281,9 +336,16 @@ public class DiagnosticsTests : IDisposable
         out FakeTcpTable table,
         out FakeFinderByName finder,
         out FakeProbe probe,
-        out FakeGuardCore guardCore)
+        out FakeGuardCore guardCore,
+        string? mode = null,
+        bool? upstreamReachable = null)
     {
         config = new AppConfig();
+        if (mode is not null)
+        {
+            config.Chain.Mode = mode;
+        }
+
         config.ForwardProxy.Listen = "127.0.0.1:18082";
         config.Chain.DaemonHttpListen = "127.0.0.1:18081";
         config.Chain.DaemonSocksListen = "127.0.0.1:18083";
@@ -296,9 +358,12 @@ public class DiagnosticsTests : IDisposable
         guardCore = new FakeGuardCore();
         var probeFixture = probe;
         var guardFixture = guardCore;
+        var state = mode == "socks5"
+            ? new ChainState(false, false, false, null, proxy.IsRunning, true, upstreamReachable)
+            : new ChainState(true, true, true, "Running", proxy.IsRunning, true);
         return new DiagnosticsService(
             config,
-            new FakeDiagChain(new ChainState(true, true, true, "Running", proxy.IsRunning, true)),
+            new FakeDiagChain(state),
             proxy,
             table,
             finder,
