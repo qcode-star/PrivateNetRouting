@@ -629,6 +629,25 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task AllRunsOneCombinedElevatedCommandWithLiveChecks()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-all");
+        config.Guard.BanProbeName = "probe.invalid";
+        var elevated = new FakeElevatedRunner();
+        var healthCalls = 0;
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), elevated,
+            out _, _ => { healthCalls++; return Task.FromResult(false); });
+
+        await service.AllAsync(enable: true, CancellationToken.None);
+        await service.AllAsync(enable: false, CancellationToken.None);
+
+        // one elevation per action, not one per layer — the collapsed card's point
+        Assert.Equal([GuardElevatedCommands.AllOn, GuardElevatedCommands.AllOff], elevated.Commands);
+        Assert.Equal(2, healthCalls); // live checks after each applying (rule #6)
+    }
+
+    [Fact]
     public async Task SystemProxyOnUsesListenerAddress()
     {
         var config = new AppConfig();
@@ -667,6 +686,33 @@ public class GuardTests : IDisposable
         Assert.Equal(["nrpt-on", "fw-on", "flush", "nrpt-off", "fw-off", "flush"], ops.Calls);
         Assert.DoesNotContain(">>", File.ReadAllText(config.Guard.HostsFile));
         Assert.Contains("removed", removeDetail);
+    }
+
+    /// <summary>The combined action: ban layers first, then the policy — one helper run, one UAC.</summary>
+    [Fact]
+    public void ElevatedAllAppliesBanLayersThenPolicy()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-all-elev");
+        File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
+        config.Guard.BanProbeName = "probe.invalid";
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        var ops = new FakeBanSystemOps();
+        var policy = new FakeEgressPolicyStore();
+        using var log = new FileLog(Path.Combine(_tempDir, "elev-all.log"));
+
+        var onDetail = GuardElevatedCommands.ApplyAll(config, log, ops, policy, enable: true);
+
+        Assert.Equal(["nrpt-on", "fw-on", "flush"], ops.Calls);
+        Assert.Equal("http://127.0.0.1:18082", policy.AppliedUrl);
+        Assert.False(policy.Removed);
+        Assert.Contains("egressProxyUrl=http://127.0.0.1:18082", onDetail);
+
+        var offDetail = GuardElevatedCommands.ApplyAll(config, log, ops, policy, enable: false);
+
+        Assert.Equal(["nrpt-on", "fw-on", "flush", "nrpt-off", "fw-off", "flush"], ops.Calls);
+        Assert.True(policy.Removed);
+        Assert.Contains("removed", offDetail);
     }
 
     public void Dispose()

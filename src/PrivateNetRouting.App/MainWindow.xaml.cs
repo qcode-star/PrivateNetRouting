@@ -479,9 +479,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The combined guard action of the collapsed card: bring every layer up (ban, policy,
-    /// settings.json, WSL — ban and policy ask for UAC), or, when everything is already on,
-    /// remove the ban and the policy.
+    /// The combined guard action of the collapsed card, one UAC prompt: ban and policy go as a
+    /// single elevated command; when enabling, the no-elevation syncs (settings.json, WSL)
+    /// follow in-process.
     /// </summary>
     private async void OnGuardAll(object sender, RoutedEventArgs e)
     {
@@ -492,10 +492,9 @@ public partial class MainWindow : Window
             && snapshot.Wsl.State == GuardState.On;
         await RunGuardAsync(async () =>
         {
-            var ban = await _runtime.Guard.BanAsync(enable: !disable, CancellationToken.None);
-            await _runtime.Guard.PolicyAsync(enable: !disable, CancellationToken.None);
-            var dns = Loc.S(ban.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
-            var direct = Loc.S(ban.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
+            var all = await _runtime.Guard.AllAsync(!disable, CancellationToken.None);
+            var dns = Loc.S(all.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
+            var direct = Loc.S(all.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
             if (disable)
             {
                 _viewModel.SetCheckResult("Main.Guard.All.DisabledFmt", dns, direct);

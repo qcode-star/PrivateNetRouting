@@ -16,9 +16,12 @@ public static class GuardElevatedCommands
     public const string BanOff = "--elevated-guard-ban-off";
     public const string PolicyOn = "--elevated-guard-policy-on";
     public const string PolicyOff = "--elevated-guard-policy-off";
+    // the combined action of the collapsed guards card: ban + policy in one elevation (one UAC)
+    public const string AllOn = "--elevated-guard-all-on";
+    public const string AllOff = "--elevated-guard-all-off";
 
     public static bool IsCommand(string argument) =>
-        argument is BanOn or BanOff or PolicyOn or PolicyOff;
+        argument is BanOn or BanOff or PolicyOn or PolicyOff or AllOn or AllOff;
 
     /// <summary>Runs in an already elevated process (App or pnr); returns the exit code.</summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
@@ -34,8 +37,10 @@ public static class GuardElevatedCommands
             {
                 BanOn => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config.Guard, powershell), enable: true),
                 BanOff => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config.Guard, powershell), enable: false),
-                PolicyOn => ApplyPolicy(config, enable: true),
-                PolicyOff => ApplyPolicy(config, enable: false),
+                PolicyOn => ApplyPolicy(config, new RegistryEgressPolicyStore(), enable: true),
+                PolicyOff => ApplyPolicy(config, new RegistryEgressPolicyStore(), enable: false),
+                AllOn => ApplyAll(config, log, new PowerShellBanSystemOps(config.Guard, powershell), new RegistryEgressPolicyStore(), enable: true),
+                AllOff => ApplyAll(config, log, new PowerShellBanSystemOps(config.Guard, powershell), new RegistryEgressPolicyStore(), enable: false),
                 _ => $"unknown command: {command}",
             };
             log.Info($"elevated {command}: {detail}");
@@ -90,9 +95,22 @@ public static class GuardElevatedCommands
         }
     }
 
-    private static string ApplyPolicy(AppConfig config, bool enable)
+    /// <summary>
+    /// The combined action of the collapsed guards card: the three ban layers and the managed
+    /// policy in one elevation — "enable/disable all" costs one UAC prompt.
+    /// </summary>
+    internal static string ApplyAll(AppConfig config, FileLog log, IBanSystemOps ops, IEgressPolicyStore policy, bool enable)
     {
-        var policy = new RegistryEgressPolicyStore();
+        var ban = ApplyBanLayers(config, log, ops, enable);
+        var policyDetail = ApplyPolicy(config, policy, enable);
+        return $"{ban}; {policyDetail}";
+    }
+
+    private static string ApplyPolicy(AppConfig config, bool enable) =>
+        ApplyPolicy(config, new RegistryEgressPolicyStore(), enable);
+
+    internal static string ApplyPolicy(AppConfig config, IEgressPolicyStore policy, bool enable)
+    {
         if (enable)
         {
             var url = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);

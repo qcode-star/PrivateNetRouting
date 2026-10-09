@@ -184,6 +184,26 @@ public sealed class GuardService(
         return result.Detail;
     }
 
+    /// <summary>
+    /// Ban and policy in one elevation (the combined action of the collapsed card); live checks
+    /// follow, as after a plain ban. settings.json and WSL stay with the caller — they need no
+    /// elevation.
+    /// </summary>
+    public async Task<BanApplyResult> AllAsync(bool enable, CancellationToken ct)
+    {
+        var command = enable ? GuardElevatedCommands.AllOn : GuardElevatedCommands.AllOff;
+        var result = await elevated.RunAsync(command, ct);
+        if (!result.Ok)
+        {
+            log.Error($"guard all {(enable ? "on" : "off")}: {result.Detail}");
+            throw new IOException(result.Detail);
+        }
+
+        log.Info($"guard all {(enable ? "on" : "off")}: {result.Detail}");
+        var live = await LiveChecksAsync(ct);
+        return new BanApplyResult(result.Detail, live);
+    }
+
     public Task<SettingsSyncResult> SyncSettingsAsync(CancellationToken ct) =>
         Task.Run(() =>
         {
