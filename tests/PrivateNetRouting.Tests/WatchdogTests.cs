@@ -103,6 +103,14 @@ public class WatchdogTests : IDisposable
         Assert.Equal(2, wsl.Calls.Count); // listing + bash stop
     }
 
+    [Fact]
+    public void ScriptInputIsNormalizedToLf()
+    {
+        // raw string literals capture the source line endings; bash dies on CR
+        Assert.Equal("a\nb\nc\n", WslProcessRunner.NormalizeScript("a\r\nb\rc\n"));
+        Assert.Equal("a\nb\n", WslProcessRunner.NormalizeScript("a\nb\n"));
+    }
+
     [Theory]
     [InlineData("STATE=none", WslHostState.None)]
     [InlineData("STATE=stopped", WslHostState.Stopped)]

@@ -60,13 +60,22 @@ public sealed class WslProcessRunner : IWslProcessRunner
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
         if (standardInput is not null)
         {
-            await process.StandardInput.WriteAsync(standardInput.AsMemory(), ct);
+            await process.StandardInput.WriteAsync(NormalizeScript(standardInput).AsMemory(), ct);
             process.StandardInput.Close();
         }
 
         await process.WaitForExitAsync(ct);
         return await stdoutTask + await stderrTask;
     }
+
+    /// <summary>
+    /// bash scripts are raw string literals in the source and capture its line endings: a CRLF
+    /// checkout turns every line into "…\r", bash dies on the first one ("then\r" is a syntax
+    /// error) and wsl.exe exit codes do not surface it. Every script fed to a distro goes
+    /// through here, so LF is enforced.
+    /// </summary>
+    internal static string NormalizeScript(string script) =>
+        script.Replace("\r\n", "\n").Replace("\r", "\n");
 }
 
 /// <summary>
