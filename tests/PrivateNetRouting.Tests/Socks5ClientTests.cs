@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using PrivateNetRouting.Core.Net.Socks;
 
 namespace PrivateNetRouting.Tests;
@@ -35,6 +36,55 @@ public class Socks5ClientTests
 
         await Assert.ThrowsAsync<IOException>(() =>
             client.ConnectAsync(IPAddress.Loopback, 443, TimeSpan.FromSeconds(5), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AuthenticatesAndTunnelsWithUsernameAndPassword()
+    {
+        var (upstream, connectTask) = await StartFakeUpstreamAsync(user: "alice", password: "s3cret");
+        var client = new Socks5Client(upstream, "alice", "s3cret");
+
+        var socket = await client.ConnectAsync(IPAddress.Parse("10.1.2.3"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
+        using var _ = socket;
+
+        var stream = new NetworkStream(socket, ownsSocket: false);
+        await stream.WriteAsync("ping"u8.ToArray());
+        var buffer = new byte[16];
+        var read = await stream.ReadAsync(buffer);
+        Assert.Equal("pong"u8.ToArray(), buffer[..read]);
+
+        var (seenIp, seenPort) = await connectTask;
+        Assert.Equal("10.1.2.3", seenIp);
+        Assert.Equal(8443, seenPort);
+    }
+
+    [Fact]
+    public async Task ThrowsWhenUpstreamRejectsTheCredentials()
+    {
+        var (upstream, _) = await StartFakeUpstreamAsync(user: "alice", password: "s3cret");
+        var client = new Socks5Client(upstream, "alice", "wrong");
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            client.ConnectAsync(IPAddress.Loopback, 443, TimeSpan.FromSeconds(5), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ThrowsWhenUpstreamRefusesUsernamePassword()
+    {
+        var (upstream, _) = await StartFakeUpstreamAsync(refuseAuth: true);
+        var client = new Socks5Client(upstream, "alice", "s3cret");
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            client.ConnectAsync(IPAddress.Loopback, 443, TimeSpan.FromSeconds(5), CancellationToken.None));
+    }
+
+    [Fact]
+    public void ConstructorRequiresUserAndPasswordTogether()
+    {
+        Assert.Throws<ArgumentException>(() => new Socks5Client("127.0.0.1:1080", password: "x"));
+        Assert.Throws<ArgumentException>(() => new Socks5Client("127.0.0.1:1080", user: "alice"));
+        _ = new Socks5Client("127.0.0.1:1080"); // no credentials — fine
+        _ = new Socks5Client("127.0.0.1:1080", "alice", "s3cret"); // both — fine
     }
 
     [Fact]
@@ -74,8 +124,14 @@ public class Socks5ClientTests
         Assert.Throws<FormatException>(() => Socks5Client.ParseEndPoint(value));
     }
 
-    /// <summary>Fake SOCKS5 upstream: answers the handshake and replies "pong" to "ping".</summary>
-    private static async Task<(IPEndPoint endpoint, Task<(string Ip, int Port)> seen)> StartFakeUpstreamAsync(bool refuseAuth)
+    /// <summary>
+    /// Fake SOCKS5 upstream: answers the handshake (RFC 1929 user/pass subnegotiation when
+    /// credentials are configured; the tunnel only opens with the exact pair) and replies "pong".
+    /// </summary>
+    private static async Task<(IPEndPoint endpoint, Task<(string Ip, int Port)> seen)> StartFakeUpstreamAsync(
+        bool refuseAuth = false,
+        string? user = null,
+        string? password = null)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -89,11 +145,41 @@ public class Socks5ClientTests
 
             var greeting = new byte[3];
             await ReadExactAsync(stream, greeting);
-            await stream.WriteAsync(refuseAuth ? new byte[] { 5, 0xFF } : new byte[] { 5, 0 });
             if (refuseAuth)
             {
+                await stream.WriteAsync(new byte[] { 5, 0xFF });
                 tcs.SetResult(("none", 0));
                 return;
+            }
+
+            if (user is null)
+            {
+                await stream.WriteAsync(new byte[] { 5, 0 });
+            }
+            else
+            {
+                await stream.WriteAsync(new byte[] { 5, 2 });
+                var subnegotiation = new byte[2]; // VER ULEN
+                await ReadExactAsync(stream, subnegotiation);
+                if (subnegotiation[0] != 1)
+                {
+                    return;
+                }
+
+                var uname = new byte[subnegotiation[1]];
+                var plen = new byte[1];
+                await ReadExactAsync(stream, uname);
+                await ReadExactAsync(stream, plen);
+                var passwd = new byte[plen[0]];
+                await ReadExactAsync(stream, passwd);
+
+                var ok = Encoding.UTF8.GetString(uname) == user
+                    && Encoding.UTF8.GetString(passwd) == password;
+                await stream.WriteAsync(new byte[] { 1, ok ? (byte)0 : (byte)1 });
+                if (!ok)
+                {
+                    return;
+                }
             }
 
             var request = new byte[10];

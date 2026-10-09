@@ -54,6 +54,27 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ConnectsThroughAuthenticatedUpstream()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync("alice", "s3cret");
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300),
+            "alice",
+            "s3cret");
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+
+        var status = await ReadLineAsync(stream);
+        Assert.StartsWith("HTTP/1.1 200", status);
+    }
+
+    [Fact]
     public async Task Replies400ToNonConnect()
     {
         var socksUpstream = await StartRelaySocksAsync();
@@ -171,7 +192,9 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
 
     private async Task<(ForwardProxyService Proxy, IPEndPoint Endpoint)> StartProxyAsync(
         string socksUpstream,
-        Func<string, Core.Net.Dns.ResolveResult> resolve)
+        Func<string, Core.Net.Dns.ResolveResult> resolve,
+        string? user = null,
+        string? password = null)
     {
         var log = new FileLog(Path.Combine(_tempDir, "proxy.log"));
         var config = new ForwardProxyConfig
@@ -185,7 +208,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var proxy = new ForwardProxyService(
             config,
             new FakeResolver(resolve),
-            new Socks5Client(socksUpstream),
+            new Socks5Client(socksUpstream, user, password),
             new ActivityMarker(Path.Combine(_tempDir, "marker"), TimeSpan.FromSeconds(60)),
             log);
         await proxy.StartAsync(CancellationToken.None);
@@ -252,8 +275,11 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return listener;
     }
 
-    /// <summary>SOCKS5 upstream that really connects to the requested IP:port and relays bytes.</summary>
-    private async Task<string> StartRelaySocksAsync()
+    /// <summary>
+    /// SOCKS5 upstream that really connects to the requested IP:port and relays bytes;
+    /// with credentials — the RFC 1929 subnegotiation first, and only the exact pair opens the tunnel.
+    /// </summary>
+    private async Task<string> StartRelaySocksAsync(string? user = null, string? password = null)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -286,7 +312,41 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
                         return;
                     }
 
-                    await stream.WriteAsync(new byte[] { 5, 0 });
+                    if (user is null)
+                    {
+                        await stream.WriteAsync(new byte[] { 5, 0 });
+                    }
+                    else
+                    {
+                        await stream.WriteAsync(new byte[] { 5, 2 });
+                        var subnegotiation = new byte[2]; // VER ULEN
+                        if (!await TryReadExactAsync(stream, subnegotiation) || subnegotiation[0] != 1)
+                        {
+                            return;
+                        }
+
+                        var uname = new byte[subnegotiation[1]];
+                        var plen = new byte[1];
+                        if (!await TryReadExactAsync(stream, uname) || !await TryReadExactAsync(stream, plen))
+                        {
+                            return;
+                        }
+
+                        var passwd = new byte[plen[0]];
+                        if (!await TryReadExactAsync(stream, passwd))
+                        {
+                            return;
+                        }
+
+                        var ok = Encoding.UTF8.GetString(uname) == user
+                            && Encoding.UTF8.GetString(passwd) == password;
+                        await stream.WriteAsync(new byte[] { 1, ok ? (byte)0 : (byte)1 });
+                        if (!ok)
+                        {
+                            return;
+                        }
+                    }
+
                     var request = new byte[10];
                     if (!await TryReadExactAsync(stream, request))
                     {

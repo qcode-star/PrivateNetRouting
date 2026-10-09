@@ -111,7 +111,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new(Path.Combine(config.Logging.Directory, fileName), config.Logging.EffectiveLevel, config.Logging.MaxBytes, config.Logging.Keep);
         var log = NewLog(logFileName);
 
-        var socks = new Socks5Client(fp.Socks5Upstream);
+        var socks = new Socks5Client(fp.Socks5Upstream, fp.Socks5UpstreamUser, fp.Socks5UpstreamPassword);
 
         var seed = fp.DohSeed
             .Select(s => DohEndpoint.TryParse(s, out var ep) && ep is not null ? ep : null)

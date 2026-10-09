@@ -451,6 +451,15 @@ public sealed class ForwardProxyConfig
     /// <summary>SOCKS5 upstream "host:port" (userspace-sidecar), dialing by IP after resolution.</summary>
     public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
 
+    /// <summary>
+    /// Username of the external SOCKS5 upstream (RFC 1929), together with Socks5UpstreamPassword;
+    /// both empty — no authentication (the tailscale sidecar needs none).
+    /// </summary>
+    public string Socks5UpstreamUser { get; set; } = "";
+
+    /// <summary>Password of the external SOCKS5 upstream; lives only in the user config — the repository example holds an empty placeholder.</summary>
+    public string Socks5UpstreamPassword { get; set; } = "";
+
     /// <summary>Seed pool of DoH resolvers in the form "http://IP:PORT/dns-query".</summary>
     public List<string> DohSeed { get; set; } = [];
 

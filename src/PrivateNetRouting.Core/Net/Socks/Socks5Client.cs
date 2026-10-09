@@ -1,26 +1,40 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 namespace PrivateNetRouting.Core.Net.Socks;
 
 /// <summary>
-/// SOCKS5 client (RFC 1928) for the userspace upstream: no authentication, dialing by IP only
-/// (IPv4, ATYP=1). Important: we do not pass the name to the upstream — its own resolution is
-/// poisoned by the hosts/NRPT ban, resolution is always done by the caller.
+/// SOCKS5 client (RFC 1928) for the upstream: no authentication or username/password
+/// (RFC 1929), dialing by IP only (IPv4, ATYP=1). Important: we do not pass the name to the
+/// upstream — its own resolution is poisoned by the hosts/NRPT ban, resolution is always done
+/// by the caller.
 /// </summary>
 public sealed class Socks5Client
 {
     private readonly EndPoint _upstream;
+    private readonly string? _user;
+    private readonly string? _password;
 
-    public Socks5Client(string upstream)
+    public Socks5Client(string upstream, string? user = null, string? password = null)
     {
         _upstream = ParseEndPoint(upstream);
+        (_user, _password) = NormalizeCredentials(user, password);
     }
 
-    public Socks5Client(IPEndPoint upstream)
+    public Socks5Client(IPEndPoint upstream, string? user = null, string? password = null)
     {
         _upstream = upstream;
+        (_user, _password) = NormalizeCredentials(user, password);
+    }
+
+    /// <summary>Credentials go together and only both; empty values mean no authentication.</summary>
+    private static (string? User, string? Password) NormalizeCredentials(string? user, string? password)
+    {
+        return string.IsNullOrEmpty(user) != string.IsNullOrEmpty(password)
+            ? throw new ArgumentException("socks5: upstream user and password must be set together")
+            : (string.IsNullOrEmpty(user) ? null : user, string.IsNullOrEmpty(password) ? null : password);
     }
 
     /// <summary>Establishes a tunnel to IP:port through the upstream and returns a ready socket.</summary>
@@ -40,13 +54,21 @@ public sealed class Socks5Client
             await socket.ConnectAsync(_upstream, cts.Token);
             var stream = new NetworkStream(socket, ownsSocket: false);
 
-            // greeting: VER=5, one method, no-auth
-            await stream.WriteAsync(new byte[] { 0x05, 0x01, 0x00 }, cts.Token);
+            // greeting: VER=5, one method — no-auth, or username/password when configured
+            await stream.WriteAsync(_user is null ? new byte[] { 0x05, 0x01, 0x00 } : new byte[] { 0x05, 0x01, 0x02 }, cts.Token);
             var method = new byte[2];
             await ReadExactAsync(stream, method, cts.Token);
-            if (method[0] != 0x05 || method[1] != 0x00)
+            var expectedMethod = _user is null ? (byte)0x00 : (byte)0x02;
+            if (method[0] != 0x05 || method[1] != expectedMethod)
             {
-                throw new IOException("socks5: upstream rejected the no-auth method");
+                throw new IOException(_user is null
+                    ? "socks5: upstream rejected the no-auth method"
+                    : "socks5: upstream rejected the username/password method");
+            }
+
+            if (_user is not null)
+            {
+                await AuthenticateAsync(stream, _user, _password!, cts.Token);
             }
 
             // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
@@ -88,6 +110,32 @@ public sealed class Socks5Client
         {
             socket.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>RFC 1929 username/password subnegotiation (VER=1).</summary>
+    private static async Task AuthenticateAsync(NetworkStream stream, string user, string password, CancellationToken ct)
+    {
+        var userBytes = Encoding.UTF8.GetBytes(user);
+        var passwordBytes = Encoding.UTF8.GetBytes(password);
+        if (userBytes.Length is < 1 or > 255 || passwordBytes.Length is < 1 or > 255)
+        {
+            throw new InvalidOperationException("socks5: username/password must be 1..255 bytes");
+        }
+
+        var request = new byte[3 + userBytes.Length + passwordBytes.Length];
+        request[0] = 0x01; // subnegotiation version
+        request[1] = (byte)userBytes.Length;
+        userBytes.CopyTo(request, 2);
+        request[2 + userBytes.Length] = (byte)passwordBytes.Length;
+        passwordBytes.CopyTo(request, 3 + userBytes.Length);
+        await stream.WriteAsync(request, ct);
+
+        var answer = new byte[2];
+        await ReadExactAsync(stream, answer, ct);
+        if (answer[0] != 0x01 || answer[1] != 0x00)
+        {
+            throw new IOException("socks5: upstream rejected the credentials");
         }
     }
 
