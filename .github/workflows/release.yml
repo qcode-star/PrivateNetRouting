@@ -1,0 +1,54 @@
+# Release build on a version tag: tests, then packaging/make-release.ps1 (a self-contained
+# publish of both projects, the portable zip, the Inno Setup installer), then a GitHub release
+# with both artifacts and auto-generated notes. The version in Directory.Build.props must
+# match the tag (vX.Y.Z).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check the tag against Directory.Build.props
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME.Substring(1)
+          $props = Get-Content Directory.Build.props -Raw
+          $version = [regex]::Match($props, "<Version>([^<]+)</Version>").Groups[1].Value
+          if ($tag -ne $version)
+          {
+            throw "tag $env:GITHUB_REF_NAME does not match Directory.Build.props version $version"
+          }
+
+      - name: Test
+        run: dotnet test
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build the artifacts (zip + setup)
+        shell: pwsh
+        run: ./packaging/make-release.ps1
+
+      - name: Create the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $n = $tag.Substring(1)
+          gh release create $tag --title $tag --generate-notes `
+            "artifacts/PrivateNetRouting-$n-win-x64.zip" `
+            "artifacts/PrivateNetRouting-$n-setup-win-x64.exe"
