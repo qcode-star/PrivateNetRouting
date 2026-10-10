@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Security.Principal;
@@ -90,16 +91,54 @@ public static class WindowsPrivilege
 /// <summary>Utilities for launching console processes without a window.</summary>
 public static class ProcessOps
 {
+    private const int StdInputHandle = -10;
+    private const int StdOutputHandle = -11;
+    private const int StdErrorHandle = -12;
+    private const int HandleFlagInherit = 0x1;
+    private static bool _stdHandlesGuarded;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetHandleInformation(IntPtr handle, int mask, int flags);
+
+    /// <summary>
+    /// Marks this process's std handles non-inheritable (once, idempotent). Without it every
+    /// spawned child receives copies of them, and a child that outlives us — the daemon's cmd
+    /// wrapper, a detached worker — pins the caller's redirected stdout forever: `pnr chain up`
+    /// under PowerShell capture or a pipe never completes even though the command has finished.
+    /// </summary>
+    public static void KeepStdHandlesFromChildren()
+    {
+        if (_stdHandlesGuarded)
+        {
+            return;
+        }
+
+        _stdHandlesGuarded = true;
+        foreach (var id in new[] { StdInputHandle, StdOutputHandle, StdErrorHandle })
+        {
+            var handle = GetStdHandle(id);
+            if (handle != IntPtr.Zero && handle != new IntPtr(-1))
+            {
+                SetHandleInformation(handle, HandleFlagInherit, 0);
+            }
+        }
+    }
+
     /// <summary>
     /// Launches a command via cmd with file redirection: the file handles belong to cmd
     /// and survive the exit of our process — logs are written while the child is alive, and the chain does not depend
     /// on the application's lifetime. The cmd process itself gets fresh std handles: with
     /// inherited ones a long-lived cmd (it waits for the child) pins the caller's redirected
-    /// stdout forever — `pnr chain up | anything` never sees the end of the stream. Nothing
-    /// writes to these handles: the inner command redirects its own output to files/NUL.
+    /// stdout forever. Nothing writes to these handles: the inner command redirects its own
+    /// output to files/NUL.
     /// </summary>
-    public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath) =>
-        Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))
+    public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath)
+    {
+        KeepStdHandlesFromChildren();
+        return Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -107,6 +146,7 @@ public static class ProcessOps
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         });
+    }
 
     /// <summary>
     /// The form /c "…1&gt;out 2&gt;err": the outer quote paired with the command's own quote gives
