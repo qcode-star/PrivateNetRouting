@@ -35,7 +35,7 @@ comments is in [config/appsettings.example.json](config/appsettings.example.json
 | Updater | Manual MSIX update of Claude Desktop: version check before bring-up, package URL from Claude's own update feed (asked through the already-live proxy) with the AppX journal as the fallback, multi-threaded chunked download through the proxy, Publisher verification, `Add-AppxPackage`. When no source has a package address, the update window offers to raise the chain and asks the sources again over the live chain. A startup check announces an update only with a concrete offered version and lights an accent dot on the update button (the versions in its tooltip), which the update window's own check or a finished installation clears; the window closes itself 30 s after a successful installation, with a visible countdown. |
 | Guards | Direct-access control: the managed `egressProxyUrl` policy, a local ban (hosts + one NRPT rule + firewall subnet block), Claude Code env on Windows and in WSL, and the WinINET system proxy. Status is read-only; changes go through an elevated helper. |
 | Diagnostics | Read-only state summary (port owners, chain processes — or the socks5 egress line, WSL bind, counters, marker, CONNECT roundtrip, guards) in a window of its own; the log list/tail/rotation live in the CLI, the window has an "Open logs" button. |
-| Localization | UI string dictionaries with on-the-fly switching (en/ru; `ui.language` in the config); the selector shows a drawn flag mark and the short code (en/ru/system). |
+| Localization | UI string dictionaries with on-the-fly switching (en/ru; `ui.language` in the config); the selector shows a drawn flag mark and the short code (en/ru), with the config's `auto` displayed as the language it resolves to. |
 
 ## Build
 

@@ -204,7 +204,6 @@
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Language</s:String>
-    <s:String x:Key="Main.Language.Auto">System default</s:String>
 
     <!-- Help menu of the "?" button in the header -->
     <s:String x:Key="Main.Help">Help</s:String>

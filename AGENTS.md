@@ -127,7 +127,7 @@ config; they change only by explicitly editing the user config.
 | App self-update | a one-time check on GUI start (`ui.checkAppUpdatesOnStart`) and a "Check for updates…" item of the "?" help menu: the repository's GitHub releases against the running version; a newer release — an offer to open the releases page (no auto-install); the request is anonymous api.github.com (the repository is public), no chain and no proxy needed; at start a failure is logged quietly, from the menu it is a message box | `PrivateNetRouting.Core.AppUpdate` + the "?" menu item; log `appupdate.log` |
 | BrowserLauncher | launching a browser with an isolated profile and the application proxy, without touching system settings: Firefox — a separate profile with user.js, rewritten on every launch (the proxy address from `forwardProxy.listen`, `no_proxies_on` — the `launcher.bypassDomains` domains in both forms + `*.tld` from `browser.directTlds`, `failover_direct=false`, `trr.mode=5`), started with `--new-instance` (otherwise the URL would go to the everyday instance without a proxy); Chromium-like — `--proxy-server`/`--proxy-bypass-list`/`--user-data-dir`/`--no-first-run` (a separate directory is mandatory: a running instance ignores the flags); the chain is like the Claude launcher's (live CONNECT, on failure an idempotent bring-up drawn in the chain card while waiting); the browser is chosen by `browser.type` (firefox/chromium, an unknown value — firefox), the private window — `browser.private` or a flag; an already running instance of ours (cmdline with our profile) is not duplicated — a note in the application window | `PrivateNetRouting.Core.Launcher.BrowserLauncher`; CLI `pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]`; the "Browser" button in the main window; GUI shortcut mode `--launch-browser`; the "Claude (browser)" shortcuts point at the application |
 | Diagnostics | a read-only state summary: owners of the chain listeners with PIDs (a TCP table through iphlpapi, no PowerShell), keeper/node — or, in the socks5 mode, one egress line (the upstream with its user, never the password, and its reachability), the proxy's WSL bind, counters and age of the activity marker, a detailed CONNECT roundtrip (time + first response line), the core of the guards (policy + ban, without WSL), idle stopper liveness (visible from outside by the command line: the detached worker `--watchdog-worker` or the foreground `pnr watchdog`); a fully stopped chain — a short "normal" message instead of the full picture (in the socks5 mode the daemon ports mean nothing and are not consulted); log viewing (a list with sizes, tail by name `--tail N`) and rotation: the process's live log — in place (`FileLog.RotateNow`), a free file — by shifting the age chain, one held by another process — honestly "locked" | `PrivateNetRouting.Core.Diagnostics` + `DiagnosticsWindow` in App (the "Diagnostics…" item of the "?" help menu: a highlighted summary and an "Open logs" button — the log list and rotation live in the CLI); CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]` |
-| Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | `PrivateNetRouting.App/Localization`; en/ru; a flag selector (en/ru/system, drawn by `LanguageFlag`) in the window header |
+| Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | `PrivateNetRouting.App/Localization`; en/ru; a flag selector (en/ru, drawn by `LanguageFlag`) in the window header — no "system" option: the config's `auto` is shown as the language it resolves to, a manual choice writes the concrete code to the config |
 
 Architecture notes:
 
@@ -198,9 +198,10 @@ src/
   PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
                              # window hidden to the tray), tray (TrayIcon: show window, chain
                              # up/down, launch Claude, two exits, balloon),
-                             # the language selector with drawn flag marks (en/ru/system,
-                             # LanguageFlag + the data template) and the "?" help menu
-                             # (diagnostics, open logs, check for updates, about with the
+                             # the language selector with drawn flag marks (en/ru; the config's
+                             # "auto" shows as the resolved language, a manual choice writes the
+                             # code to the config; LanguageFlag + the data template) and the "?"
+                             # help menu (diagnostics, open logs, check for updates, about with the
                              # project's GitHub page),
                              # the chain card — the single lifecycle control
                              # (idempotent bring-up/stop of the whole chain, the animated rail
@@ -232,7 +233,7 @@ src/
                              # (AppIcons + Assets/app.ico, the tray is a WinForms NotifyIcon);
                              # elevated helper arguments are handled before the UI
     LanguageFlag.cs          # the language selector's option data (LanguageOption) and the drawn
-                             # mark of a language: the Union Jack / three stripes / the globe
+                             # mark of a language: the Union Jack / three stripes
     Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary
                              # swap (DynamicResource in XAML, Loc.S/Loc.F in code,
                              # Loc.LanguageChanged)

@@ -1404,18 +1404,20 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo(AppUpdateChecker.ReleasesPageUrl) { UseShellExecute = true });
 
     /// <summary>
-    /// Fills the language selector: a drawn flag + the short code per language, then "system"
-    /// with the globe mark; selection — by the config value, tooltips carry the full names.
-    /// The items are plain data rendered by the item template.
+    /// Fills the language selector: a drawn flag + the short code per supported language — the
+    /// config's "auto" is not an option, the language it resolves to is shown instead. Selection —
+    /// by the resolved value, tooltips carry the full names. The items are plain data rendered
+    /// by the item template.
     /// </summary>
     private void FillLanguages(string preference)
     {
         _fillingLanguages = true;
-        var wanted = preference?.Trim().ToLowerInvariant();
-        var options = new List<LanguageOption> { new(AppLanguage.Auto, "system", Loc.S("Main.Language.Auto")) };
-        options.AddRange(AppLanguage.Supported.Select(code => new LanguageOption(code, code, LanguageDisplayName(code))));
+        var current = AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture);
+        var options = AppLanguage.Supported
+            .Select(code => new LanguageOption(code, code, LanguageDisplayName(code)))
+            .ToList();
         LanguageBox.ItemsSource = options;
-        LanguageBox.SelectedItem = options.FirstOrDefault(option => option.Code == wanted) ?? options[0];
+        LanguageBox.SelectedItem = options.FirstOrDefault(option => option.Code == current);
         _fillingLanguages = false;
     }
 
@@ -1432,10 +1434,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        // the options are the supported codes only, so a manual choice is always concrete:
+        // the config stops saying "auto" from the moment the user picks a language
         var preference = selected.Code;
         try
         {
-            Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
+            Loc.Apply(preference);
             AppConfigStore.Update(config => config.Ui.Language = preference);
         }
         catch (Exception ex)
@@ -1445,9 +1449,7 @@ public partial class MainWindow : Window
         }
 
         FillLanguages(preference);
-        _viewModel.SetCheckResult(
-            "Main.LanguageSavedFmt",
-            preference == AppLanguage.Auto ? Loc.S("Main.Language.Auto") : preference);
+        _viewModel.SetCheckResult("Main.LanguageSavedFmt", preference);
     }
 }
 
