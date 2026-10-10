@@ -33,11 +33,13 @@ public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
 }
 
 /// <summary>
-/// Local CONNECT proxy. It resolves names via DoH through the SOCKS5 upstream —
-/// system resolution is not used (it is overridden by the bans), dialing goes by IP over the same
-/// SOCKS5. It binds to the primary address from the config and once on the WSL NAT gateway when the
-/// adapter appears. Normal mode — silence in the log: start/stop, warnings, errors; per-request
-/// tracing — Debug.
+/// Local CONNECT proxy. In the tailscale mode it resolves names via DoH through the SOCKS5
+/// upstream — system resolution is not used (it is overridden by the bans) — and dials by IP
+/// over the same SOCKS5. In the socks5 mode the trusted external upstream resolves on its side:
+/// the target name rides the CONNECT itself (ATYP=3, no DoH machinery exists in that mode at
+/// all). It binds to the primary address from the config and once on the WSL NAT gateway when
+/// the adapter appears. Normal mode — silence in the log: start/stop, warnings, errors;
+/// per-request tracing — Debug.
 /// </summary>
 public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposable
 {
@@ -51,10 +53,11 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
 
     private readonly ForwardProxyConfig _config;
-    private readonly IDnsResolver _resolver;
+    private readonly IDnsResolver? _resolver;
     private readonly Socks5Client _socks;
     private readonly ActivityMarker _marker;
     private readonly FileLog _log;
+    private readonly bool _passHostName;
     private readonly CancellationTokenSource _cts = new();
     private readonly List<TcpListener> _listeners = [];
     private readonly object _gate = new();
@@ -66,16 +69,18 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     public ForwardProxyService(
         ForwardProxyConfig config,
-        IDnsResolver resolver,
+        IDnsResolver? resolver,
         Socks5Client socks,
         ActivityMarker marker,
-        FileLog log)
+        FileLog log,
+        bool passHostNameToUpstream = false)
     {
         _config = config;
         _resolver = resolver;
         _socks = socks;
         _marker = marker;
         _log = log;
+        _passHostName = passHostNameToUpstream;
     }
 
     public bool IsRunning => _running;
@@ -237,16 +242,31 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             }
 
             var target = request!;
-            var destination = IPAddress.TryParse(target.Host, out var literal)
-                ? new ResolveResult(literal, "literal", null)
-                : await _resolver.ResolveAsync(target.Host, _cts.Token);
+            Socket upstreamSocket;
+            string route;
+            if (_passHostName)
+            {
+                // the socks5 mode: the name rides the CONNECT, the trusted upstream resolves
+                upstreamSocket = await _socks.ConnectAsync(
+                    target.Host, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), _cts.Token);
+                route = "upstream resolves";
+            }
+            else
+            {
+                var resolver = _resolver
+                    ?? throw new InvalidOperationException("forward-proxy: no resolver configured for by-IP dialing");
+                var destination = IPAddress.TryParse(target.Host, out var literal)
+                    ? new ResolveResult(literal, "literal", null)
+                    : await resolver.ResolveAsync(target.Host, _cts.Token);
+                upstreamSocket = await _socks.ConnectAsync(
+                    destination.Ip, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), _cts.Token);
+                route = $"{destination.Ip} ({destination.Source})";
+            }
 
-            using var upstreamClient = await _socks.ConnectAsync(
-                destination.Ip, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), _cts.Token);
-
+            using var upstreamClient = upstreamSocket;
             await stream.WriteAsync(EstablishResponse, _cts.Token);
             _marker.Touch();
-            _log.Debug($"forward-proxy: {target} -> {destination.Ip} ({destination.Source})");
+            _log.Debug($"forward-proxy: {target} -> {route}");
 
             var upstreamStream = new NetworkStream(upstreamClient, ownsSocket: false);
             await TunnelAsync(stream, upstreamStream);

@@ -7,9 +7,10 @@ namespace PrivateNetRouting.Core.Net.Socks;
 
 /// <summary>
 /// SOCKS5 client (RFC 1928) for the upstream: no authentication or username/password
-/// (RFC 1929), dialing by IP only (IPv4, ATYP=1). Important: we do not pass the name to the
-/// upstream — its own resolution is poisoned by the hosts/NRPT ban, resolution is always done
-/// by the caller.
+/// (RFC 1929). Two dial forms: by IPv4 (ATYP=1) — the tailscale sidecar's own resolution is
+/// poisoned by the hosts/NRPT ban, so the caller always resolves first; and by name (ATYP=3) —
+/// the socks5 mode passes the target name to the trusted external upstream, which resolves it
+/// on its side.
 /// </summary>
 public sealed class Socks5Client
 {
@@ -38,13 +39,55 @@ public sealed class Socks5Client
     }
 
     /// <summary>Establishes a tunnel to IP:port through the upstream and returns a ready socket.</summary>
-    public async Task<Socket> ConnectAsync(IPAddress destination, int port, TimeSpan timeout, CancellationToken ct)
+    public Task<Socket> ConnectAsync(IPAddress destination, int port, TimeSpan timeout, CancellationToken ct)
     {
         if (destination.AddressFamily != AddressFamily.InterNetwork)
         {
             throw new NotSupportedException($"socks5: dial is IPv4-only, got {destination}");
         }
 
+        // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
+        var request = new byte[10];
+        request[0] = 0x05;
+        request[1] = 0x01;
+        request[3] = 0x01;
+        destination.TryWriteBytes(request.AsSpan(4, 4), out _);
+        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(8, 2), (ushort)port);
+        return DialAsync(request, timeout, ct);
+    }
+
+    /// <summary>
+    /// Establishes a tunnel to host:port, passing the name to the upstream (ATYP=3) — its
+    /// resolver answers. A name that is an IP literal still dials by ATYP=1.
+    /// </summary>
+    public Task<Socket> ConnectAsync(string hostName, int port, TimeSpan timeout, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(hostName);
+        if (IPAddress.TryParse(hostName, out var literal))
+        {
+            return ConnectAsync(literal, port, timeout, ct);
+        }
+
+        var nameLength = Encoding.UTF8.GetByteCount(hostName);
+        if (nameLength is < 1 or > 255)
+        {
+            throw new ArgumentException($"socks5: hostname must be 1..255 bytes, got {nameLength}", nameof(hostName));
+        }
+
+        // CONNECT: VER CMD=1 RSV=0 ATYP=3 name-len name port
+        var request = new byte[7 + nameLength];
+        request[0] = 0x05;
+        request[1] = 0x01;
+        request[3] = 0x03;
+        request[4] = (byte)nameLength;
+        Encoding.UTF8.GetBytes(hostName, request.AsSpan(5));
+        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(5 + nameLength, 2), (ushort)port);
+        return DialAsync(request, timeout, ct);
+    }
+
+    /// <summary>Negotiates the upstream, sends the prepared CONNECT request, returns the tunnel socket.</summary>
+    private async Task<Socket> DialAsync(byte[] request, TimeSpan timeout, CancellationToken ct)
+    {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
 
@@ -71,13 +114,6 @@ public sealed class Socks5Client
                 await AuthenticateAsync(stream, _user, _password!, cts.Token);
             }
 
-            // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
-            var request = new byte[10];
-            request[0] = 0x05;
-            request[1] = 0x01;
-            request[3] = 0x01;
-            destination.TryWriteBytes(request.AsSpan(4, 4), out _);
-            BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(8, 2), (ushort)port);
             await stream.WriteAsync(request, cts.Token);
 
             var header = new byte[4]; // VER REP RSV ATYP

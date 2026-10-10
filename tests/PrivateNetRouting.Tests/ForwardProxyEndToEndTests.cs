@@ -125,6 +125,54 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         Assert.True(alive);
     }
 
+    [Fact]
+    public async Task Socks5ModePassesTargetNameToUpstream()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var (socksUpstream, seenName) = await StartNameRelaySocksAsync(originPort);
+
+        // the resolver must never be called: in the socks5 mode the name goes to the upstream
+        var log = new FileLog(Path.Combine(_tempDir, "proxy-passthrough.log"));
+        var config = new ForwardProxyConfig
+        {
+            Listen = "127.0.0.1:0",
+            BindWslGateway = false,
+            Socks5Upstream = socksUpstream,
+            HeaderTimeoutSeconds = 5,
+            SocksTimeoutSeconds = 5,
+        };
+        var proxy = new ForwardProxyService(
+            config,
+            new FakeResolver(_ => throw new IOException("resolution must not happen in the socks5 mode")),
+            new Socks5Client(socksUpstream),
+            new ActivityMarker(Path.Combine(_tempDir, "marker-passthrough"), TimeSpan.FromSeconds(60)),
+            log,
+            passHostNameToUpstream: true);
+        await proxy.StartAsync(CancellationToken.None);
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(ParseIpEndPoint(proxy.ListenerEndpoints[0]));
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+
+        var status = await ReadLineAsync(stream);
+        Assert.StartsWith("HTTP/1.1 200", status);
+
+        await stream.WriteAsync("ping"u8.ToArray());
+        var echo = new byte[16];
+        var total = 0;
+        while (total < 4)
+        {
+            var read = await stream.ReadAsync(echo.AsMemory(total));
+            Assert.True(read > 0);
+            total += read;
+        }
+
+        Assert.Equal("pong"u8.ToArray(), echo[..4]);
+        Assert.Equal("target.example", await seenName);
+    }
+
     /// <summary>
     /// Regression of the GUI deadlock on exit: OnExit synchronously waits for DisposeAsync under a
     /// SynchronizationContext whose thread is blocked by that same wait (Dispatcher).
@@ -373,6 +421,92 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             }
         });
         return ((IPEndPoint)listener.LocalEndpoint).ToString();
+    }
+
+    /// <summary>
+    /// SOCKS5 upstream for the passthrough tests: accepts a CONNECT by name (ATYP=3), records
+    /// the seen name and relays to the prearranged local port (stands in for "the upstream
+    /// resolved the name").
+    /// </summary>
+    private async Task<(string Upstream, Task<string> SeenName)> StartNameRelaySocksAsync(int originPort)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        _listeners.Add(listener);
+        var tcs = new TaskCompletionSource<string>();
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                TcpClient session;
+                try
+                {
+                    session = await listener.AcceptTcpClientAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (SocketException)
+                {
+                    return;
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    using var _ = session;
+                    var stream = session.GetStream();
+                    var greeting = new byte[3];
+                    if (!await TryReadExactAsync(stream, greeting))
+                    {
+                        return;
+                    }
+
+                    await stream.WriteAsync(new byte[] { 5, 0 });
+
+                    var header = new byte[4]; // VER CMD RSV ATYP
+                    if (!await TryReadExactAsync(stream, header) || header[3] != 0x03)
+                    {
+                        return;
+                    }
+
+                    var len = new byte[1];
+                    if (!await TryReadExactAsync(stream, len))
+                    {
+                        return;
+                    }
+
+                    var name = new byte[len[0]];
+                    if (!await TryReadExactAsync(stream, name))
+                    {
+                        return;
+                    }
+
+                    var portBytes = new byte[2];
+                    if (!await TryReadExactAsync(stream, portBytes))
+                    {
+                        return;
+                    }
+
+                    tcs.TrySetResult(Encoding.UTF8.GetString(name));
+                    await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
+
+                    try
+                    {
+                        using var target = new TcpClient();
+                        await target.ConnectAsync(IPAddress.Loopback, originPort);
+                        var targetStream = target.GetStream();
+                        await Task.WhenAll(
+                            RelayAsync(stream, targetStream),
+                            RelayAsync(targetStream, stream));
+                    }
+                    catch (SocketException)
+                    {
+                    }
+                });
+            }
+        });
+        return (((IPEndPoint)listener.LocalEndpoint).ToString(), tcs.Task);
     }
 
     private static async Task RelayAsync(NetworkStream from, NetworkStream to)

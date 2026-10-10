@@ -33,7 +33,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public FileLog Log { get; }
 
-    public DohEndpointPool DohPool { get; }
+    /// <summary>The DoH pool — the resolver set of the tailscale mode; null in the socks5 mode.</summary>
+    public DohEndpointPool? DohPool { get; }
 
     public ChainSupervisor Chain { get; }
 
@@ -76,7 +77,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -112,50 +113,61 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var log = NewLog(logFileName);
 
         var socks = new Socks5Client(fp.Socks5Upstream, fp.Socks5UpstreamUser, fp.Socks5UpstreamPassword);
+        var socks5 = config.Chain.EffectiveMode == ChainMode.Socks5;
 
-        var seed = fp.DohSeed
-            .Select(s => DohEndpoint.TryParse(s, out var ep) && ep is not null ? ep : null)
-            .OfType<DohEndpoint>()
-            .ToList();
-        var rejected = fp.DohSeed.Count - seed.Count;
-        if (rejected > 0)
+        // The DoH machinery is a tailscale-mode tool: the sidecar's own resolution is poisoned by
+        // the bans, so names resolve through the tailnet DoH (discovered from the netmap or taken
+        // from the seed set). In the socks5 mode the trusted upstream resolves the name carried by
+        // the CONNECT — nothing in this process resolves anything, so no pool is built and no
+        // probes run.
+        DohEndpointPool? pool = null;
+        CachingDnsResolver? resolver = null;
+        if (socks5)
         {
-            log.Warn($"doh: skipped malformed seed endpoints: {rejected}");
+            log.Info("doh: not used in the socks5 mode: names go to the upstream with the CONNECT");
+        }
+        else
+        {
+            var seed = fp.DohSeed
+                .Select(s => DohEndpoint.TryParse(s, out var ep) && ep is not null ? ep : null)
+                .OfType<DohEndpoint>()
+                .ToList();
+            var rejected = fp.DohSeed.Count - seed.Count;
+            if (rejected > 0)
+            {
+                log.Warn($"doh: skipped malformed seed endpoints: {rejected}");
+            }
+
+            // netmap discovery reads the tailnet config through the sidecar pipe; disabled — the
+            // pool lives on the seed set alone
+            IDohEndpointSource? source = fp.DohDiscovery.Enabled
+                ? new TailscaleNetmapDohSource(fp.DohDiscovery, log)
+                : null;
+            if (source is null && seed.Count == 0)
+            {
+                log.Warn("doh: discovery is off and the seed set is empty — name resolution will not work");
+            }
+            pool = new DohEndpointPool(
+                socks,
+                seed,
+                log,
+                TimeSpan.FromSeconds(fp.DohRefreshSeconds),
+                TimeSpan.FromSeconds(fp.DohProbeTimeoutSeconds),
+                TimeSpan.FromSeconds(fp.DohDeadCooldownSeconds),
+                fp.DohProbeName,
+                source);
+
+            resolver = new CachingDnsResolver(
+                new DohResolver(socks, pool, TimeSpan.FromSeconds(fp.DohTimeoutSeconds)),
+                TimeSpan.FromSeconds(fp.CacheTtlMinSeconds),
+                TimeSpan.FromSeconds(fp.CacheTtlMaxSeconds));
         }
 
-        // netmap discovery reads the tailnet config through the sidecar pipe — it only exists in
-        // the tailscale mode; in socks5 mode the pool lives on the seed set
-        IDohEndpointSource? source = null;
-        if (fp.DohDiscovery.Enabled)
-        {
-            if (config.Chain.EffectiveMode == ChainMode.Tailscale)
-            {
-                source = new TailscaleNetmapDohSource(fp.DohDiscovery);
-            }
-            else
-            {
-                log.Info("doh: netmap discovery needs the tailscale mode, keeping the seed set");
-            }
-        }
-        var pool = new DohEndpointPool(
-            socks,
-            seed,
-            log,
-            TimeSpan.FromSeconds(fp.DohRefreshSeconds),
-            TimeSpan.FromSeconds(fp.DohProbeTimeoutSeconds),
-            TimeSpan.FromSeconds(fp.DohDeadCooldownSeconds),
-            fp.DohProbeName,
-            source);
-
-        var resolver = new CachingDnsResolver(
-            new DohResolver(socks, pool, TimeSpan.FromSeconds(fp.DohTimeoutSeconds)),
-            TimeSpan.FromSeconds(fp.CacheTtlMinSeconds),
-            TimeSpan.FromSeconds(fp.CacheTtlMaxSeconds));
         var marker = new ActivityMarker(
             fp.ActivityMarkerPath,
             TimeSpan.FromSeconds(fp.ActivityTouchIntervalSeconds));
 
-        var proxy = new ForwardProxyService(fp, resolver, socks, marker, log);
+        var proxy = new ForwardProxyService(fp, resolver, socks, marker, log, passHostNameToUpstream: socks5);
 
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
@@ -178,7 +190,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             // fire and forget: the raise result must not wait for the worker spawn
             () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)),
             config.Chain.EffectiveMode == ChainMode.Socks5
-                ? ct => EgressCheckAsync(config, resolver, socks, chainLog, ct)
+                ? ct => EgressCheckAsync(config, socks, chainLog, ct)
                 : null);
 
         var launcherLog = NewLog("launcher.log");
@@ -268,12 +280,12 @@ public sealed class ProxyRuntime : IAsyncDisposable
         (await ChainProbeAsync(config, ct)).Ok;
 
     /// <summary>
-    /// The socks5 egress check: the per-connection path without the local listener — DoH
-    /// resolution (the DoH traffic itself rides the upstream) and a CONNECT-dial through it.
+    /// The socks5 egress check: a CONNECT-dial by name straight through the upstream — the same
+    /// per-connection shape as the proxy's own path (the name rides the tunnel, the upstream
+    /// resolves on its side).
     /// </summary>
     private static async Task<bool> EgressCheckAsync(
         AppConfig config,
-        IDnsResolver resolver,
         Socks5Client socks,
         FileLog log,
         CancellationToken ct)
@@ -281,9 +293,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         try
         {
             var fp = config.ForwardProxy;
-            var destination = await resolver.ResolveAsync(fp.HealthCheckHost, ct);
             using var connection = await socks.ConnectAsync(
-                destination.Ip,
+                fp.HealthCheckHost,
                 fp.HealthCheckPort,
                 TimeSpan.FromSeconds(fp.SocksTimeoutSeconds),
                 ct);
@@ -351,7 +362,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         // ConfigureAwait: Dispose is awaited blocking from the GUI (OnExit) — without it the
         // shutdown chain hits the captured Dispatcher context and deadlocks the process
         await ProxyService.DisposeAsync().ConfigureAwait(false);
-        DohPool.Dispose();
+        DohPool?.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();
         _browserLog.Dispose();
