@@ -56,6 +56,17 @@ public sealed class WatchdogSupervisor(
     public bool IsRunning() => FindStopperPids().Count > 0;
 
     /// <summary>
+    /// The auto-start of the last chain raise (still pending or done). The raise itself fires it
+    /// and forgets it, but a command-line process exits right after the raise — it awaits this
+    /// task first, or the worker spawn dies with the process and the stopper is never armed.
+    /// </summary>
+    public Task LastAutoStart { get; private set; } = Task.CompletedTask;
+
+    /// <summary>Chain-raised hook: arms the stopper off the raise path (watchdog.autoStart).</summary>
+    public void TrackAutoStart() =>
+        LastAutoStart = Task.Run(() => AutoStartAsync(CancellationToken.None));
+
+    /// <summary>
     /// Idempotent start: a running stopper is left alone; otherwise the same executable with the
     /// marker is spawned through cmd (stdout to NUL, stderr to a file) and the start is confirmed
     /// by the process list — the same truth the chain card row reads.

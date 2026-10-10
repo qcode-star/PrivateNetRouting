@@ -189,8 +189,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             chainLog,
             ct => ChainHealthAsync(config, ct),
             // after every successful raise the idle stopper re-arms itself (watchdog.autoStart);
-            // fire and forget: the raise result must not wait for the worker spawn
-            () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)),
+            // fire and forget: the raise result must not wait for the worker spawn — the pending
+            // task is tracked on the supervisor so a CLI process can await it before exiting
+            watchdogControl.TrackAutoStart,
             // a completed stop takes the idle stopper down with the chain (awaited: "chain down"
             // means no stoppers either — the GUI and `pnr chain down` return to a clean state)
             ct => watchdogControl.StopAsync(ct),

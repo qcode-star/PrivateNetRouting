@@ -159,6 +159,7 @@ internal static class Program
             case "up":
                 await runtime.Chain.EnsureRunningAsync(progress, CancellationToken.None);
                 Console.WriteLine("chain is up");
+                await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
                 return 0;
 
             case "down":
@@ -346,6 +347,7 @@ internal static class Program
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
         var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly), progress, CancellationToken.None);
+        await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         if (result.Outcome == LaunchOutcome.CheckOnly)
         {
             Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
@@ -404,6 +406,7 @@ internal static class Program
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
         var result = await runtime.Browser.LaunchAsync(options, progress, CancellationToken.None);
+        await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         if (result.Outcome != BrowserLaunchOutcome.Launched)
         {
             Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
