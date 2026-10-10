@@ -422,6 +422,9 @@ focus"). Branching: `main` is the buildable state; features go in short branches
 - `config/appsettings.example.json` — the authoritative config schema with placeholders. A new
   setting goes here and into `AppConfig` before any code reads it (rule #3).
 - `README.md` — the human-facing module overview.
+- `docs/testing.md` — the hands-on testing guide: GUI automation on a locked session (UIA +
+  PrintWindow recipes, what works unattended and what does not) and the socks5-for-tailnet
+  test setup; read it before a test session instead of rediscovering the methods.
 - `.zcodeignore` — the block above the sync marker is rewritten from `.gitignore`; put agent-only
   rules below the marker line, or they will be lost on the next sync.
 - `.zcode/` is not git-ignored and holds no tracked files; anything written there (e.g. under
