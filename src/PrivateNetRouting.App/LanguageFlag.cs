@@ -9,7 +9,13 @@ namespace PrivateNetRouting.App;
 /// One option of the language selector: the config code, the short label and the full name
 /// for the tooltip.
 /// </summary>
-public sealed record LanguageOption(string Code, string Label, string Hint);
+/// <summary>A language selector option; Label is the short code shown next to the flag, Hint the
+/// full name in the tooltip. ToString returns the label: it becomes the combo item's UIA name,
+/// which assistive tech reads.</summary>
+public sealed record LanguageOption(string Code, string Label, string Hint)
+{
+    public override string ToString() => Label;
+}
 
 /// <summary>
 /// The mark of a language selector option: a small drawn flag — the Union Jack for en, three
