@@ -93,13 +93,19 @@ public static class ProcessOps
     /// <summary>
     /// Launches a command via cmd with file redirection: the file handles belong to cmd
     /// and survive the exit of our process — logs are written while the child is alive, and the chain does not depend
-    /// on the application's lifetime.
+    /// on the application's lifetime. The cmd process itself gets fresh std handles: with
+    /// inherited ones a long-lived cmd (it waits for the child) pins the caller's redirected
+    /// stdout forever — `pnr chain up | anything` never sees the end of the stream. Nothing
+    /// writes to these handles: the inner command redirects its own output to files/NUL.
     /// </summary>
     public static Process? StartViaCmd(string commandLine, string? stdoutPath, string stderrPath) =>
         Process.Start(new ProcessStartInfo("cmd.exe", BuildCmdArguments(commandLine, stdoutPath, stderrPath))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         });
 
     /// <summary>
