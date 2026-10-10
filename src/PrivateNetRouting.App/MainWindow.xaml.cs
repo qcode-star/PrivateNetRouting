@@ -126,7 +126,28 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized)
         {
             Hide();
+            return;
         }
+
+        if (WindowState == WindowState.Normal)
+        {
+            // A maximize/restore cycle breaks SizeToContent: WPF keeps the content height measured
+            // under the maximized bounds and afterwards ignores content changes (collapsing a card
+            // no longer shrinks the window). Re-arming it re-measures against the restored size;
+            // posted so the Win32 restore finishes before the window is resized.
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, ReArmSizeToContent);
+        }
+    }
+
+    private void ReArmSizeToContent()
+    {
+        if (WindowState != WindowState.Normal)
+        {
+            return; // the state changed again while the callback waited — leave the new state alone
+        }
+
+        SizeToContent = SizeToContent.Manual;
+        SizeToContent = SizeToContent.Height;
     }
 
     protected override void OnClosed(EventArgs e)
