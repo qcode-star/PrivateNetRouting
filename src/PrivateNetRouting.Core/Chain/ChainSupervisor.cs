@@ -68,7 +68,9 @@ public interface IChainSupervisor
 /// tailscale — daemon → keeper → node (liveness: daemon HTTP listener, watch-ipn process,
 /// BackendState=Running), socks5 — a single check of the provided external upstream. Both
 /// continue proxy → health (proxy listener, live CONNECT-roundtrip). A successful bring-up ends
-/// with the chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart).
+/// with the chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart);
+/// a completed stop ends with the chainStopped hook — the idle stopper is taken down through it
+/// (a stopped chain has nothing left to stop).
 /// </summary>
 public sealed class ChainSupervisor(
     ChainConfig config,
@@ -79,6 +81,7 @@ public sealed class ChainSupervisor(
     FileLog log,
     Func<CancellationToken, Task<bool>> healthCheck,
     Action? chainRaised = null,
+    Func<CancellationToken, Task>? chainStopped = null,
     Func<CancellationToken, Task<bool>>? upstreamCheck = null) : IChainSupervisor
 {
     private readonly bool _socks5 = config.EffectiveMode == ChainMode.Socks5;
@@ -305,6 +308,13 @@ public sealed class ChainSupervisor(
         }
 
         log.Info("chain: stopped");
+
+        // the idle stopper exists only over a live chain: the stop is its end too. Its own token
+        // is not trusted here — a cancelled chain stop must still take the stoppers down
+        if (chainStopped is not null)
+        {
+            await chainStopped(CancellationToken.None);
+        }
     }
 
     /// <summary>A step into the UI/CLI progress; also a Debug line to the log (the full bring-up picture).</summary>

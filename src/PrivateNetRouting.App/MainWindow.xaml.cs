@@ -847,6 +847,8 @@ public partial class MainWindow : Window
             _viewModel.SetChainBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
+            // a stop takes the idle stopper down with the chain — the row must not wait for the next poll
+            await RefreshIdleStopAsync();
         }
     }
 
@@ -1088,6 +1090,7 @@ public partial class MainWindow : Window
             EndOperation();
             SettleChainCardAfterOperation(success);
             await RefreshChainAsync();
+            await RefreshIdleStopAsync();
         }
     }
 
@@ -1180,11 +1183,12 @@ public partial class MainWindow : Window
             EndOperation();
             SettleChainCardAfterOperation(success);
             await RefreshChainAsync();
+            await RefreshIdleStopAsync();
         }
     }
 
     /// <summary>
-    /// Signal about a Claude update found at startup: a line next to the launch buttons.
+    /// Signal about a Claude update found at startup: the badge dot on the update button.
     /// Returns the localized text — App uses it for the tray balloon as well.
     /// </summary>
     public string SetUpdateNotice(string installedVersion, string? offeredVersion)
@@ -1194,6 +1198,11 @@ public partial class MainWindow : Window
             ? Loc.S("Main.Update.Available")
             : Loc.F("Main.Update.AvailableFmt", installedVersion, offeredVersion);
     }
+
+#if DEBUG
+    /// <summary>Visual check of the update badge: fake versions, no feed touched (the --force-update-badge debug run).</summary>
+    public void DebugShowUpdateBadge() => _viewModel.SetUpdateNotice("0.5.0", "0.6.0");
+#endif
 
     /// <summary>
     /// Claude Desktop update window (MSIX via the proxy chain): one per application,
@@ -1215,7 +1224,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The update window has resolved the version state (its own check, or a finished
-    /// installation): the line about an available update follows it — a stale one is dropped,
+    /// installation): the update button's badge follows it — a stale one is dropped,
     /// a still-valid one is reused.
     /// </summary>
     private void OnVersionStateResolved(UpdateCheckResult check)
@@ -1565,7 +1574,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _idleStopBrush, value);
     }
 
-    public bool CanIdleStop => !_idleStopBusy;
+    /// <summary>
+    /// The toggle grays out while its operation runs; Start is offered only over a live chain —
+    /// the stopper exists to stop the chain, a stopped chain takes its stopper down (the
+    /// orchestrator's chain-stopped hook). Stop stays available whenever a stopper is running,
+    /// and an unknown state keeps the gate open — the same convention as the chain buttons.
+    /// </summary>
+    public bool CanIdleStop =>
+        !_idleStopBusy && (_idleStopRunning || _lastChainState is null || _lastChainState.IsFullyUp);
 
     /// <summary>Formatted from key+args on every read — survives a language change.</summary>
     public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
@@ -1582,8 +1598,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CheckResultBrush));
     }
 
-    /// <summary>Signal about a Claude update found at startup; empty when there is no update.</summary>
-    public string UpdateNotice => _updateNoticeKey is null ? "" : Loc.F(_updateNoticeKey, _updateNoticeArgs);
+    /// <summary>The accent dot on the update button — the only in-window announcement of a found update.</summary>
+    public Visibility UpdateBadgeVisibility =>
+        _updateNoticeKey is null ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>The versions sit in the button tooltip while an update is announced; otherwise no tooltip at all.</summary>
+    public string? UpdateBadgeToolTip => _updateNoticeKey is null ? null : Loc.F(_updateNoticeKey, _updateNoticeArgs);
 
     public void SetUpdateNotice(string installedVersion, string? offeredVersion)
     {
@@ -1598,15 +1618,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _updateNoticeArgs = [installedVersion, offeredVersion];
         }
 
-        OnPropertyChanged(nameof(UpdateNotice));
+        OnPropertyChanged(nameof(UpdateBadgeVisibility));
+        OnPropertyChanged(nameof(UpdateBadgeToolTip));
     }
 
-    /// <summary>The reported state has stopped being true — the version is current, the line goes away.</summary>
+    /// <summary>The reported state has stopped being true — the version is current, the dot goes away.</summary>
     public void ClearUpdateNotice()
     {
         _updateNoticeKey = null;
         _updateNoticeArgs = [];
-        OnPropertyChanged(nameof(UpdateNotice));
+        OnPropertyChanged(nameof(UpdateBadgeVisibility));
+        OnPropertyChanged(nameof(UpdateBadgeToolTip));
     }
 
     /// <summary>Bring-up is offered while something in the chain is not up; state unknown — enabled.</summary>
@@ -1715,6 +1737,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ChainStateBrush = Theme.TextMuted;
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
+        OnPropertyChanged(nameof(CanIdleStop));
     }
 
     public void Refresh()
@@ -1791,6 +1814,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         IdleStopBrush = running ? Theme.Ok : Theme.TextSecondary;
         IdleStopAction = running ? Loc.S("Main.IdleStop.Button.Stop") : Loc.S("Main.IdleStop.Button.Start");
         OnPropertyChanged(nameof(IdleStopRunning));
+        OnPropertyChanged(nameof(CanIdleStop));
     }
 
     /// <summary>A failed liveness search: the state word goes unknown, the last belief and the button stay.</summary>
@@ -1816,13 +1840,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         ChainStateBrush = state.IsFullyUp ? Theme.Ok : HasAnythingUp(state) ? Theme.Warn : Theme.Idle;
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
+        OnPropertyChanged(nameof(CanIdleStop));
     }
 
     private void OnLanguageChanged()
     {
         Refresh();
         OnPropertyChanged(nameof(CheckResult));
-        OnPropertyChanged(nameof(UpdateNotice));
+        OnPropertyChanged(nameof(UpdateBadgeToolTip));
         UpdateIdleStop(_idleStopRunning);
         if (_chainOperationRunning)
         {

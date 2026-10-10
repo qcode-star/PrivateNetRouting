@@ -114,6 +114,14 @@ public partial class App : Application
         };
         window.Show();
 
+#if DEBUG
+        // visual-check flag: the update badge with fake versions, without touching the feed
+        if (e.Args.Contains("--force-update-badge"))
+        {
+            window.DebugShowUpdateBadge();
+        }
+#endif
+
         _tray = new TrayIcon();
         _tray.OpenRequested += ActivateMainWindow;
         _tray.ChainUpRequested += () => _ = window.ChainUpAsync();

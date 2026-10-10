@@ -189,6 +189,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             // after every successful raise the idle stopper re-arms itself (watchdog.autoStart);
             // fire and forget: the raise result must not wait for the worker spawn
             () => _ = Task.Run(() => watchdogControl.AutoStartAsync(CancellationToken.None)),
+            // a completed stop takes the idle stopper down with the chain (awaited: "chain down"
+            // means no stoppers either — the GUI and `pnr chain down` return to a clean state)
+            ct => watchdogControl.StopAsync(ct),
             config.Chain.EffectiveMode == ChainMode.Socks5
                 ? ct => EgressCheckAsync(config, socks, chainLog, ct)
                 : null);

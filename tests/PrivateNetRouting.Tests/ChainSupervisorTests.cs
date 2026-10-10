@@ -21,6 +21,7 @@ public class ChainSupervisorTests : IDisposable
         Action? chainRaised = null,
         int healthWaitSeconds = 5,
         string? mode = null,
+        Func<CancellationToken, Task>? chainStopped = null,
         Func<CancellationToken, Task<bool>>? upstream = null)
     {
         var log = new FileLog(_logPath);
@@ -34,6 +35,7 @@ public class ChainSupervisorTests : IDisposable
             log,
             health ?? (_ => Task.FromResult(true)),
             chainRaised,
+            chainStopped,
             upstream);
     }
 
@@ -217,6 +219,59 @@ public class ChainSupervisorTests : IDisposable
             _calls);
     }
 
+    /// <summary>
+    /// A completed stop ends with the chain-stopped hook — the idle stopper is taken down through
+    /// it, in both modes. The hook runs even when the caller's token is already cancelled (a
+    /// cancelled chain stop must still leave no stoppers), and it receives no leftover token.
+    /// </summary>
+    [Fact]
+    public async Task CompletedStopFiresTheChainStoppedHook()
+    {
+        var tokens = new List<CancellationToken>();
+        var supervisor = Create(chainStopped: ct =>
+        {
+            tokens.Add(ct);
+            return Task.CompletedTask;
+        });
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await supervisor.StopAsync(null, cancelled.Token);
+
+        Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+        Assert.Equal([CancellationToken.None], tokens);
+
+        _calls.Clear();
+        tokens.Clear();
+        var socks5 = Create(mode: "socks5", chainStopped: ct =>
+        {
+            tokens.Add(ct);
+            return Task.CompletedTask;
+        });
+        await socks5.StopAsync(null, CancellationToken.None);
+
+        Assert.Equal(["proxy.stop"], _calls);
+        Assert.Equal([CancellationToken.None], tokens);
+    }
+
+    /// <summary>A failed stop is not a completed stop: the daemon is still alive, the hook waits.</summary>
+    [Fact]
+    public async Task FailedStopDoesNotFireTheChainStoppedHook()
+    {
+        var stopped = false;
+        var daemon = new FakeDaemon(_calls) { KillThrows = new IOException("access denied") };
+        var supervisor = Create(daemon: daemon, chainStopped: _ =>
+        {
+            stopped = true;
+            return Task.CompletedTask;
+        });
+
+        await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.StopAsync(null, CancellationToken.None));
+
+        Assert.False(stopped);
+    }
+
     /// <summary>socks5 egress: instead of the three tailscale links, one check of the provided upstream.</summary>
     [Fact]
     public async Task Socks5ColdStartChecksEgressThenStartsProxy()
@@ -385,6 +440,8 @@ public class ChainSupervisorTests : IDisposable
 
         public Exception? EnsureThrows { get; init; }
 
+        public Exception? KillThrows { get; init; }
+
         public bool NeedsUac { get; init; }
 
         public bool StartNeedsUac() => NeedsUac;
@@ -404,9 +461,14 @@ public class ChainSupervisorTests : IDisposable
 
         public Task KillAsync(CancellationToken ct)
         {
+            calls.Add("daemon.kill");
+            if (KillThrows is not null)
+            {
+                throw KillThrows;
+            }
+
             IsHttpListening = false;
             IsProcessAlive = false;
-            calls.Add("daemon.kill");
             return Task.CompletedTask;
         }
     }

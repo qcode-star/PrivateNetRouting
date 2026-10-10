@@ -120,6 +120,36 @@ public class WatchdogSupervisorTests : IDisposable
         Assert.Empty(killed);
     }
 
+    /// <summary>
+    /// The calling stopper is left alone: the worker reaches the stop through its own chain stop
+    /// (WatchdogService → the orchestrator's chain-stopped hook) and exits right after — killing
+    /// its own pid here would cut that exit short. Other stoppers still go.
+    /// </summary>
+    [Fact]
+    public async Task StopLeavesTheCallingStopperAlone()
+    {
+        var self = Environment.ProcessId;
+        var finder = new FakeFinderByName();
+        finder.ByName["PrivateNetRouting.App.exe"] =
+        [
+            new(self, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"), // this process itself
+            new(11, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
+        ];
+        var killed = new List<int>();
+        var supervisor = Create(finder, kill: pid =>
+        {
+            killed.Add(pid);
+            finder.ByName["PrivateNetRouting.App.exe"] = finder.ByName["PrivateNetRouting.App.exe"]
+                .Where(p => p.Id != pid)
+                .ToList();
+        });
+
+        await supervisor.StopAsync(CancellationToken.None);
+
+        Assert.Equal([11], killed); // the worker's own pid is not in the kill list
+        Assert.Contains(self, supervisor.FindStopperPids()); // it exits by itself right after
+    }
+
     [Fact]
     public async Task KillFailureIsLoggedAndTheRestAreStopped()
     {

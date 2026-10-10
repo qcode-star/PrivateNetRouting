@@ -64,6 +64,7 @@
     <s:String x:Key="Main.IdleStop.Off">не запущен</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Запустить</s:String>
     <s:String x:Key="Main.IdleStop.Button.Stop">Остановить</s:String>
+    <s:String x:Key="Main.IdleStop.Gate">Автостоп включается только при поднятой цепочке: он останавливает её, когда Claude простаивает, а остановленная цепочка выключает его сама.</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">автостоп запущен: проверка каждые {0} с, работает в фоне</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">автостоп остановлен</s:String>
 
@@ -72,7 +73,7 @@
     <s:String x:Key="Main.Button.ChainDown">Остановить</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
     <s:String x:Key="Main.Button.LaunchBrowser">Браузер</s:String>
-    <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude…</s:String>
+    <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>

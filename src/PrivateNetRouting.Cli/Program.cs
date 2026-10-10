@@ -425,6 +425,15 @@ internal static class Program
             stop.Cancel();
         };
 
+        // the stopper exists to stop a live chain: over a down one it would only wait forever
+        // (the usage probe sees the running Claude and never reports idle)
+        var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
+        if (!state.IsFullyUp)
+        {
+            Console.WriteLine("watchdog: the chain is not up — nothing to stop; raise the chain first (pnr chain up)");
+            return 1;
+        }
+
         Console.WriteLine($"watchdog: checking Claude usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
         if (string.IsNullOrWhiteSpace(config.Watchdog.WslDistro))
         {

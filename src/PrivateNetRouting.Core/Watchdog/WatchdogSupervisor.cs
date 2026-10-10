@@ -123,10 +123,16 @@ public sealed class WatchdogSupervisor(
         }
     }
 
-    /// <summary>Stops the running stoppers (killing by pid from the command-line search) and waits for them to disappear.</summary>
+    /// <summary>
+    /// Stops the running stoppers (killing by pid from the command-line search) and waits for them
+    /// to disappear. The calling stopper is left alone: the worker reaches this stop through its
+    /// own chain stop (WatchdogService) and exits right after — killing itself here would cut the
+    /// final log lines and the CLI form's exit.
+    /// </summary>
     public async Task StopAsync(CancellationToken ct)
     {
-        var pids = FindStopperPids();
+        var self = Environment.ProcessId;
+        var pids = FindStopperPids().Where(pid => pid != self).ToList();
         if (pids.Count == 0)
         {
             return;

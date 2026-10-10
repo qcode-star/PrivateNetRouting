@@ -64,6 +64,7 @@
     <s:String x:Key="Main.IdleStop.Off">not running</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Start</s:String>
     <s:String x:Key="Main.IdleStop.Button.Stop">Stop</s:String>
+    <s:String x:Key="Main.IdleStop.Gate">The idle stopper arms only over a live chain: it stops the chain when Claude goes idle, and a stopped chain takes it down itself.</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">idle stop is on: checking every {0}s, runs in the background</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">idle stop is off</s:String>
 
@@ -72,7 +73,7 @@
     <s:String x:Key="Main.Button.ChainDown">Stop</s:String>
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
     <s:String x:Key="Main.Button.LaunchBrowser">Browser</s:String>
-    <s:String x:Key="Main.Button.UpdateClaude">Update Claude…</s:String>
+    <s:String x:Key="Main.Button.UpdateClaude">Update Claude</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
