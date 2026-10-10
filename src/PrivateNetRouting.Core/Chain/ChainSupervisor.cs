@@ -36,6 +36,15 @@ public sealed record ChainState(
         && (UpstreamReachable.HasValue
             ? UpstreamReachable.Value
             : DaemonHttpListening && DaemonProcessAlive && KeeperRunning && BackendState == "Running");
+
+    /// <summary>Nothing is up at all — the chain's normal resting state, not a partial one.</summary>
+    public bool IsStopped =>
+        !ProxyRunning
+        && !DaemonProcessAlive
+        && !DaemonHttpListening
+        && !KeeperRunning
+        && BackendState != "Running"
+        && UpstreamReachable != true;
 }
 
 /// <summary>Proxy control on the orchestrator side (implementation — ForwardProxyService).</summary>

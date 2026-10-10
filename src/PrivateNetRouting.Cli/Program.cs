@@ -153,7 +153,7 @@ internal static class Program
                 }
 
                 Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
-                Console.WriteLine(state.IsFullyUp ? "chain: fully up" : "chain: partial");
+                Console.WriteLine(state.IsFullyUp ? "chain: fully up" : state.IsStopped ? "chain: stopped" : "chain: partial");
                 return 0;
 
             case "up":

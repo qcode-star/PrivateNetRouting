@@ -1842,7 +1842,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _lastChainState = state;
         _chainStateError = null;
-        ChainSummary = state.IsFullyUp ? Loc.S("Main.Chain.FullUp") : Loc.S("Main.Chain.Partial");
+        ChainSummary = state.IsFullyUp
+            ? Loc.S("Main.Chain.FullUp")
+            : state.IsStopped ? Loc.S("Main.Chain.Stopped") : Loc.S("Main.Chain.Partial");
         ChainStateBrush = state.IsFullyUp ? Theme.Ok : HasAnythingUp(state) ? Theme.Warn : Theme.Idle;
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));

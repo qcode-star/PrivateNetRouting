@@ -56,6 +56,47 @@ public class ChainSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ColdChainStateIsStoppedNotPartial()
+    {
+        var supervisor = Create();
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.False(state.IsFullyUp);
+        Assert.True(state.IsStopped); // nothing is up — "stopped", not "partial"
+    }
+
+    [Fact]
+    public async Task PartiallyUpChainIsNeitherFullyUpNorStopped()
+    {
+        var daemon = new FakeDaemon(_calls) { IsHttpListening = true, IsProcessAlive = true };
+        var supervisor = Create(daemon: daemon);
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.False(state.IsFullyUp);
+        Assert.False(state.IsStopped); // the daemon alone is up
+    }
+
+    [Fact]
+    public void Socks5StoppedChainIsStoppedEvenWithUntestedUpstream()
+    {
+        // the external upstream was never checked (null) and the proxy is down — stopped
+        var state = new ChainState(
+            DaemonHttpListening: false,
+            DaemonProcessAlive: false,
+            KeeperRunning: false,
+            BackendState: null,
+            ProxyRunning: false,
+            ProxyHealthy: false,
+            UpstreamReachable: null);
+        Assert.True(state.IsStopped);
+
+        var reachable = state with { UpstreamReachable = true };
+        Assert.False(reachable.IsStopped); // a reachable upstream alone is "partial", the stop button keys off it
+    }
+
+    [Fact]
     public async Task ColdStartRunsInOrder()
     {
         var cli = new FakeCli(_calls) { BackendState = "NeedsLogin" };

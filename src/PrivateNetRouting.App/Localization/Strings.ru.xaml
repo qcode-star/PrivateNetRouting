@@ -27,6 +27,7 @@
     <s:String x:Key="Main.Chain">Цепочка</s:String>
     <s:String x:Key="Main.Chain.FullUp">полностью поднята</s:String>
     <s:String x:Key="Main.Chain.Partial">не полностью</s:String>
+    <s:String x:Key="Main.Chain.Stopped">остановлена</s:String>
     <!-- Collapsed/expanded card states -->
     <s:String x:Key="Main.Card.Expand">Развернуть</s:String>
     <s:String x:Key="Main.Card.Collapse">Свернуть</s:String>

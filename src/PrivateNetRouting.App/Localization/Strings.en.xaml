@@ -27,6 +27,7 @@
     <s:String x:Key="Main.Chain">Chain</s:String>
     <s:String x:Key="Main.Chain.FullUp">fully up</s:String>
     <s:String x:Key="Main.Chain.Partial">partial</s:String>
+    <s:String x:Key="Main.Chain.Stopped">stopped</s:String>
     <!-- Collapsed/expanded card states -->
     <s:String x:Key="Main.Card.Expand">Expand</s:String>
     <s:String x:Key="Main.Card.Collapse">Collapse</s:String>
