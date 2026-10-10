@@ -24,38 +24,53 @@ internal sealed record RailStage(string Text, Brush Brush, RailMark Mark = RailM
 }
 
 /// <summary>
-/// The chain rail: the five stages of the chain in bring-up order, drawn as markers sitting on a
-/// link. A marker lights up when its stage comes up, and a link carries the colour of the stage it
-/// leads to — so the rail shows where the flow has got to and where it stops. It runs live from the
-/// bring-up steps and, the rest of the time, from the chain snapshot. Colours are animated, so a
-/// stage lights up instead of jumping, and a stage that completes pops its marker once.
+/// The chain rail: the stages of the chain in bring-up order, drawn as markers sitting on a link.
+/// The stage list follows the chain mode (tailscale: daemon → keeper → node → proxy → health;
+/// socks5: egress → proxy → health) and comes in through the constructor. A marker lights up when
+/// its stage comes up, and a link carries the colour of the stage it leads to — so the rail shows
+/// where the flow has got to and where it stops. It runs live from the bring-up steps and, the
+/// rest of the time, from the chain snapshot. Colours are animated, so a stage lights up instead
+/// of jumping, and a stage that completes pops its marker once.
 /// </summary>
 internal sealed class ChainRail
 {
-    private const int StageCount = 5;
+    private readonly string[] _labelKeys;
 
-    private static readonly string[] LabelKeys =
-        ["Main.Rail.Daemon", "Main.Rail.Keeper", "Main.Rail.Node", "Main.Rail.Proxy", "Main.Rail.Health"];
+    private readonly int _stageCount;
 
-    private readonly Ellipse[] _markers = new Ellipse[StageCount];
-    private readonly ShapePath[] _checks = new ShapePath[StageCount];
-    private readonly ShapePath[] _crosses = new ShapePath[StageCount];
-    private readonly Rectangle[] _links = new Rectangle[StageCount - 1];
-    private readonly TextBlock[] _labels = new TextBlock[StageCount];
-    private readonly TextBlock[] _states = new TextBlock[StageCount];
-    private readonly ScaleTransform[] _scales = new ScaleTransform[StageCount];
-    private readonly SolidColorBrush[] _markerBrushes = new SolidColorBrush[StageCount];
-    private readonly SolidColorBrush[] _linkBrushes = new SolidColorBrush[StageCount - 1];
-    private readonly RailMark[] _marks = new RailMark[StageCount];
+    private readonly Ellipse[] _markers;
+    private readonly ShapePath[] _checks;
+    private readonly ShapePath[] _crosses;
+    private readonly Rectangle[] _links;
+    private readonly TextBlock[] _labels;
+    private readonly TextBlock[] _states;
+    private readonly ScaleTransform[] _scales;
+    private readonly SolidColorBrush[] _markerBrushes;
+    private readonly SolidColorBrush[] _linkBrushes;
+    private readonly RailMark[] _marks;
 
     /// <param name="host">Empty grid of the chain card the rail is drawn into.</param>
-    public ChainRail(Grid host)
+    /// <param name="labelKeys">Localization keys of the stage labels, in bring-up order.</param>
+    public ChainRail(Grid host, IReadOnlyList<string> labelKeys)
     {
+        _labelKeys = [.. labelKeys];
+        _stageCount = _labelKeys.Length;
+        _markers = new Ellipse[_stageCount];
+        _checks = new ShapePath[_stageCount];
+        _crosses = new ShapePath[_stageCount];
+        _links = new Rectangle[_stageCount - 1];
+        _labels = new TextBlock[_stageCount];
+        _states = new TextBlock[_stageCount];
+        _scales = new ScaleTransform[_stageCount];
+        _markerBrushes = new SolidColorBrush[_stageCount];
+        _linkBrushes = new SolidColorBrush[_stageCount - 1];
+        _marks = new RailMark[_stageCount];
+
         host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.5, GridUnitType.Star) });
-        for (var i = 0; i < StageCount; i++)
+        for (var i = 0; i < _stageCount; i++)
         {
             host.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            if (i < StageCount - 1)
+            if (i < _stageCount - 1)
             {
                 host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             }
@@ -68,7 +83,7 @@ internal sealed class ChainRail
         }
 
         var glyph = (Brush)Application.Current.FindResource("Brush.Card");
-        for (var i = 0; i < StageCount; i++)
+        for (var i = 0; i < _stageCount; i++)
         {
             var column = 1 + (i * 2);
             _markerBrushes[i] = new SolidColorBrush(Colors.Transparent);
@@ -103,7 +118,7 @@ internal sealed class ChainRail
                 Style = (Style)Application.Current.FindResource("Text.Caption"),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 10, 0, 0),
-                Text = Loc.S(LabelKeys[i]),
+                Text = Loc.S(_labelKeys[i]),
             };
             Grid.SetRow(_labels[i], 1);
             Grid.SetColumn(_labels[i], column);
@@ -122,7 +137,7 @@ internal sealed class ChainRail
             Grid.SetColumn(_states[i], column);
             host.Children.Add(_states[i]);
 
-            if (i >= StageCount - 1)
+            if (i >= _stageCount - 1)
             {
                 continue;
             }
@@ -143,16 +158,16 @@ internal sealed class ChainRail
     /// <summary>Stage names after a language change.</summary>
     public void Relabel()
     {
-        for (var i = 0; i < StageCount; i++)
+        for (var i = 0; i < _stageCount; i++)
         {
-            _labels[i].Text = Loc.S(LabelKeys[i]);
+            _labels[i].Text = Loc.S(_labelKeys[i]);
         }
     }
 
     /// <summary>Puts every stage back to "nothing is known yet" — the start of a bring-up.</summary>
     public void Reset(RailStage pending)
     {
-        for (var i = 0; i < StageCount; i++)
+        for (var i = 0; i < _stageCount; i++)
         {
             SetStage(i, pending, animate: false);
         }
@@ -165,7 +180,7 @@ internal sealed class ChainRail
     /// </summary>
     public void SetStage(int index, RailStage stage, bool animate = true)
     {
-        if (index < 0 || index >= StageCount)
+        if (index < 0 || index >= _stageCount)
         {
             return;
         }

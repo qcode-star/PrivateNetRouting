@@ -34,12 +34,19 @@ namespace PrivateNetRouting.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    /// <summary>The chain stages in bring-up order — the order the rail draws them in.</summary>
-    private static readonly string[] ChainComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
+    /// <summary>The chain stages in bring-up order — the order the rail draws them in; the mode picks the list.</summary>
+    private static readonly string[] TailscaleComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
+    private static readonly string[] Socks5Components = ["Egress", "Proxy", "Health"];
+
+    private static readonly string[] TailscaleRailKeys =
+        ["Main.Rail.Daemon", "Main.Rail.Keeper", "Main.Rail.Node", "Main.Rail.Proxy", "Main.Rail.Health"];
+    private static readonly string[] Socks5RailKeys = ["Main.Rail.Egress", "Main.Rail.Proxy", "Main.Rail.Health"];
 
     private readonly ProxyRuntime _runtime;
     private readonly MainViewModel _viewModel;
     private readonly ChainRail _rail;
+    private readonly bool _socks5Mode;
+    private readonly string[] _chainComponents;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
     private readonly DispatcherTimer _guardTimer;
@@ -72,7 +79,10 @@ public partial class MainWindow : Window
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
-        _rail = new ChainRail(RailHost);
+        _socks5Mode = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
+        _chainComponents = _socks5Mode ? Socks5Components : TailscaleComponents;
+        _rail = new ChainRail(RailHost, _socks5Mode ? Socks5RailKeys : TailscaleRailKeys);
+        UpstreamListenersLabel.Text = Loc.S(_socks5Mode ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
         SyncAutoStartBox();
@@ -166,6 +176,7 @@ public partial class MainWindow : Window
         RenderGuardSummary();
         UpdateGuardAllButton();
         ApplyCardLayout(); // the toggle tooltips and the guard-all word follow the language
+        UpstreamListenersLabel.Text = Loc.S(_socks5Mode ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Relabel();
         if (_lastChainState is not null)
         {
@@ -298,25 +309,40 @@ public partial class MainWindow : Window
     /// </summary>
     private void RenderRail(ChainState state)
     {
-        _rail.SetStage(0, state.DaemonProcessAlive
-            ? new RailStage(
-                state.DaemonHttpListening ? Loc.S("Main.Chain.Daemon.Listening") : Loc.S("Main.Chain.Daemon.NoListener"),
-                state.DaemonHttpListening ? Theme.Ok : Theme.Warn)
-            : new RailStage(Loc.S("Main.Chain.Daemon.Down"), Theme.Idle));
+        if (_socks5Mode)
+        {
+            _rail.SetStage(0, state.UpstreamReachable switch
+            {
+                true => new RailStage(Loc.S("Main.Chain.Egress.Reachable"), Theme.Ok),
+                false => new RailStage(Loc.S("Main.Chain.Egress.NoRoute"), Theme.Bad),
+                _ => new RailStage(Loc.S("Main.State.Unknown"), Theme.Idle),
+            });
+        }
+        else
+        {
+            _rail.SetStage(0, state.DaemonProcessAlive
+                ? new RailStage(
+                    state.DaemonHttpListening ? Loc.S("Main.Chain.Daemon.Listening") : Loc.S("Main.Chain.Daemon.NoListener"),
+                    state.DaemonHttpListening ? Theme.Ok : Theme.Warn)
+                : new RailStage(Loc.S("Main.Chain.Daemon.Down"), Theme.Idle));
 
-        _rail.SetStage(1, new RailStage(
-            state.KeeperRunning ? Loc.S("Main.Chain.Keeper.Running") : Loc.S("Main.Chain.Keeper.Down"),
-            state.KeeperRunning ? Theme.Ok : Theme.Idle));
+            _rail.SetStage(1, new RailStage(
+                state.KeeperRunning ? Loc.S("Main.Chain.Keeper.Running") : Loc.S("Main.Chain.Keeper.Down"),
+                state.KeeperRunning ? Theme.Ok : Theme.Idle));
 
-        _rail.SetStage(2, state.BackendState is null
-            ? new RailStage(Loc.S("Main.Chain.Node.NoResponse"), Theme.Idle)
-            : new RailStage(state.BackendState, state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
+            _rail.SetStage(2, state.BackendState is null
+                ? new RailStage(Loc.S("Main.Chain.Node.NoResponse"), Theme.Idle)
+                : new RailStage(state.BackendState, state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
+        }
 
-        _rail.SetStage(3, new RailStage(
+        // the two closing stages are the same in both modes, only the indexes differ
+        var proxyStage = _socks5Mode ? 1 : 3;
+        var healthStage = _socks5Mode ? 2 : 4;
+        _rail.SetStage(proxyStage, new RailStage(
             state.ProxyRunning ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
             state.ProxyRunning ? Theme.Ok : Theme.Idle));
 
-        _rail.SetStage(4, !state.ProxyRunning
+        _rail.SetStage(healthStage, !state.ProxyRunning
             ? new RailStage(Loc.S("Main.Chain.Health.Idle"), Theme.Idle)
             : new RailStage(
                 state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"),
@@ -338,7 +364,7 @@ public partial class MainWindow : Window
             ChainStepStatus.Failed => new RailStage(Loc.S("Main.Rail.Failed"), Theme.Bad, RailMark.Cross),
             _ => new RailStage(Loc.S("Main.Rail.Waiting"), Theme.Idle),
         };
-        _rail.SetStage(Array.IndexOf(ChainComponents, step.Component), stage);
+        _rail.SetStage(Array.IndexOf(_chainComponents, step.Component), stage);
 
         if (step.Component == "Daemon")
         {
@@ -1337,9 +1363,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private long _totalConnections;
     private long _failedConnections;
     private Brush _failedBrush = Brushes.Gray;
-    private string _tailscaleListeners = "";
-    private string _tailscaleState = "";
-    private Brush _tailscaleBrush = Brushes.Gray;
+    private string _upstreamListeners = "";
+    private string _upstreamState = "";
+    private Brush _upstreamBrush = Brushes.Gray;
     private string _configPath = "";
     private bool _idleStopRunning;
     private bool _idleStopBusy;
@@ -1352,10 +1378,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _launchRunning;
     private string? _updateNoticeKey;
     private object?[] _updateNoticeArgs = [];
+    private readonly bool _socks5;
 
     public MainViewModel(ProxyRuntime runtime)
     {
         _runtime = runtime;
+        _socks5 = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
         Loc.LanguageChanged += OnLanguageChanged;
         // until the first liveness poll — the same word the not-running state uses
         IdleStopAction = Loc.S("Main.IdleStop.Button.Start");
@@ -1394,24 +1422,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _failedBrush, value);
     }
 
-    /// <summary>The sidecar daemon's listeners: its HTTP and SOCKS5 ports, straight from the config.</summary>
-    public string TailscaleListeners
+    /// <summary>The upstream's listeners: in the tailscale mode the sidecar daemon's HTTP and SOCKS5
+    /// ports, in the socks5 mode the external proxy's address (with its user, never the password).</summary>
+    public string UpstreamListeners
     {
-        get => _tailscaleListeners;
-        private set => SetField(ref _tailscaleListeners, value);
+        get => _upstreamListeners;
+        private set => SetField(ref _upstreamListeners, value);
     }
 
-    /// <summary>State word of the daemon's listeners: both / partial / none / unknown.</summary>
-    public string TailscaleState
+    /// <summary>State word of the upstream: tailscale — listener presence, socks5 — reachability.</summary>
+    public string UpstreamState
     {
-        get => _tailscaleState;
-        private set => SetField(ref _tailscaleState, value);
+        get => _upstreamState;
+        private set => SetField(ref _upstreamState, value);
     }
 
-    public Brush TailscaleBrush
+    public Brush UpstreamBrush
     {
-        get => _tailscaleBrush;
-        private set => SetField(ref _tailscaleBrush, value);
+        get => _upstreamBrush;
+        private set => SetField(ref _upstreamBrush, value);
     }
 
     public string ConfigPath
@@ -1495,7 +1524,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         !_chainOperationRunning && !_launchRunning && (_lastChainState is null || HasAnythingUp(_lastChainState));
 
     private static bool HasAnythingUp(ChainState state) =>
-        state.DaemonProcessAlive
+        state.UpstreamReachable is true
+        || state.DaemonProcessAlive
         || state.DaemonHttpListening
         || state.KeeperRunning
         || state.BackendState == "Running"
@@ -1585,8 +1615,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
-        TailscaleListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.ForwardProxy.Socks5Upstream}";
-        RefreshTailscaleState();
+        if (_socks5)
+        {
+            var fp = _runtime.Config.ForwardProxy;
+            UpstreamListeners = string.IsNullOrEmpty(fp.Socks5UpstreamUser)
+                ? fp.Socks5Upstream
+                : $"{fp.Socks5UpstreamUser}@{fp.Socks5Upstream}";
+            RefreshEgressState();
+        }
+        else
+        {
+            UpstreamListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.ForwardProxy.Socks5Upstream}";
+            RefreshTailscaleState();
+        }
     }
 
     /// <summary>
@@ -1602,7 +1643,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var socks = Socks5Client.ParseEndPoint(_runtime.Config.ForwardProxy.Socks5Upstream).Port;
             var httpListening = _tcpTable.GetListeners(http).Count > 0;
             var socksListening = _tcpTable.GetListeners(socks).Count > 0;
-            (TailscaleState, TailscaleBrush) = (httpListening, socksListening) switch
+            (UpstreamState, UpstreamBrush) = (httpListening, socksListening) switch
             {
                 (true, true) => (Loc.S("Main.Chain.Daemon.Listening"), Theme.Ok),
                 (false, false) => (Loc.S("Main.Chain.Daemon.NoListener"), Theme.Idle),
@@ -1611,9 +1652,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception)
         {
-            TailscaleState = Loc.S("Main.State.Unknown");
-            TailscaleBrush = Theme.TextMuted;
+            UpstreamState = Loc.S("Main.State.Unknown");
+            UpstreamBrush = Theme.TextMuted;
         }
+    }
+
+    /// <summary>socks5 upstream: the reachability word comes from the last chain snapshot.</summary>
+    private void RefreshEgressState()
+    {
+        (_upstreamState, _upstreamBrush) = _lastChainState?.UpstreamReachable switch
+        {
+            true => (Loc.S("Main.Chain.Egress.Reachable"), Theme.Ok),
+            false => (Loc.S("Main.Chain.Egress.NoRoute"), Theme.Bad),
+            _ => (Loc.S("Main.State.Unknown"), Theme.TextMuted),
+        };
+        OnPropertyChanged(nameof(UpstreamState));
+        OnPropertyChanged(nameof(UpstreamBrush));
     }
 
     /// <summary>Liveness word of the idle stopper, from the process list; the button word follows the state.</summary>

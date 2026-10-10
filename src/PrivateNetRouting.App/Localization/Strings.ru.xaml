@@ -11,6 +11,7 @@
     <!-- Chain card status rows -->
     <s:String x:Key="Main.Listeners">Слушатели PNR</s:String>
     <s:String x:Key="Main.TailscaleListeners">Слушатели tailscale</s:String>
+    <s:String x:Key="Main.EgressListeners">Выход (upstream)</s:String>
     <s:String x:Key="Main.Listeners.Partial">частично</s:String>
     <s:String x:Key="Main.Metric.Connections">соединения:</s:String>
     <s:String x:Key="Main.Metric.Active">активных</s:String>
@@ -30,6 +31,7 @@
     <s:String x:Key="Main.Rail.Daemon">tailscaled</s:String>
     <s:String x:Key="Main.Rail.Keeper">tailscale watch-ipn</s:String>
     <s:String x:Key="Main.Rail.Node">tailnet</s:String>
+    <s:String x:Key="Main.Rail.Egress">Выход</s:String>
     <s:String x:Key="Main.Rail.Proxy">Локальный прокси</s:String>
     <s:String x:Key="Main.Rail.Health">Проверка CONNECT</s:String>
     <!-- Stage words while a bring-up runs in the chain card -->
@@ -50,6 +52,8 @@
     <s:String x:Key="Main.Chain.Health.Ok">живо</s:String>
     <s:String x:Key="Main.Chain.Health.Fail">не прошло</s:String>
     <s:String x:Key="Main.Chain.Health.Idle">не проверялось</s:String>
+    <s:String x:Key="Main.Chain.Egress.Reachable">доступен</s:String>
+    <s:String x:Key="Main.Chain.Egress.NoRoute">недоступен</s:String>
 
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Автостоп</s:String>

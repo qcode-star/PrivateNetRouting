@@ -11,6 +11,7 @@
     <!-- Chain card status rows -->
     <s:String x:Key="Main.Listeners">PNR listeners</s:String>
     <s:String x:Key="Main.TailscaleListeners">Tailscale listeners</s:String>
+    <s:String x:Key="Main.EgressListeners">Egress upstream</s:String>
     <s:String x:Key="Main.Listeners.Partial">partial</s:String>
     <s:String x:Key="Main.Metric.Connections">connections:</s:String>
     <s:String x:Key="Main.Metric.Active">active</s:String>
@@ -30,6 +31,7 @@
     <s:String x:Key="Main.Rail.Daemon">tailscaled</s:String>
     <s:String x:Key="Main.Rail.Keeper">tailscale watch-ipn</s:String>
     <s:String x:Key="Main.Rail.Node">tailnet</s:String>
+    <s:String x:Key="Main.Rail.Egress">Egress</s:String>
     <s:String x:Key="Main.Rail.Proxy">Forward proxy</s:String>
     <s:String x:Key="Main.Rail.Health">CONNECT check</s:String>
     <!-- Stage words while a bring-up runs in the chain card -->
@@ -50,6 +52,8 @@
     <s:String x:Key="Main.Chain.Health.Ok">ok</s:String>
     <s:String x:Key="Main.Chain.Health.Fail">failed</s:String>
     <s:String x:Key="Main.Chain.Health.Idle">not checked</s:String>
+    <s:String x:Key="Main.Chain.Egress.Reachable">reachable</s:String>
+    <s:String x:Key="Main.Chain.Egress.NoRoute">no route</s:String>
 
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Idle stop</s:String>

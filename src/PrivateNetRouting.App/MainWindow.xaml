@@ -183,13 +183,16 @@
                                            Margin="5,0,0,0"/>
                             </StackPanel>
 
-                            <!-- Tailscale (sidecar daemon) listeners: its HTTP and SOCKS5 ports -->
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource Main.TailscaleListeners}"
+                            <!-- The upstream's listeners: in the tailscale mode the sidecar daemon's
+                                 HTTP and SOCKS5 ports, in the socks5 mode the external proxy with
+                                 its reachability word (the label follows the chain mode) -->
+                            <TextBlock x:Name="UpstreamListenersLabel" Grid.Row="1" Grid.Column="0"
+                                       Text="{DynamicResource Main.TailscaleListeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TailscaleListeners}" Style="{StaticResource Text.Mono}"
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding UpstreamListeners}" Style="{StaticResource Text.Mono}"
                                        TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,8"/>
-                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding TailscaleState}"
-                                       Foreground="{Binding TailscaleBrush}" Style="{StaticResource Text.Caption}"
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding UpstreamState}"
+                                       Foreground="{Binding UpstreamBrush}" Style="{StaticResource Text.Caption}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,8"/>
 
                             <!-- User config of this installation; the path is cut in the middle
