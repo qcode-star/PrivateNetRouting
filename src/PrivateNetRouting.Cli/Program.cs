@@ -7,6 +7,7 @@ using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.Updater;
+using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Cli;
 
@@ -15,7 +16,8 @@ namespace PrivateNetRouting.Cli;
 /// (or brings up a detached worker), chain — chain control (status/up/down), check —
 /// CONNECT roundtrip, status — diagnostics summary, logs —
 /// viewing/rotation of logs, config — path/initialization. Elevated commands (--elevated-*)
-/// are executed by the internal helper and it exits; --proxy-worker — the body of the detached proxy worker.
+/// are executed by the internal helper and it exits; --proxy-worker and --watchdog-worker — the bodies
+/// of the detached proxy and idle-stop workers.
 /// </summary>
 internal static class Program
 {
@@ -31,6 +33,13 @@ internal static class Program
                 stop.Cancel();
             };
             return await ProxyWorker.RunAsync(stop.Token);
+        }
+
+        // the detached idle-stop worker: a chain raise from a CLI process spawns this exe with
+        // the marker (WatchdogSupervisor.WorkerHostNames), so the CLI hosts the worker too
+        if (first == WatchdogSupervisor.WorkerMarker)
+        {
+            return await Task.Run(() => WatchdogWorker.RunAsync(CancellationToken.None));
         }
 
         if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain || GuardElevatedCommands.IsCommand(first))
