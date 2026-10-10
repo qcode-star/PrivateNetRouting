@@ -20,6 +20,8 @@
     <s:String x:Key="Main.Config">Config</s:String>
     <s:String x:Key="Main.Config.Button.Open">Open</s:String>
     <s:String x:Key="Main.Config.Button.Reload">Reload</s:String>
+    <s:String x:Key="Main.Config.Reloaded">Config reloaded</s:String>
+    <s:String x:Key="Main.Config.Reloaded.RestartHint">Config reloaded; the running proxy keeps its previous settings — an application restart applies them</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Chain</s:String>

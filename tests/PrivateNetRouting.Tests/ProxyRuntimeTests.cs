@@ -52,4 +52,20 @@ public class ProxyRuntimeTests
         Assert.Equal("alice", user);
         Assert.Equal("s3cret", password);
     }
+
+    [Fact]
+    public void SameProxyConfigTakesValuesAndSeedOrderIntoAccount()
+    {
+        Assert.True(ProxyRuntime.SameProxyConfig(
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5353/dns-query"] },
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5353/dns-query"] }));
+
+        Assert.False(ProxyRuntime.SameProxyConfig(
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5353/dns-query"] },
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5353/dns-query"], HeaderTimeoutSeconds = 31 }));
+
+        Assert.False(ProxyRuntime.SameProxyConfig(
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5353/dns-query", "http://127.0.0.1:5354/dns-query"] },
+            new ForwardProxyConfig { DohSeed = ["http://127.0.0.1:5354/dns-query", "http://127.0.0.1:5353/dns-query"] }));
+    }
 }

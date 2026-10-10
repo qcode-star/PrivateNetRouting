@@ -212,7 +212,9 @@ src/
                              # status rows: the PNR listeners with connection counters, the
                              # upstream row (tailscale listeners, or the socks5 egress with its
                              # reachability word), the config with its actions (open the
-                             # folder / reload), the idle stopper with its status, the
+                             # folder / reload; a reload that changed the running proxy's
+                             # section says an application restart applies it), the idle
+                             # stopper with its status, the
                              # auto-start flag and the toggle; collapsible to one compact row —
                              # overall status dot + word and the same two buttons, a chain
                              # operation expands the card and collapses it back on success,

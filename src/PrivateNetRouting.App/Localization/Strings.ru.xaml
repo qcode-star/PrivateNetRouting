@@ -20,6 +20,8 @@
     <s:String x:Key="Main.Config">Конфиг</s:String>
     <s:String x:Key="Main.Config.Button.Open">Открыть</s:String>
     <s:String x:Key="Main.Config.Button.Reload">Перезагрузить</s:String>
+    <s:String x:Key="Main.Config.Reloaded">Конфиг перечитан</s:String>
+    <s:String x:Key="Main.Config.Reloaded.RestartHint">Конфиг перечитан; работающий прокси держит прежние настройки — применятся после перезапуска приложения</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Цепочка</s:String>

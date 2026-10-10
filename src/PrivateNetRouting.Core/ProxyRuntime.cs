@@ -14,6 +14,7 @@ using PrivateNetRouting.Core.Updater;
 using PrivateNetRouting.Core.Watchdog;
 using System.Net;
 using System.Reflection;
+using System.Text.Json;
 
 namespace PrivateNetRouting.Core;
 
@@ -330,6 +331,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
     public void ReloadConfig() => AppConfigStore.ReloadInto(Config);
 
+    /// <summary>
+    /// Whether the freshly loaded proxy section has drifted from the one the running proxy
+    /// service was built with: ReloadConfig swaps the sections in the shared AppConfig, and
+    /// the service keeps its captured section until the process restarts.
+    /// </summary>
+    public bool ProxyConfigNeedsRestart => !SameProxyConfig(ProxyService.CapturedConfig, Config.ForwardProxy);
+
     /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
     /// trusted proxy from forwardProxy.socks5Upstream (with its RFC 1929 credentials); in the
     /// tailscale mode — the sidecar's own listener (chain.daemonSocksListen), which needs no
@@ -341,6 +349,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
                 config.ForwardProxy.Socks5UpstreamUser,
                 config.ForwardProxy.Socks5UpstreamPassword)
             : (config.Chain.DaemonSocksListen, "", "");
+
+    internal static bool SameProxyConfig(ForwardProxyConfig a, ForwardProxyConfig b) =>
+        JsonSerializer.Serialize(a, ConfigComparisonOptions) == JsonSerializer.Serialize(b, ConfigComparisonOptions);
+
+    private static readonly JsonSerializerOptions ConfigComparisonOptions = new();
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {

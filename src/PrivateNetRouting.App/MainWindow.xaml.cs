@@ -959,7 +959,9 @@ public partial class MainWindow : Window
     /// <summary>
     /// Re-reads the edited config: the sections are swapped in the shared object, so the
     /// launchers, guards, updater and the next idle stopper start see the fresh values; the
-    /// UI language re-applies immediately. Listener values apply after the application restart.
+    /// UI language re-applies immediately. The running proxy service keeps the section it was
+    /// built with — when the loaded proxy values differ, the result line says so and the
+    /// application restart applies them.
     /// </summary>
     private void OnConfigReload(object sender, RoutedEventArgs e)
     {
@@ -973,7 +975,9 @@ public partial class MainWindow : Window
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);
-            _viewModel.SetCheckResult("Main.Config.Reloaded");
+            _viewModel.SetCheckResult(_runtime.ProxyConfigNeedsRestart
+                ? "Main.Config.Reloaded.RestartHint"
+                : "Main.Config.Reloaded");
         }
         catch (Exception ex)
         {
