@@ -65,7 +65,7 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{DynamicResource Main.Language}" Style="{StaticResource Text.Caption}"
                                VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <ComboBox x:Name="LanguageBox" MinWidth="132" SelectionChanged="OnLanguageSelected"
+                    <ComboBox x:Name="LanguageBox" MinWidth="96" SelectionChanged="OnLanguageSelected"
                               AutomationProperties.Name="{DynamicResource Main.Language}"
                               ItemTemplate="{StaticResource LanguageOptionTemplate}"
                               ItemContainerStyle="{StaticResource LanguageItemStyle}"/>
