@@ -460,7 +460,10 @@ public sealed class ForwardProxyConfig
     /// <summary>Password of the external SOCKS5 upstream; lives only in the user config — the repository example holds an empty placeholder.</summary>
     public string Socks5UpstreamPassword { get; set; } = "";
 
-    /// <summary>Seed pool of DoH resolvers in the form "http://IP:PORT/dns-query".</summary>
+    /// <summary>
+    /// Optional extra DoH resolvers ("http(s)://IP:PORT/dns-query") on top of netmap discovery
+    /// (tailscale mode only; in the socks5 mode DoH is not used at all).
+    /// </summary>
     public List<string> DohSeed { get; set; } = [];
 
     public DohDiscoveryConfig DohDiscovery { get; set; } = new();
@@ -501,8 +504,13 @@ public sealed class ForwardProxyConfig
 
 public sealed class DohDiscoveryConfig
 {
-    /// <summary>Auto-completion of the DoH pool from the tailnet config (tailscale debug netmap).</summary>
-    public bool Enabled { get; set; }
+    /// <summary>
+    /// Auto-completion of the DoH pool from the tailnet config (tailscale debug netmap);
+    /// on by default — it fills the pool with the resolvers of any tailscale DNS config, so
+    /// dohSeed stays empty unless the user wants extra resolvers. Only the tailscale mode has
+    /// a sidecar pipe; in the socks5 mode DoH is not used and the flag is inert.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
 
     public string CliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
 

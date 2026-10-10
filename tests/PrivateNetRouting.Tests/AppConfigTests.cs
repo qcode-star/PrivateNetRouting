@@ -19,6 +19,8 @@ public class AppConfigTests : IDisposable
         Assert.Equal("127.0.0.1:18082", config.Chain.DaemonHttpListen);
         Assert.Equal(@"\\.\pipe\pnr-sidecar", config.Chain.Socket);
         Assert.True(config.ForwardProxy.BindWslGateway);
+        Assert.True(config.ForwardProxy.DohDiscovery.Enabled); // the netmap fills the pool for a new user
+        Assert.Empty(config.ForwardProxy.DohSeed); // optional; discovery is the source
         Assert.True(config.Ui.CheckUpdatesOnStart);
     }
 
