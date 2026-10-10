@@ -77,6 +77,7 @@
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
     <s:String x:Key="Main.Chain.DownDone">chain is stopped</s:String>
+    <s:String x:Key="Main.Chain.Cancelled">bring-up cancelled — chain is stopped</s:String>
     <s:String x:Key="Main.Chain.Busy">operation in progress (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Chain.StateUnknownFmt">state unknown: {0}</s:String>
     <s:String x:Key="Main.ErrorFmt">error: {0}</s:String>
@@ -85,10 +86,12 @@
     <!-- Claude launch -->
     <s:String x:Key="Main.Launch.Busy">launching (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude launched (chain ready in {0} s)</s:String>
+    <s:String x:Key="Main.Launch.Cancelled">launch cancelled</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude is already running — the window is shown without launching again</s:String>
 
     <!-- Browser launch (isolated profile) -->
     <s:String x:Key="Main.Browser.DoneFmt">Browser launched (chain ready in {0} s)</s:String>
+    <s:String x:Key="Main.Browser.Cancelled">browser launch cancelled</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
 
     <!-- Claude update: startup check notice -->

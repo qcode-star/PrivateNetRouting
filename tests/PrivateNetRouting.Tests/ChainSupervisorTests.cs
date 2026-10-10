@@ -266,6 +266,49 @@ public class ChainSupervisorTests : IDisposable
         Assert.Equal(["proxy.stop"], _calls);
     }
 
+    /// <summary>
+    /// The GUI stop during a bring-up cancels it: the cancellation must reach the caller as
+    /// cancellation, not as a link failure (the UI then brings down what got raised). A link
+    /// phase must not fold it into ChainException.
+    /// </summary>
+    [Fact]
+    public async Task CancellationSurfacesUnwrappedFromEveryPhase()
+    {
+        var daemon = new FakeDaemon(_calls) { EnsureThrows = new OperationCanceledException() };
+        var daemonSupervisor = Create(daemon: daemon);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            daemonSupervisor.EnsureRunningAsync(null, CancellationToken.None));
+        Assert.DoesNotContain("proxy.start", _calls);
+
+        _calls.Clear();
+        var proxy = new FakeProxy(_calls) { StartThrows = new OperationCanceledException() };
+        var proxySupervisor = Create(proxy: proxy);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            proxySupervisor.EnsureRunningAsync(null, CancellationToken.None));
+        // the cancellation hit at the proxy phase — the last one of the tailscale order
+        Assert.Equal(["daemon.ensure", "keeper.ensure", "cli.up", "proxy.start"], _calls);
+    }
+
+    /// <summary>socks5: the stop lands while the egress check keeps polling to its deadline.</summary>
+    [Fact]
+    public async Task Socks5EgressCheckIsCancellable()
+    {
+        using var cts = new CancellationTokenSource();
+        async Task<bool> Upstream(CancellationToken ct)
+        {
+            cts.Cancel(); // the stop arrives while the check runs
+            await Task.Delay(5000, ct); // the next poll attempt is cut by the cancellation
+            return false;
+        }
+
+        var supervisor = Create(mode: "socks5", upstream: Upstream, healthWaitSeconds: 30);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            supervisor.EnsureRunningAsync(null, cts.Token));
+
+        Assert.DoesNotContain("proxy.start", _calls); // the proxy never came up past a cancelled egress
+    }
+
     [Fact]
     public async Task Socks5StateOnlyCoversProxyAndEgress()
     {
@@ -304,10 +347,17 @@ public class ChainSupervisorTests : IDisposable
     {
         public bool IsRunning { get; set; }
 
+        public Exception? StartThrows { get; init; }
+
         public Task StartAsync(CancellationToken ct)
         {
-            IsRunning = true;
             calls.Add("proxy.start");
+            if (StartThrows is not null)
+            {
+                throw StartThrows;
+            }
+
+            IsRunning = true;
             return Task.CompletedTask;
         }
 
@@ -333,7 +383,7 @@ public class ChainSupervisorTests : IDisposable
 
         public bool IsProcessAlive { get; set; }
 
-        public IOException? EnsureThrows { get; init; }
+        public Exception? EnsureThrows { get; init; }
 
         public bool NeedsUac { get; init; }
 

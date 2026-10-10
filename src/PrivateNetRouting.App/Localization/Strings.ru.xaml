@@ -77,6 +77,7 @@
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>
     <s:String x:Key="Main.Chain.DownDone">цепочка остановлена</s:String>
+    <s:String x:Key="Main.Chain.Cancelled">поднятие отменено — цепочка остановлена</s:String>
     <s:String x:Key="Main.Chain.Busy">выполняется операция (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Chain.StateUnknownFmt">состояние неизвестно: {0}</s:String>
     <s:String x:Key="Main.ErrorFmt">ошибка: {0}</s:String>
@@ -85,10 +86,12 @@
     <!-- Claude launch -->
     <s:String x:Key="Main.Launch.Busy">запуск (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
+    <s:String x:Key="Main.Launch.Cancelled">запуск отменён</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
 
     <!-- Browser launch (isolated profile) -->
     <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
+    <s:String x:Key="Main.Browser.Cancelled">запуск браузера отменён</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
 
     <!-- Claude update: startup check notice -->

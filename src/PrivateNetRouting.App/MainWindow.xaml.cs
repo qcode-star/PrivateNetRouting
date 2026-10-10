@@ -56,7 +56,9 @@ public partial class MainWindow : Window
     private GuardSnapshot? _lastGuards;
     private bool _guardBusy;
     private bool _chainBusy;
+    private bool _chainBusyCancellable; // the running chain operation is a bring-up — Stop cancels it
     private bool _launchBusy;
+    private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
@@ -739,7 +741,9 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Chain bring-up, shared by the card button and the tray item: the card draws the steps
-    /// (the window may be hidden), the tray enablement follows the same Can* flags.
+    /// (the window may be hidden), the tray enablement follows the same Can* flags. The card's
+    /// Stop stays enabled meanwhile and cancels the bring-up (RunChainBusy brings down what got
+    /// raised before the cancellation).
     /// </summary>
     public async Task ChainUpAsync()
     {
@@ -748,7 +752,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!await RunChainBusy(() => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
+        if (!await RunChainBusy(bringUp: true, ct => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct)))
         {
             return;
         }
@@ -757,15 +761,31 @@ public partial class MainWindow : Window
         await RefreshChainAsync();
     }
 
-    /// <summary>Chain shutdown, shared by the card button and the tray item.</summary>
+    /// <summary>
+    /// Chain shutdown, shared by the card button and the tray item. While a bring-up or a launch
+    /// is running the same button is the cancel: it aborts the operation; what happens to the
+    /// half-raised chain is the running operation's business (a bring-up extinguishes itself, a
+    /// launch extinguishes only the chain it raised itself).
+    /// </summary>
     public async Task ChainDownAsync()
     {
-        if (_chainBusy || _launchBusy)
+        if (_chainBusy)
         {
+            if (_chainBusyCancellable)
+            {
+                _operationCts?.Cancel();
+            }
+
             return;
         }
 
-        if (!await RunChainBusy(() => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), CancellationToken.None)))
+        if (_launchBusy)
+        {
+            _operationCts?.Cancel();
+            return;
+        }
+
+        if (!await RunChainBusy(bringUp: false, ct => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), ct)))
         {
             return;
         }
@@ -774,7 +794,7 @@ public partial class MainWindow : Window
         await RefreshChainAsync();
     }
 
-    private async Task<bool> RunChainBusy(Func<Task> action)
+    private async Task<bool> RunChainBusy(bool bringUp, Func<CancellationToken, Task> action)
     {
         if (_chainBusy)
         {
@@ -782,14 +802,36 @@ public partial class MainWindow : Window
         }
 
         _chainBusy = true;
-        _viewModel.SetChainBusy(true);
+        _chainBusyCancellable = bringUp;
+        _viewModel.SetChainBusy(true, bringUp);
         BeginOperation();
         var success = false;
+        var cts = new CancellationTokenSource();
+        _operationCts = cts;
         try
         {
-            await action();
+            await action(cts.Token);
             success = true;
             return true;
+        }
+        catch (OperationCanceledException) when (bringUp)
+        {
+            // Stop during a bring-up: cancel, then bring down whatever got raised before the
+            // cancellation (in socks5 that is normally nothing — the egress check runs first).
+            // The quiet stop draws no rail steps; the next state poll redraws the card.
+            _chainBusyCancellable = false;
+            _viewModel.SetChainBusy(true, cancellable: false);
+            _viewModel.SetCheckResult("Main.Chain.Cancelled");
+            try
+            {
+                await _runtime.Chain.StopAsync(null, CancellationToken.None);
+            }
+            catch (Exception stopEx)
+            {
+                _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
+            }
+
+            return false;
         }
         catch (Exception ex)
         {
@@ -798,7 +840,10 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _operationCts = null;
+            cts.Dispose();
             _chainBusy = false;
+            _chainBusyCancellable = false;
             _viewModel.SetChainBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
@@ -995,18 +1040,40 @@ public partial class MainWindow : Window
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
         var success = false;
+        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        var cts = new CancellationTokenSource();
+        _operationCts = cts;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            chainWasDown = !healthy;
             if (!healthy)
             {
                 BeginOperation();
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, CancellationToken.None);
+            var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, cts.Token);
             _viewModel.SetCheckResult("Main.Launch.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
             success = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Stop during the launch: the launch aborts (Claude is not started); a chain the
+            // launch raised itself is brought down, one that was already up keeps working.
+            if (chainWasDown)
+            {
+                try
+                {
+                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                }
+                catch (Exception stopEx)
+                {
+                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
+                }
+            }
+
+            _viewModel.SetCheckResult("Main.Launch.Cancelled");
         }
         catch (Exception ex)
         {
@@ -1014,6 +1081,8 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _operationCts = null;
+            cts.Dispose();
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
             EndOperation();
@@ -1063,18 +1132,40 @@ public partial class MainWindow : Window
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
         var success = false;
+        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        var cts = new CancellationTokenSource();
+        _operationCts = cts;
         try
         {
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            chainWasDown = !healthy;
             if (!healthy)
             {
                 BeginOperation();
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, CancellationToken.None);
+            var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, cts.Token);
             _viewModel.SetCheckResult("Main.Browser.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
             success = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Same contract as the Claude launch: abort, extinguish only a chain the launch
+            // raised itself.
+            if (chainWasDown)
+            {
+                try
+                {
+                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                }
+                catch (Exception stopEx)
+                {
+                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
+                }
+            }
+
+            _viewModel.SetCheckResult("Main.Browser.Cancelled");
         }
         catch (Exception ex)
         {
@@ -1082,6 +1173,8 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _operationCts = null;
+            cts.Dispose();
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
             EndOperation();
@@ -1375,6 +1468,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string _chainSummary = "…";
     private Brush _chainStateBrush = Theme.TextMuted;
     private bool _chainOperationRunning;
+    private bool _chainOperationCancellable;
     private bool _launchRunning;
     private string? _updateNoticeKey;
     private object?[] _updateNoticeArgs = [];
@@ -1519,9 +1613,27 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool CanChainUp =>
         !_chainOperationRunning && !_launchRunning && (_lastChainState is null || !_lastChainState.IsFullyUp);
 
-    /// <summary>The stop is offered while any chain component is up; state unknown — enabled.</summary>
-    public bool CanChainDown =>
-        !_chainOperationRunning && !_launchRunning && (_lastChainState is null || HasAnythingUp(_lastChainState));
+    /// <summary>
+    /// The stop is offered while any chain component is up (state unknown — enabled), and stays
+    /// offered while a bring-up or a launch runs: then it is the cancel of the running operation.
+    /// </summary>
+    public bool CanChainDown
+    {
+        get
+        {
+            if (_chainOperationRunning)
+            {
+                return _chainOperationCancellable;
+            }
+
+            if (_launchRunning)
+            {
+                return true;
+            }
+
+            return _lastChainState is null || HasAnythingUp(_lastChainState);
+        }
+    }
 
     private static bool HasAnythingUp(ChainState state) =>
         state.UpstreamReachable is true
@@ -1573,9 +1685,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CanChainDown));
     }
 
-    public void SetChainBusy(bool busy)
+    public void SetChainBusy(bool busy, bool cancellable = false)
     {
         _chainOperationRunning = busy;
+        _chainOperationCancellable = cancellable;
         if (busy)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");

@@ -53,6 +53,11 @@ public interface IChainSupervisor
 {
     Task<ChainState> GetStateAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Idempotent bring-up. Honours <paramref name="ct"/>: a cancellation surfaces as
+    /// OperationCanceledException (never wrapped in ChainException), so the caller can tell
+    /// "the stop button cancelled the bring-up" from a link failure.
+    /// </summary>
     Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct);
 
     Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct);
@@ -134,7 +139,7 @@ public sealed class ChainSupervisor(
                         Report(progress, "Daemon", ChainStepStatus.Active, detail)), ct);
                     Report(progress, "Daemon", ChainStepStatus.Done, "listener is up");
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
                     throw new ChainException("daemon", ex);
@@ -154,7 +159,7 @@ public sealed class ChainSupervisor(
                     await keeper.EnsureStartedAsync(ct);
                     Report(progress, "Keeper", ChainStepStatus.Done, "running");
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Report(progress, "Keeper", ChainStepStatus.Failed, ex.Message);
                     throw new ChainException("keeper", ex);
@@ -181,7 +186,7 @@ public sealed class ChainSupervisor(
 
                     Report(progress, "Node", ChainStepStatus.Done, "Running");
                 }
-                catch (Exception ex) when (ex is not ChainException)
+                catch (Exception ex) when (ex is not ChainException and not OperationCanceledException)
                 {
                     Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
                     throw new ChainException("node", ex);
@@ -202,7 +207,7 @@ public sealed class ChainSupervisor(
                 await proxy.StartAsync(ct);
                 Report(progress, "Proxy", ChainStepStatus.Done, "listening");
             }
-            catch (Exception ex) when (ex is not ChainException)
+            catch (Exception ex) when (ex is not ChainException and not OperationCanceledException)
             {
                 Report(progress, "Proxy", ChainStepStatus.Failed, ex.Message);
                 throw new ChainException("proxy", ex);
