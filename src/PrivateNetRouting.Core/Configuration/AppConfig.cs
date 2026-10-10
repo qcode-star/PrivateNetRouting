@@ -16,6 +16,8 @@ public sealed class AppConfig
 
     public LauncherConfig Launcher { get; set; } = new();
 
+    public CodexConfig Codex { get; set; } = new();
+
     public BrowserConfig Browser { get; set; } = new();
 
     public WatchdogConfig Watchdog { get; set; } = new();
@@ -63,6 +65,43 @@ public sealed class LauncherConfig
 
     /// <summary>Proxy bypass zones: each goes into the bypass-list in two forms (zone and *.zone).</summary>
     public List<string> BypassDomains { get; set; } = [];
+}
+
+/// <summary>
+/// Launching and updating the Codex desktop app (OpenAI, a Microsoft Store MSIX). The app is
+/// Electron/Chromium: the main process takes --proxy-server/--proxy-bypass-list like Claude,
+/// and its embedded CLI core takes the standard proxy env variables (config.toml has no proxy
+/// key). The launch goes through Invoke-CommandInDesktopPackage: the entry-point stub loses
+/// arguments, and the package-context launch hands the process both the flags and the env.
+/// </summary>
+public sealed class CodexConfig
+{
+    /// <summary>MSIX package name of the Codex desktop app (Get-AppxPackage -Name).</summary>
+    public string PackageName { get; set; } = "OpenAI.Codex";
+
+    /// <summary>Application id inside the package manifest (Invoke-CommandInDesktopPackage -AppId).</summary>
+    public string AppId { get; set; } = "App";
+
+    /// <summary>Main executable inside the package, relative to InstallLocation (the manifest entry point; the Codex.exe stub loses arguments).</summary>
+    public string AppExecutable { get; set; } = @"app\ChatGPT.exe";
+
+    /// <summary>Microsoft Store product id of the app — the key the Store update check asks by (a public constant).</summary>
+    public string StoreProductId { get; set; } = "9PLM9XGG6VKS";
+
+    /// <summary>
+    /// OpenAI's own version manifest of the Store package (a public constant — the same endpoint
+    /// the codex CLI's doctor reads): only names the offered version for the tooltip, the bits
+    /// always come from the Store. The host is under the direct-access ban, so the lookup runs
+    /// only when the proxy chain is already alive (through the proxy). Empty — do not ask.
+    /// </summary>
+    public string UpdateVersionUrl { get; set; } =
+        "https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json";
+
+    /// <summary>Main process name of the desktop app (already-running detection, closing before an update).</summary>
+    public string ProcessName { get; set; } = "ChatGPT";
+
+    /// <summary>Hard limit of one Store update (search, download and install together).</summary>
+    public int UpdateTimeoutSeconds { get; set; } = 1800;
 }
 
 /// <summary>
@@ -325,6 +364,7 @@ public sealed class GuardConfig
         "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
         "chatgpt.site", "oaistatsig.com", "crixet.com",
         "ab.chatgpt.com", "api.openai.com", "auth.openai.com", "platform.openai.com", "cdn.oaistatic.com",
+        "persistent.oaistatic.com", "releases.openai.com",
         "openai.qualtrics.com", "chatgpt.livekit.cloud", "openai.com.cdn.cloudflare.net",
         "openaicom.imgix.net", "openaiassets.blob.core.windows.net",
         "openaicomproductionae4b.blob.core.windows.net", "openaiapi-site.azureedge.net",
@@ -359,6 +399,12 @@ public sealed class GuardConfig
 
     /// <summary>Claude Code settings.json on Windows; environment variables are expanded.</summary>
     public string ClaudeSettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
+
+    /// <summary>
+    /// config.toml of Codex (desktop and CLI) — the sync adds `[features] respect_system_proxy = true`
+    /// there, the file itself belongs to the application; environment variables are expanded.
+    /// </summary>
+    public string CodexSettingsPath { get; set; } = @"%USERPROFILE%\.codex\config.toml";
 
     // --- WSL: startup script + settings.json of the distros (the whole layer is optional) ---
 

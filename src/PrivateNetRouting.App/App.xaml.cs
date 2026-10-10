@@ -142,6 +142,7 @@ public partial class App : Application
         }
 
         _ = RunStartupUpdateCheckAsync(window);
+        _ = RunStartupCodexUpdateCheckAsync(window);
         _ = RunStartupAppUpdateCheckAsync(window);
     }
 
@@ -263,6 +264,38 @@ public partial class App : Application
         catch (Exception ex)
         {
             _runtime.Updater.Log.Warn($"startup update check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Background Codex update check on startup (ui.checkUpdatesOnStart): the Microsoft Store
+    /// catalog answer is read-only — no chain, no UAC, the Store CDN is not part of the ban.
+    /// An update — a dot on the Codex update button and a tray balloon; the Store being
+    /// unreachable is not announced (the dot just stays off). Runs a beat behind the Claude
+    /// check so two balloons do not fight for the tray.
+    /// </summary>
+    private async Task RunStartupCodexUpdateCheckAsync(MainWindow window)
+    {
+        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4));
+            var check = await _runtime.CodexUpdater.CheckAsync(CancellationToken.None);
+            if (!check.UpdateAvailable)
+            {
+                return;
+            }
+
+            var text = window.SetCodexUpdateNotice(check.Installed.Version, check.OfferedVersion);
+            _tray?.ShowNotice(text);
+        }
+        catch (Exception ex)
+        {
+            _runtime.CodexUpdater.Log.Warn($"startup Codex update check failed: {ex.Message}");
         }
     }
 

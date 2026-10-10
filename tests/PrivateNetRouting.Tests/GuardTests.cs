@@ -357,6 +357,127 @@ public class GuardTests : IDisposable
         Assert.Equal("http://other:2", mismatch.CurrentProxy);
     }
 
+    // ----- config.toml of Codex -----
+
+    private AppConfig CodexConfig()
+    {
+        var config = new AppConfig();
+        config.Guard.CodexSettingsPath = Path.Combine(_tempDir, "codex-config.toml");
+        return config;
+    }
+
+    [Fact]
+    public void CodexSettingsSyncAddsSectionAndKeepsEveryOtherLine()
+    {
+        var config = CodexConfig();
+        File.WriteAllText(config.Guard.CodexSettingsPath, """
+            notify = [ "C:\\tools\\codex-computer-use.exe", "turn-ended" ]
+
+            [desktop]
+            followUpQueueMode = "steer"
+
+            [mcp_servers.node_repl]
+            args = []
+            command = 'C:\tools\node_repl.exe'
+            """);
+        var guard = new CodexSettingsGuard(config);
+        Assert.Equal(GuardState.Partial, guard.Read().State); // the flag is not set yet
+
+        var result = guard.Sync();
+
+        Assert.True(result.Written);
+        Assert.NotNull(result.BackupPath);
+        Assert.True(File.Exists(result.BackupPath));
+        Assert.Equal(GuardState.On, guard.Read().State);
+
+        var lines = File.ReadAllLines(config.Guard.CodexSettingsPath);
+        Assert.Contains("[features]", lines);
+        Assert.Contains("respect_system_proxy = true", lines);
+        var before = File.ReadAllLines(result.BackupPath!);
+        Assert.All(before, line => Assert.Contains(line, lines)); // every original line survived byte for byte
+        Assert.Equal(before.Length + 3, lines.Length); // blank line, section header, key
+
+        // the second sync finds the flag already correct: no rewrite, no backup
+        var again = guard.Sync();
+        Assert.False(again.Written);
+        Assert.Null(again.BackupPath);
+    }
+
+    [Fact]
+    public void CodexSettingsSyncInsertsIntoTheExistingSection()
+    {
+        var config = CodexConfig();
+        File.WriteAllText(config.Guard.CodexSettingsPath, "[features]\nfoo = \"bar\"\n\n[other]\nkey = 1\n");
+
+        var result = new CodexSettingsGuard(config).Sync();
+
+        Assert.True(result.Written);
+        Assert.Equal(
+            "[features]\nrespect_system_proxy = true\nfoo = \"bar\"\n\n[other]\nkey = 1\n",
+            File.ReadAllText(config.Guard.CodexSettingsPath));
+    }
+
+    [Fact]
+    public void CodexSettingsSyncUpdatesTheFlagInPlaceKeepingStyle()
+    {
+        var config = CodexConfig();
+        File.WriteAllText(config.Guard.CodexSettingsPath, "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n");
+        var guard = new CodexSettingsGuard(config);
+        Assert.Equal(GuardState.Partial, guard.Read().State);
+
+        var result = guard.Sync();
+
+        Assert.True(result.Written);
+        Assert.Equal(
+            "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n",
+            File.ReadAllText(config.Guard.CodexSettingsPath)); // the inline comment and the CRLF style survive
+        Assert.Equal(GuardState.On, guard.Read().State);
+    }
+
+    [Fact]
+    public void CodexSettingsSyncRewritesTheDottedFlagAndIgnoresStrings()
+    {
+        var config = CodexConfig();
+        var toml = "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n";
+        File.WriteAllText(config.Guard.CodexSettingsPath, toml);
+        var guard = new CodexSettingsGuard(config);
+
+        // the lines inside the multi-line string are not structure: the effective value is the dotted key's false
+        Assert.Equal(GuardState.Partial, guard.Read().State);
+
+        var result = guard.Sync();
+
+        Assert.True(result.Written);
+        Assert.Equal(
+            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n",
+            File.ReadAllText(config.Guard.CodexSettingsPath)); // the dotted key is rewritten, the string is untouched
+        Assert.Equal(GuardState.On, guard.Read().State);
+    }
+
+    [Fact]
+    public void CodexSettingsSyncCreatesTheFileAndStatusDetectsStates()
+    {
+        var config = CodexConfig();
+        var guard = new CodexSettingsGuard(config);
+
+        var missing = guard.Read();
+        Assert.True(missing.FileMissing);
+        Assert.Equal(GuardState.Off, missing.State);
+
+        var created = guard.Sync();
+        Assert.True(created.Written);
+        Assert.Equal(
+            new[] { "[features]", "respect_system_proxy = true" },
+            File.ReadAllLines(config.Guard.CodexSettingsPath));
+        Assert.Equal(GuardState.On, guard.Read().State);
+
+        File.WriteAllText(config.Guard.CodexSettingsPath, "[desktop]\nfollowUpQueueMode = \"steer\"\n");
+        var unset = guard.Read();
+        Assert.Equal(GuardState.Partial, unset.State); // the file exists, the flag does not
+        Assert.Null(unset.Enabled);
+        Assert.False(unset.FileMissing);
+    }
+
     // ----- NRPT/firewall PowerShell scripts -----
 
     [Fact]
@@ -647,6 +768,7 @@ public class GuardTests : IDisposable
             policy,
             banOps,
             new ClaudeSettingsGuard(config),
+            new CodexSettingsGuard(config),
             new WslConfigGuard(config, new FakeWslRunner(), () => IPAddress.Parse("192.0.2.1")),
             sysProxy,
             elevated,

@@ -17,12 +17,20 @@ public sealed record BanLiveChecks(
 
 public sealed record BanApplyResult(string Detail, BanLiveChecks Live);
 
-public sealed record SettingsSyncResult(bool Written, string? BackupPath, string ProxyUrl, string NoProxy);
+public sealed record SettingsSyncResult(
+    bool Written,
+    string? BackupPath,
+    string ProxyUrl,
+    string NoProxy,
+    bool CodexWritten,
+    string? CodexBackupPath,
+    string CodexPath);
 
 public sealed record GuardSnapshot(
     LocalBanStatus Ban,
     EgressPolicyStatus Policy,
     ClaudeSettingsStatus Settings,
+    CodexSettingsStatus CodexSettings,
     WslConfigStatus Wsl,
     SystemProxyStatus SystemProxy,
     IReadOnlyList<GuardItemStatus> Items)
@@ -32,15 +40,17 @@ public sealed record GuardSnapshot(
 
 /// <summary>
 /// Orchestration of direct-access guards: status is read-only (registry, hosts, NRPT/firewall
-/// via cmdlets, settings.json, WSL), enabling the ban/policy goes through the elevated helper,
-/// settings.json/WSL/system proxy need no elevation. After applying the ban, live checks run
-/// (rule #6 of AGENTS.md: not "it should work", but a check on live traffic).
+/// via cmdlets, settings.json, config.toml of Codex, WSL), enabling the ban/policy goes through
+/// the elevated helper, the settings/WSL/system proxy need no elevation. One settings sync covers
+/// both applications at once (Claude Code env and the Codex system-proxy flag). After applying the
+/// ban, live checks run (rule #6 of AGENTS.md: not "it should work", but a check on live traffic).
 /// </summary>
 public sealed class GuardService(
     AppConfig config,
     IEgressPolicyStore policy,
     IBanSystemOps banOps,
     ClaudeSettingsGuard settings,
+    CodexSettingsGuard codexSettings,
     WslConfigGuard wsl,
     ISystemProxyStore systemProxy,
     IElevatedCommandRunner elevated,
@@ -52,10 +62,18 @@ public sealed class GuardService(
         var (ban, policyStatus) = await GetCoreStatusAsync(ct);
 
         var settingsStatus = settings.Read();
+        var codexStatus = codexSettings.Read();
         var wslStatus = await wsl.ReadAsync(ct);
         var sysProxyStatus = systemProxy.Read();
 
-        return new GuardSnapshot(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus, BuildItems(ban, policyStatus, settingsStatus, wslStatus, sysProxyStatus));
+        return new GuardSnapshot(
+            ban,
+            policyStatus,
+            settingsStatus,
+            codexStatus,
+            wslStatus,
+            sysProxyStatus,
+            BuildItems(ban, policyStatus, settingsStatus, codexStatus, wslStatus, sysProxyStatus));
     }
 
     /// <summary>
@@ -119,6 +137,7 @@ public sealed class GuardService(
         LocalBanStatus ban,
         EgressPolicyStatus policy,
         ClaudeSettingsStatus settings,
+        CodexSettingsStatus codex,
         WslConfigStatus wsl,
         SystemProxyStatus sysProxy)
     {
@@ -135,6 +154,11 @@ public sealed class GuardService(
                 : settings.Detail ?? (settings.State == GuardState.On
                     ? $"env proxy {settings.ExpectedProxy}, NO_PROXY up to date"
                     : $"HTTPS_PROXY={settings.CurrentProxy ?? "<none>"}, NO_PROXY={settings.CurrentNoProxy ?? "<none>"} (expected {settings.ExpectedProxy})")),
+            new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.FileMissing
+                ? "config.toml not found"
+                : codex.State == GuardState.On
+                    ? "respect_system_proxy = true"
+                    : $"respect_system_proxy={Word(codex.Enabled)} (expected true)")),
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
                 : string.Join("; ", wsl.Distros.Select(d =>
@@ -143,6 +167,13 @@ public sealed class GuardService(
                 sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled"),
         ];
     }
+
+    private static string Word(bool? value) => value switch
+    {
+        true => "true",
+        false => "false",
+        _ => "<unset>",
+    };
 
 
     internal static string Word(GuardState state) => state switch
@@ -204,18 +235,30 @@ public sealed class GuardService(
         return new BanApplyResult(result.Detail, live);
     }
 
+    /// <summary>
+    /// Both applications at once: env in Claude Code settings.json and the system-proxy flag in
+    /// Codex config.toml (the guard card's single sync action). Each file is written only on an
+    /// actual change; the log carries one line per application.
+    /// </summary>
     public Task<SettingsSyncResult> SyncSettingsAsync(CancellationToken ct) =>
         Task.Run(() =>
         {
             var sync = settings.Sync();
+            var codexSync = codexSettings.Sync();
             var outcome = new SettingsSyncResult(
                 sync.Written,
                 sync.BackupPath,
                 ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
-                ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
+                ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
+                codexSync.Written,
+                codexSync.BackupPath,
+                config.Guard.CodexSettingsPath);
             log.Info(outcome.Written
-                ? $"guard settings sync: env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
-                : $"guard settings sync: env already up to date (proxy {outcome.ProxyUrl})");
+                ? $"guard settings sync: Claude env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
+                : $"guard settings sync: Claude env already up to date (proxy {outcome.ProxyUrl})");
+            log.Info(outcome.CodexWritten
+                ? $"guard codex settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
+                : "guard codex settings sync: respect_system_proxy=true already in place");
             return outcome;
         }, ct);
 

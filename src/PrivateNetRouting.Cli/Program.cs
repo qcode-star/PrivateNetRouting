@@ -62,6 +62,7 @@ internal static class Program
                 "logs" => RunLogsCommand(args.Skip(1).ToList()),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
                 "browser" => await RunBrowserAsync(args.Skip(1).ToList()),
+                "codex" => await RunCodexAsync(args.Skip(1).ToList()),
                 "update" => await RunUpdateAsync(args.Skip(1).ToList()),
                 "watchdog" => await RunWatchdogAsync(),
                 "guard" => await RunGuardAsync(args.Skip(1).ToList()),
@@ -426,6 +427,111 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> RunCodexAsync(List<string> rest)
+    {
+        var action = rest.FirstOrDefault() ?? "help";
+        var options = rest.Skip(1).ToList();
+        switch (action)
+        {
+            case "launch":
+                return await RunCodexLaunchAsync(options);
+            case "update":
+                return await RunCodexUpdateAsync(options);
+            default:
+                Console.WriteLine("""
+                    usage: pnr codex launch [--check-only]
+                           pnr codex update [--check]
+
+                    launch  start the Codex desktop app with --proxy-server/--proxy-bypass-list
+                            and the proxy env (Invoke-CommandInDesktopPackage, codex.* config),
+                            bringing the chain up if needed
+                    update  update the app through the Microsoft Store (versions check first,
+                            a running Codex is closed before the Store replaces the package)
+                    """);
+                return action == "help" ? 0 : 1;
+        }
+    }
+
+    private static async Task<int> RunCodexLaunchAsync(List<string> rest)
+    {
+        var checkOnly = false;
+        foreach (var argument in rest)
+        {
+            switch (argument)
+            {
+                case "--check-only":
+                    checkOnly = true;
+                    break;
+                default:
+                    Console.Error.WriteLine($"unknown option: {argument} (--check-only)");
+                    return 1;
+            }
+        }
+
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        var progress = new Progress<ChainStep>(step =>
+            Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
+
+        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly), progress, CancellationToken.None);
+        await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
+        if (result.Outcome == CodexLaunchOutcome.CheckOnly)
+        {
+            Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
+            return 0;
+        }
+
+        Console.WriteLine($"codex launched (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})");
+        return 0;
+    }
+
+    private static async Task<int> RunCodexUpdateAsync(List<string> rest)
+    {
+        var checkOnly = false;
+        foreach (var argument in rest)
+        {
+            switch (argument)
+            {
+                case "--check":
+                    checkOnly = true;
+                    break;
+                default:
+                    Console.Error.WriteLine($"unknown option: {argument} (--check)");
+                    return 1;
+            }
+        }
+
+        var config = AppConfigStore.LoadOrCreate();
+        await using var runtime = ProxyRuntime.FromConfig(config);
+        var check = await runtime.CodexUpdater.CheckAsync(CancellationToken.None);
+        Console.WriteLine($"installed: {check.Installed.Version} (package {check.Installed.Name})");
+        if (check.StoreUnavailable)
+        {
+            Console.WriteLine("the Store did not answer the update search");
+            return 1;
+        }
+
+        if (!check.UpdateAvailable)
+        {
+            Console.WriteLine("up to date — the Store has nothing newer");
+            return 0;
+        }
+
+        Console.WriteLine(check.OfferedVersion is null
+            ? "update available (the Store did not name the version)"
+            : $"update available: {check.OfferedVersion}");
+        if (checkOnly)
+        {
+            return 0;
+        }
+
+        var progress = new Progress<UpdateProgress>(p =>
+            Console.WriteLine($"[{p.Phase}] {p.Message}"));
+        var after = await runtime.CodexUpdater.UpdateAsync(progress, CancellationToken.None);
+        Console.WriteLine($"codex updated: {check.Installed.Version} -> {after.Version}");
+        return 0;
+    }
+
     private static async Task<int> RunWatchdogAsync()
     {
         var config = AppConfigStore.LoadOrCreate();
@@ -577,8 +683,9 @@ internal static class Program
 
     /// <summary>
     /// Direct-access guards: status (read-only), local ban of hosts/NRPT/firewall
-    /// and the managed policy (both — UAC), env in Claude Code settings.json (Windows and WSL),
-    /// WinINET system proxy. After ban on/off — live checks (DNS/direct/proxied).
+    /// and the managed policy (both — UAC), env in Claude Code settings.json and the system-proxy
+    /// flag in Codex config.toml (Windows; WSL separately), WinINET system proxy.
+    /// After ban on/off — live checks (DNS/direct/proxied).
     /// </summary>
     private static async Task<int> RunGuardAsync(List<string> rest)
     {
@@ -657,6 +764,9 @@ internal static class Program
                 Console.WriteLine(settings.Written
                     ? $"settings.json: env proxy {settings.ProxyUrl}, NO_PROXY written (backup: {settings.BackupPath ?? "none"})"
                     : $"settings.json: env already up to date (proxy {settings.ProxyUrl})");
+                Console.WriteLine(settings.CodexWritten
+                    ? $"config.toml: respect_system_proxy = true written (backup: {settings.CodexBackupPath ?? "none"})"
+                    : "config.toml: respect_system_proxy = true already in place");
                 return 0;
 
             case "wsl":
@@ -717,6 +827,7 @@ internal static class Program
             GuardKind.LocalBan => "local ban",
             GuardKind.EgressPolicy => "egress policy",
             GuardKind.ClaudeSettings => "settings.json",
+            GuardKind.CodexSettings => "codex config",
             GuardKind.WslConfig => "wsl config",
             GuardKind.SystemProxy => "sysproxy",
             _ => kind.ToString().ToLowerInvariant(),
@@ -814,6 +925,15 @@ internal static class Program
                                  start the browser with an isolated profile and the app's
                                  proxy (firefox user.js / chromium flags, browser.* config);
                                  --prepare-only writes the profile without opening it
+            pnr codex launch [--check-only]
+                                 start the Codex desktop app (OpenAI, Microsoft Store MSIX)
+                                 with --proxy-server/--proxy-bypass-list and the proxy env
+                                 (package-context launch, codex.* config), bringing the
+                                 chain up if needed
+            pnr codex update [--check]
+                                 update the app through the Microsoft Store: the Store catalog
+                                 is asked first (no chain, no UAC), a running Codex is closed
+                                 before the Store replaces the package
             pnr update [--check] [--download-only] [--force] [--keep-file]
                        [--keep-running] [--url <url>] [--install-from <path>]
                                  update Claude Desktop (MSIX) through the proxy chain:
@@ -825,13 +945,14 @@ internal static class Program
                                  the chain (Ctrl+C to stop; starts nothing by itself)
             pnr guard status [--live]
                                  guard states, read-only: local ban (hosts/NRPT/firewall),
-                                 egress policy, Claude settings.json env, WSL config;
-                                 --live adds DNS/direct/proxied probes
+                                 egress policy, Claude settings.json env, Codex config.toml,
+                                 WSL config; --live adds DNS/direct/proxied probes
             pnr guard ban on|off local ban on direct access: hosts + NRPT + firewall (UAC)
             pnr guard policy on|off
                                  managed policy egressProxyUrl + disableWslSessions=0 (UAC)
             pnr guard settings sync
                                  write env (proxy + NO_PROXY) into Claude Code settings.json
+                                 and [features] respect_system_proxy into Codex config.toml
             pnr guard wsl sync   update the WSL startup script and settings.json env in
                                  the distro (guard.wslDistro/guard.wslUser)
             pnr guard sysproxy on|off

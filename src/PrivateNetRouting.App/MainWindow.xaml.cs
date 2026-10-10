@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -61,6 +62,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
+    private CodexUpdateWindow? _codexUpdateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private AboutWindow? _aboutWindow;
     private bool _idleStopBusy;
@@ -472,17 +474,30 @@ public partial class MainWindow : Window
             return;
         }
 
-        SetGuardDots(snapshot.Ban.State, snapshot.Policy.State, snapshot.Settings.State, snapshot.Wsl.State);
+        SetGuardDots(
+            snapshot.Ban.State,
+            snapshot.Policy.State,
+            Merge(snapshot.Settings.State, snapshot.CodexSettings.State),
+            snapshot.Wsl.State);
 
-        BanDetail.Text = snapshot.Ban.Detail ?? (snapshot.Ban.State switch
+        // a hosts block that lags behind the configured list carries a visible note at the end of the
+        // line (the CLI spells the same marker); it is coloured as a warning and the tooltip says
+        // what to do about it
+        var staleHosts = snapshot.Ban.HostsEntries > 0 && !snapshot.Ban.HostsCurrent;
+        var banDetail = snapshot.Ban.Detail ?? (snapshot.Ban.State switch
         {
             GuardState.Off => Loc.S("Main.Guard.Ban.Off"),
             GuardState.Unknown => Loc.S("Main.Guard.Unknown"),
             _ => Loc.F("Main.Guard.Ban.DetailFmt", snapshot.Ban.HostsEntries, snapshot.Ban.NrptNamespaces.Count, snapshot.Ban.FirewallRules),
         });
-        BanDetail.ToolTip = snapshot.Ban.HostsEntries > 0 && !snapshot.Ban.HostsCurrent
-            ? Loc.S("Main.Guard.Ban.Stale")
-            : null;
+        BanDetail.Inlines.Clear();
+        BanDetail.Inlines.Add(new Run(banDetail));
+        if (staleHosts)
+        {
+            BanDetail.Inlines.Add(new Run(" " + Loc.S("Main.Guard.Ban.StaleMark")) { Foreground = Theme.Bad });
+        }
+
+        BanDetail.ToolTip = staleHosts ? Loc.S("Main.Guard.Ban.Stale") : null;
 
         PolicyDetail.Text = snapshot.Policy.State switch
         {
@@ -492,7 +507,8 @@ public partial class MainWindow : Window
             _ => snapshot.Policy.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
 
-        SettingsDetail.Text = snapshot.Settings.State switch
+        // one row, both applications: Claude Code env and the Codex system-proxy flag
+        var claude = snapshot.Settings.State switch
         {
             GuardState.On => Loc.F("Main.Guard.Settings.OkFmt", snapshot.Settings.ExpectedProxy),
             GuardState.Off => Loc.S("Main.Guard.Settings.NoFile"),
@@ -502,6 +518,16 @@ public partial class MainWindow : Window
                 snapshot.Settings.CurrentNoProxy ?? "—"),
             _ => snapshot.Settings.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
+        var codex = snapshot.CodexSettings.State switch
+        {
+            GuardState.On => Loc.S("Main.Guard.Settings.Codex.Ok"),
+            GuardState.Off => Loc.S("Main.Guard.Settings.Codex.NoFile"),
+            GuardState.Partial => Loc.F(
+                "Main.Guard.Settings.Codex.FlagFmt",
+                snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : "unset"),
+            _ => snapshot.CodexSettings.Detail ?? Loc.S("Main.Guard.Unknown"),
+        };
+        SettingsDetail.Text = $"{claude}; {codex}";
 
         WslDetail.Text = snapshot.Wsl.Distros.Count == 0
             ? LocalizeWslReason(snapshot.Wsl.Reason)
@@ -515,7 +541,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The collapsed card's one status line: the four layer states folded into one. Unknown
+    /// The collapsed card's one status line: the five layer states folded into one. Unknown
     /// dominates (nobody knows), any mix folds to partial; only all-on is good, all-off is the
     /// only bad one.
     /// </summary>
@@ -523,7 +549,9 @@ public partial class MainWindow : Window
     {
         var state = _lastGuards is null
             ? GuardState.Unknown
-            : Merge(Merge(_lastGuards.Ban.State, _lastGuards.Policy.State), Merge(_lastGuards.Settings.State, _lastGuards.Wsl.State));
+            : Merge(
+                Merge(_lastGuards.Ban.State, _lastGuards.Policy.State),
+                Merge(_lastGuards.Settings.State, Merge(_lastGuards.CodexSettings.State, _lastGuards.Wsl.State)));
 
         var (word, brush) = state switch
         {
@@ -537,17 +565,23 @@ public partial class MainWindow : Window
 
         // the same readability rule as the rows: an unknown state keeps the muted text colour
         GuardSummary.Foreground = state == GuardState.Unknown ? Theme.TextMuted : brush;
-
-        static GuardState Merge(GuardState a, GuardState b)
-        {
-            if (a == b)
-            {
-                return a;
-            }
-
-            return a == GuardState.Unknown || b == GuardState.Unknown ? GuardState.Unknown : GuardState.Partial;
-        }
     }
+
+    /// <summary>Two layer states as one: equals stay, anything mixed is partial, unknown dominates.</summary>
+    private static GuardState Merge(GuardState a, GuardState b)
+    {
+        if (a == b)
+        {
+            return a;
+        }
+
+        return a == GuardState.Unknown || b == GuardState.Unknown ? GuardState.Unknown : GuardState.Partial;
+    }
+
+    /// <summary>The settings row and the combined action treat both applications as one layer.</summary>
+    private GuardState SettingsLayerState() => _lastGuards is { } snapshot
+        ? Merge(snapshot.Settings.State, snapshot.CodexSettings.State)
+        : GuardState.Unknown;
 
     /// <summary>
     /// The collapsed card's single action follows the state: everything on — "Disable all"
@@ -558,7 +592,7 @@ public partial class MainWindow : Window
         var allOn = _lastGuards is { } snapshot
             && snapshot.Ban.State == GuardState.On
             && snapshot.Policy.State == GuardState.On
-            && snapshot.Settings.State == GuardState.On
+            && SettingsLayerState() == GuardState.On
             && snapshot.Wsl.State == GuardState.On;
         GuardAllButton.Content = Loc.S(allOn ? "Main.Guard.Button.DisableAll" : "Main.Guard.Button.EnableAll");
     }
@@ -573,7 +607,7 @@ public partial class MainWindow : Window
         var disable = _lastGuards is { } snapshot
             && snapshot.Ban.State == GuardState.On
             && snapshot.Policy.State == GuardState.On
-            && snapshot.Settings.State == GuardState.On
+            && SettingsLayerState() == GuardState.On
             && snapshot.Wsl.State == GuardState.On;
         await RunGuardAsync(async () =>
         {
@@ -693,16 +727,20 @@ public partial class MainWindow : Window
         _viewModel.SetCheckResult("Main.Guard.Policy.OffDone");
     });
 
-    /// <summary>Writing env (proxy + NO_PROXY) into Claude Code settings.json; a backup only when the content changes.</summary>
+    /// <summary>
+    /// One sync for both applications: env into Claude Code settings.json, the system-proxy flag
+    /// into Codex config.toml; a backup of either file is named in the result.
+    /// </summary>
     private async void OnGuardSettingsSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-        if (result.Written)
+        var backups = new[] { result.BackupPath, result.CodexBackupPath }
+            .Where(path => path is not null)
+            .ToList();
+        var backupText = backups.Count == 0 ? Loc.S("Main.Guard.Backup.None") : string.Join("; ", backups);
+        if (result.Written || result.CodexWritten)
         {
-            _viewModel.SetCheckResult(
-                "Main.Guard.Settings.DoneFmt",
-                result.ProxyUrl,
-                result.BackupPath ?? Loc.S("Main.Guard.Backup.None"));
+            _viewModel.SetCheckResult("Main.Guard.Settings.DoneFmt", result.ProxyUrl, backupText);
         }
         else
         {
@@ -1218,6 +1256,76 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Codex launch: the same contract as the Claude launch — a live CONNECT, an idempotent
+    /// chain bring-up drawn in the chain card, then the app with the proxy flags and env
+    /// (the package-context launch). A running copy is only warned about in the log.
+    /// </summary>
+    private async void OnLaunchCodex(object sender, RoutedEventArgs e) => await RunCodexLaunchAsync();
+
+    private async Task RunCodexLaunchAsync()
+    {
+        if (_launchBusy)
+        {
+            return;
+        }
+
+        _launchBusy = true;
+        _viewModel.SetLaunchBusy(true);
+        var success = false;
+        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        var cts = new CancellationTokenSource();
+        _operationCts = cts;
+        try
+        {
+            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            chainWasDown = !healthy;
+            if (!healthy)
+            {
+                BeginOperation();
+            }
+
+            var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
+            var result = await _runtime.CodexLauncher.LaunchAsync(LauncherOptions.Default, progress, cts.Token);
+            _viewModel.SetCheckResult("Main.Codex.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+            success = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Same contract as the Claude launch: abort, extinguish only a chain the launch
+            // raised itself.
+            if (chainWasDown)
+            {
+                try
+                {
+                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                }
+                catch (Exception stopEx)
+                {
+                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
+                }
+            }
+
+            _viewModel.SetCheckResult("Main.Codex.Cancelled");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _operationCts = null;
+            cts.Dispose();
+            _launchBusy = false;
+            _viewModel.SetLaunchBusy(false);
+            EndOperation();
+            SettleChainCardAfterOperation(success);
+            await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
+            await RefreshChainAsync();
+            await RefreshIdleStopAsync();
+        }
+    }
+
+    /// <summary>
     /// Signal about a Claude update found at startup: the badge dot on the update button.
     /// Returns the localized text — App uses it for the tray balloon as well.
     /// </summary>
@@ -1270,6 +1378,54 @@ public partial class MainWindow : Window
             SetUpdateNotice(check.Installed.Version, check.OfferedVersion);
         }
     }
+
+    /// <summary>
+    /// Codex update window (Microsoft Store): one per application, a repeated click activates
+    /// the open one.
+    /// </summary>
+    private void OnUpdateCodex(object sender, RoutedEventArgs e)
+    {
+        if (_codexUpdateWindow is not null)
+        {
+            _codexUpdateWindow.Activate();
+            return;
+        }
+
+        _codexUpdateWindow = new CodexUpdateWindow(_runtime) { Owner = this };
+        _codexUpdateWindow.VersionStateResolved += OnCodexVersionStateResolved;
+        _codexUpdateWindow.Closed += (_, _) => _codexUpdateWindow = null;
+        _codexUpdateWindow.Show();
+    }
+
+    /// <summary>
+    /// The Codex update window has resolved the version state: the Codex update button's badge
+    /// follows it — a stale dot is dropped (the version is current or the Store is unreachable).
+    /// </summary>
+    private void OnCodexVersionStateResolved(CodexUpdateCheck check)
+    {
+        if (!check.UpdateAvailable)
+        {
+            _viewModel.ClearCodexUpdateNotice();
+            return;
+        }
+
+        SetCodexUpdateNotice(check.Installed.Version, check.OfferedVersion);
+    }
+
+    /// <summary>
+    /// Signal about a Codex update found at startup: the badge dot on the Codex update button.
+    /// Returns the localized text — App uses it for the tray balloon as well. The offered version
+    /// comes from OpenAI's manifest when it answered (it rides the live proxy only).
+    /// </summary>
+    public string SetCodexUpdateNotice(string installedVersion, string? offeredVersion)
+    {
+        _viewModel.SetCodexUpdateNotice(installedVersion, offeredVersion);
+        return offeredVersion is null
+            ? Loc.F("Main.CodexUpdate.AvailableFmt", installedVersion)
+            : Loc.F("Main.CodexUpdate.AvailableVersionFmt", installedVersion, offeredVersion);
+    }
+
+    private void ClearCodexUpdateNotice() => _viewModel.ClearCodexUpdateNotice();
 
     /// <summary>
     /// The help menu of the header "?" button: diagnostics, the logs folder, about. Built on
@@ -1661,6 +1817,37 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _updateNoticeArgs = [];
         OnPropertyChanged(nameof(UpdateBadgeVisibility));
         OnPropertyChanged(nameof(UpdateBadgeToolTip));
+    }
+
+    // --- Codex update badge: the offered version rides OpenAI's manifest and may be unknown ---
+
+    private string? _codexUpdateInstalledVersion;
+    private string? _codexUpdateOfferedVersion;
+
+    /// <summary>The Codex brand dot on the Codex update button.</summary>
+    public Visibility CodexUpdateBadgeVisibility =>
+        _codexUpdateInstalledVersion is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public string? CodexUpdateBadgeToolTip => _codexUpdateInstalledVersion is null
+        ? null
+        : _codexUpdateOfferedVersion is null
+            ? Loc.F("Main.CodexUpdate.AvailableFmt", _codexUpdateInstalledVersion)
+            : Loc.F("Main.CodexUpdate.AvailableVersionFmt", _codexUpdateInstalledVersion, _codexUpdateOfferedVersion);
+
+    public void SetCodexUpdateNotice(string installedVersion, string? offeredVersion)
+    {
+        _codexUpdateInstalledVersion = installedVersion;
+        _codexUpdateOfferedVersion = offeredVersion;
+        OnPropertyChanged(nameof(CodexUpdateBadgeVisibility));
+        OnPropertyChanged(nameof(CodexUpdateBadgeToolTip));
+    }
+
+    public void ClearCodexUpdateNotice()
+    {
+        _codexUpdateInstalledVersion = null;
+        _codexUpdateOfferedVersion = null;
+        OnPropertyChanged(nameof(CodexUpdateBadgeVisibility));
+        OnPropertyChanged(nameof(CodexUpdateBadgeToolTip));
     }
 
     /// <summary>Bring-up is offered while something in the chain is not up; state unknown — enabled.</summary>

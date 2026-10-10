@@ -77,6 +77,8 @@
     <s:String x:Key="Main.Button.LaunchClaude">Запустить Claude</s:String>
     <s:String x:Key="Main.Button.LaunchBrowser">Браузер</s:String>
     <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude</s:String>
+    <s:String x:Key="Main.Button.UpdateCodex">Обновить Codex</s:String>
+    <s:String x:Key="Main.Button.LaunchCodex">Запустить Codex</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>
@@ -97,9 +99,13 @@
     <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Browser.Cancelled">запуск браузера отменён</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
+    <s:String x:Key="Main.Codex.DoneFmt">Codex запущен (цепочка готова за {0} с)</s:String>
+    <s:String x:Key="Main.Codex.Cancelled">Запуск Codex отменён</s:String>
 
     <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Доступно обновление Claude: {0} → {1}</s:String>
+    <s:String x:Key="Main.CodexUpdate.AvailableFmt">Codex: установлен {0}, доступно обновление (Microsoft Store)</s:String>
+    <s:String x:Key="Main.CodexUpdate.AvailableVersionFmt">Доступно обновление Codex: {0} → {1}</s:String>
     <s:String x:Key="Main.Update.Available">Доступно обновление Claude</s:String>
 
     <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
@@ -127,6 +133,7 @@
     <s:String x:Key="Main.Guard.Ban">Локальный бан</s:String>
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} имён · NRPT: {1} зон · firewall: {2} правил</s:String>
     <s:String x:Key="Main.Guard.Ban.Off">правил hosts/NRPT/firewall нет</s:String>
+    <s:String x:Key="Main.Guard.Ban.StaleMark">(список устарел)</s:String>
     <s:String x:Key="Main.Guard.Ban.Stale">Блок в hosts отличается от списка доменов конфига — включите бан заново, чтобы обновить.</s:String>
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Локальный бан применён. Проба DNS: {0}; прямое соединение: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">закрыто</s:String>
@@ -137,12 +144,15 @@
     <s:String x:Key="Main.Guard.Policy.OtherFmt">{0} (ожидалось {1})</s:String>
     <s:String x:Key="Main.Guard.Policy.OnDone">Политика задана: Claude всегда идёт через прокси.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Политика снята.</s:String>
-    <s:String x:Key="Main.Guard.Settings">settings.json (Windows)</s:String>
-    <s:String x:Key="Main.Guard.Settings.OkFmt">env актуален: прокси {0}</s:String>
-    <s:String x:Key="Main.Guard.Settings.NoFile">settings.json не найден</s:String>
-    <s:String x:Key="Main.Guard.Settings.MismatchFmt">HTTPS_PROXY={0}, NO_PROXY={1} — отличается от конфига</s:String>
-    <s:String x:Key="Main.Guard.Settings.DoneFmt">settings.json обновлён: прокси {0} (бэкап: {1})</s:String>
-    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">settings.json уже актуален (прокси {0})</s:String>
+    <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>
+    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env актуален, прокси {0}</s:String>
+    <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json не найден</s:String>
+    <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — отличается от конфига</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (ожидалось true)</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml не найден</s:String>
+    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code и Codex обновлены: прокси {0} (бэкап: {1})</s:String>
+    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code и Codex уже актуальны (прокси {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">без бэкапа (файл создан с нуля)</s:String>
     <s:String x:Key="Main.Guard.Wsl">Конфиг WSL</s:String>
     <s:String x:Key="Main.Guard.Wsl.Off.Mode">слой выключен (guard.wsl.mode=off)</s:String>
@@ -204,6 +214,25 @@
     <s:String x:Key="Update.Button.ContinueWithUrl">Продолжить с этим URL</s:String>
     <s:String x:Key="Update.ConfirmClose">Остановить обновление и закрыть?</s:String>
     <s:String x:Key="Update.ConfirmRaiseChain">Ни лента обновлений, ни журнал AppX не дали адрес пакета — лента отвечает только через прокси-цепочку. Поднять цепочку и поискать адрес снова?</s:String>
+
+    <!-- Codex update window (the Microsoft Store update of the Codex desktop app) -->
+    <s:String x:Key="CodexUpdate.Title">Обновить Codex</s:String>
+    <s:String x:Key="CodexUpdate.Header">Codex (OpenAI)</s:String>
+    <s:String x:Key="CodexUpdate.SubHeader">Обновление через Microsoft Store</s:String>
+    <s:String x:Key="CodexUpdate.Step.Check">Версии</s:String>
+    <s:String x:Key="CodexUpdate.Step.Download">Загрузка</s:String>
+    <s:String x:Key="CodexUpdate.Step.Install">Установка</s:String>
+    <s:String x:Key="CodexUpdate.Check.Running">спрашиваем каталог Microsoft Store об обновлениях</s:String>
+    <s:String x:Key="CodexUpdate.Check.UpToDateFmt">Установлена {0} — в Store ничего новее, обновлять нечего.</s:String>
+    <s:String x:Key="CodexUpdate.Check.AvailableFmt">Установлена {0} — Store предлагает обновление.</s:String>
+    <s:String x:Key="CodexUpdate.Check.OfferedFmt">Установлена {0} → предлагается {1}</s:String>
+    <s:String x:Key="CodexUpdate.Check.StoreUnavailable">Store не ответил на поиск обновлений — попробуйте позже (связность Store чинит сам).</s:String>
+    <s:String x:Key="CodexUpdate.ConfirmClose">Codex сейчас запущен. Его нужно закрыть, чтобы Store смог заменить пакет, — продолжить?</s:String>
+    <s:String x:Key="CodexUpdate.Done.Declined">Обновление отложено, пока запущен Codex.</s:String>
+    <s:String x:Key="CodexUpdate.Done.InstalledFmt">Установлено: {0} → {1}</s:String>
+    <s:String x:Key="CodexUpdate.Install.VersionWarn">Предупреждение: версия после обновления Store не изменилась — возможно, нужна ещё одна попытка.</s:String>
+    <s:String x:Key="CodexUpdate.Launch.Done">Codex запущен.</s:String>
+    <s:String x:Key="CodexUpdate.Button.LaunchCodex">Запустить Codex</s:String>
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Язык</s:String>

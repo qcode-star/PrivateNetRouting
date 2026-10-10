@@ -331,7 +331,7 @@
                                         IsEnabled="{Binding CanGuard}"/>
                             </StackPanel>
 
-                            <!-- env in Claude Code settings.json (Windows) -->
+                            <!-- app settings: env in Claude Code settings.json + the system-proxy flag in Codex config.toml -->
                             <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray"
                                      VerticalAlignment="Center" Margin="0,0,6,10" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}"
@@ -361,16 +361,29 @@
             </StackPanel>
         </Border>
 
-                <!-- Launch actions: the primary one, then the update. An announced Claude update is
-                     signalled by the accent dot on the update button (the tooltip carries the versions);
+                <!-- Launch actions, one row: the Claude pair pinned left, the shared browser
+                     button centred, the Codex pair pinned right. The buttons size to their labels
+                     (no minimum width — no empty space around the text) and the two star columns
+                     are pure spacers: they carry the spread on a wide window and give way (down to
+                     their minimum) on a narrow one, so the buttons never shrink into each other.
+                     An announced update is signalled
+                     by the brand dot on the update button (the tooltip carries the versions);
                      Diagnostics and the logs folder live in the help menu of the "?" button in the header. -->
-                <StackPanel Orientation="Horizontal" Margin="0,16,0,16">
-                    <Button Content="{DynamicResource Main.Button.LaunchClaude}" MinWidth="200" Click="OnLaunchClaude"
+                <Grid Margin="0,16,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*" MinWidth="20"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*" MinWidth="20"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- the row's own padding is tighter than the app-wide one: five buttons must fit one row -->
+                    <Button Grid.Column="0" Content="{DynamicResource Main.Button.LaunchClaude}" Padding="12,0" Click="OnLaunchClaude"
                             IsEnabled="{Binding CanLaunch}"/>
-                    <Button Content="{DynamicResource Main.Button.LaunchBrowser}" MinWidth="120" Margin="8,0,0,0"
-                            Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
-                    <Button Style="{StaticResource SecondaryButton}" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"
-                            MinWidth="160" Margin="8,0,0,0"
+                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"
+                            Margin="8,0,0,0"
                             ToolTipService.ShowOnDisabled="True" ToolTip="{Binding UpdateBadgeToolTip}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="{DynamicResource Main.Button.UpdateClaude}"/>
@@ -379,7 +392,22 @@
                                      Visibility="{Binding UpdateBadgeVisibility}"/>
                         </StackPanel>
                     </Button>
-                </StackPanel>
+                    <Button Grid.Column="3" Content="{DynamicResource Main.Button.LaunchBrowser}" Padding="12,0"
+                            Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
+                    <Button Grid.Column="5" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateCodex" IsEnabled="{Binding CanLaunch}"
+                            Margin="0,0,8,0"
+                            ToolTipService.ShowOnDisabled="True" ToolTip="{Binding CodexUpdateBadgeToolTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{DynamicResource Main.Button.UpdateCodex}"/>
+                            <Ellipse Width="8" Height="8" Margin="7,0,0,0" VerticalAlignment="Center"
+                                     Fill="{StaticResource Brush.Codex}"
+                                     Visibility="{Binding CodexUpdateBadgeVisibility}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="6" Content="{DynamicResource Main.Button.LaunchCodex}" Padding="12,0"
+                            Style="{StaticResource CodexButton}" Click="OnLaunchCodex"
+                            IsEnabled="{Binding CanLaunch}"/>
+                </Grid>
 
             </StackPanel>
         </ScrollViewer>

@@ -77,6 +77,8 @@
     <s:String x:Key="Main.Button.LaunchClaude">Launch Claude</s:String>
     <s:String x:Key="Main.Button.LaunchBrowser">Browser</s:String>
     <s:String x:Key="Main.Button.UpdateClaude">Update Claude</s:String>
+    <s:String x:Key="Main.Button.UpdateCodex">Update Codex</s:String>
+    <s:String x:Key="Main.Button.LaunchCodex">Launch Codex</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
@@ -97,10 +99,14 @@
     <s:String x:Key="Main.Browser.DoneFmt">Browser launched (chain ready in {0} s)</s:String>
     <s:String x:Key="Main.Browser.Cancelled">browser launch cancelled</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
+    <s:String x:Key="Main.Codex.DoneFmt">Codex launched (chain ready in {0} s)</s:String>
+    <s:String x:Key="Main.Codex.Cancelled">Codex launch cancelled</s:String>
 
     <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Claude update available: {0} → {1}</s:String>
     <s:String x:Key="Main.Update.Available">A Claude update is available</s:String>
+    <s:String x:Key="Main.CodexUpdate.AvailableFmt">Codex: installed {0}, an update is available (Microsoft Store)</s:String>
+    <s:String x:Key="Main.CodexUpdate.AvailableVersionFmt">Codex update available: {0} → {1}</s:String>
 
     <!-- Guards: direct access control (local ban, egress policy, settings.json env, WSL config) -->
     <s:String x:Key="Main.Guard">Guards: direct access control</s:String>
@@ -127,6 +133,7 @@
     <s:String x:Key="Main.Guard.Ban">Local ban</s:String>
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} names · NRPT: {1} namespaces · firewall: {2} rules</s:String>
     <s:String x:Key="Main.Guard.Ban.Off">no hosts/NRPT/firewall rules</s:String>
+    <s:String x:Key="Main.Guard.Ban.StaleMark">(list is stale)</s:String>
     <s:String x:Key="Main.Guard.Ban.Stale">The hosts block differs from the configured domain list — enable the ban again to refresh it.</s:String>
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Local ban applied. DNS probe: {0}; direct connection: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">blocked</s:String>
@@ -137,12 +144,15 @@
     <s:String x:Key="Main.Guard.Policy.OtherFmt">{0} (expected {1})</s:String>
     <s:String x:Key="Main.Guard.Policy.OnDone">Egress policy is set: Claude always goes through the proxy.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Egress policy is removed.</s:String>
-    <s:String x:Key="Main.Guard.Settings">settings.json (Windows)</s:String>
-    <s:String x:Key="Main.Guard.Settings.OkFmt">env is up to date: proxy {0}</s:String>
-    <s:String x:Key="Main.Guard.Settings.NoFile">settings.json was not found</s:String>
-    <s:String x:Key="Main.Guard.Settings.MismatchFmt">HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
-    <s:String x:Key="Main.Guard.Settings.DoneFmt">settings.json updated: proxy {0} (backup: {1})</s:String>
-    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">settings.json already up to date (proxy {0})</s:String>
+    <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>
+    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env is up to date, proxy {0}</s:String>
+    <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json was not found</s:String>
+    <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (expected true)</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml was not found</s:String>
+    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code and Codex updated: proxy {0} (backup: {1})</s:String>
+    <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code and Codex already up to date (proxy {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">no backup (file was created)</s:String>
     <s:String x:Key="Main.Guard.Wsl">WSL config</s:String>
     <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (guard.wsl.mode=off)</s:String>
@@ -204,6 +214,25 @@
     <s:String x:Key="Update.Button.ContinueWithUrl">Continue with this URL</s:String>
     <s:String x:Key="Update.ConfirmClose">Stop the update and close?</s:String>
     <s:String x:Key="Update.ConfirmRaiseChain">Neither the update feed nor the AppX journal has a package address — the feed answers only through the proxy chain. Raise the chain and search for the address again?</s:String>
+
+    <!-- Codex update window (the Microsoft Store update of the Codex desktop app) -->
+    <s:String x:Key="CodexUpdate.Title">Update Codex</s:String>
+    <s:String x:Key="CodexUpdate.Header">Codex (OpenAI)</s:String>
+    <s:String x:Key="CodexUpdate.SubHeader">Update through the Microsoft Store</s:String>
+    <s:String x:Key="CodexUpdate.Step.Check">Versions</s:String>
+    <s:String x:Key="CodexUpdate.Step.Download">Download</s:String>
+    <s:String x:Key="CodexUpdate.Step.Install">Install</s:String>
+    <s:String x:Key="CodexUpdate.Check.Running">asking the Microsoft Store catalog for updates</s:String>
+    <s:String x:Key="CodexUpdate.Check.UpToDateFmt">Installed {0} — the Store has nothing newer, nothing to install.</s:String>
+    <s:String x:Key="CodexUpdate.Check.AvailableFmt">Installed {0} — the Store offers an update.</s:String>
+    <s:String x:Key="CodexUpdate.Check.OfferedFmt">Installed {0} → offered {1}</s:String>
+    <s:String x:Key="CodexUpdate.Check.StoreUnavailable">The Store did not answer the update search — try again later (the Store app itself repairs its connectivity).</s:String>
+    <s:String x:Key="CodexUpdate.ConfirmClose">Codex is running. It must be closed so the Store can replace the package — continue?</s:String>
+    <s:String x:Key="CodexUpdate.Done.Declined">Update declined while Codex is running.</s:String>
+    <s:String x:Key="CodexUpdate.Done.InstalledFmt">Installed: {0} → {1}</s:String>
+    <s:String x:Key="CodexUpdate.Install.VersionWarn">Warning: the version did not change after the Store update — the Store may need another pass.</s:String>
+    <s:String x:Key="CodexUpdate.Launch.Done">Codex launched.</s:String>
+    <s:String x:Key="CodexUpdate.Button.LaunchCodex">Launch Codex</s:String>
 
     <!-- Settings -->
     <s:String x:Key="Main.Language">Language</s:String>

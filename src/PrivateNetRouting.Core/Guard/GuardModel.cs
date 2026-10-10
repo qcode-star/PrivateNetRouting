@@ -11,6 +11,9 @@ public enum GuardKind
     /// <summary>env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) in settings.json of Claude Code, Windows.</summary>
     ClaudeSettings,
 
+    /// <summary>The flag `[features] respect_system_proxy` in config.toml of Codex (desktop and CLI).</summary>
+    CodexSettings,
+
     /// <summary>WSL: startup script with the proxy address + settings.json in the distro.</summary>
     WslConfig,
 
@@ -63,3 +66,14 @@ public sealed record ClaudeSettingsStatus(
     string? Detail = null);
 
 public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override);
+
+/// <summary>
+/// Status of the Codex settings layer: the flag is read from config.toml; a file that is absent
+/// (Codex is not installed or has never run) means the layer is off, a flag that is absent or
+/// false — partial.
+/// </summary>
+public sealed record CodexSettingsStatus(
+    GuardState State,
+    bool? Enabled,
+    bool FileMissing,
+    string? Detail = null);

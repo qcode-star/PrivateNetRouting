@@ -637,9 +637,9 @@ public class UpdaterTests : IDisposable
 
     private sealed class FakeAppxSource : IAppxPackageSource
     {
-        public InstalledPackage? Installed { get; set; } = new("Claude", "2.26454.2.0", MatchingPublisher, @"C:\WindowsApps\Claude");
+        public InstalledPackage? Installed { get; set; } = new("Claude", "2.26454.2.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
 
-        public InstalledPackage? AfterInstall { get; set; } = new("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude");
+        public InstalledPackage? AfterInstall { get; set; } = new("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
 
         public List<string> AddedFiles { get; } = [];
 

@@ -94,6 +94,7 @@ public static class AppConfigStore
         target.ForwardProxy = fresh.ForwardProxy;
         target.Chain = fresh.Chain;
         target.Launcher = fresh.Launcher;
+        target.Codex = fresh.Codex;
         target.Browser = fresh.Browser;
         target.Watchdog = fresh.Watchdog;
         target.Updater = fresh.Updater;
@@ -119,5 +120,6 @@ file static class AppConfigExtensions
         config.Updater.PowerShellPath = Environment.ExpandEnvironmentVariables(config.Updater.PowerShellPath);
         config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);
         config.Guard.ClaudeSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.ClaudeSettingsPath);
+        config.Guard.CodexSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.CodexSettingsPath);
     }
 }

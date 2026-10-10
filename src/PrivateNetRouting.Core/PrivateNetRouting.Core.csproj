@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- The Windows SDK projection (10.0.19041.0) is needed by the Codex updater only:
+         the Store update APIs (Windows.ApplicationModel.Store.Preview.InstallControl). -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

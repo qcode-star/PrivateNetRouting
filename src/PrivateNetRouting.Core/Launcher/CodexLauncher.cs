@@ -1,0 +1,137 @@
+using System.Diagnostics;
+using System.Text;
+using PrivateNetRouting.Core.Chain;
+using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Guard;
+using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.SystemOps;
+
+namespace PrivateNetRouting.Core.Launcher;
+
+public enum CodexLaunchOutcome
+{
+    /// <summary>The Codex desktop app is started with the proxy flags and env.</summary>
+    Launched,
+
+    /// <summary>--check-only mode: the chain is alive, Codex was not started.</summary>
+    CheckOnly,
+}
+
+public sealed record CodexLaunchResult(CodexLaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed);
+
+/// <summary>
+/// Codex desktop app (OpenAI, Microsoft Store MSIX) launcher: checks the chain with a live
+/// CONNECT roundtrip, on failure brings it up idempotently (the only UAC window is starting the
+/// daemon), then starts the app with --proxy-server/--proxy-bypass-list and the proxy env
+/// variables. The launch goes through Invoke-CommandInDesktopPackage: the packaged entry-point
+/// stub drops arguments, and the package-context launch is what hands the process both the
+/// flags (the Chromium side of the app) and the env (its embedded CLI core takes the standard
+/// proxy variables; config.toml has no proxy key). An already running app without the flags is
+/// only monitored, with a warning in the log (it cannot stop the launch).
+/// </summary>
+public sealed class CodexLauncher(
+    AppConfig config,
+    IChainSupervisor chain,
+    Func<CancellationToken, Task<bool>> healthCheck,
+    IProcessFinder processFinder,
+    FileLog log,
+    IPowerShellExecutor powershell,
+    Func<ProcessStartInfo, Process?>? startProcess = null)
+{
+    private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
+
+    /// <summary>Launcher log.</summary>
+    public FileLog Log => log;
+
+    /// <summary>Proxy URL for --proxy-server and for the proxy env variables.</summary>
+    public string ProxyUrl => "http://" + config.ForwardProxy.Listen;
+
+    public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
+
+    public async Task<CodexLaunchResult> LaunchAsync(LauncherOptions options, IProgress<ChainStep>? progress, CancellationToken ct)
+    {
+        var watch = Stopwatch.StartNew();
+        var chainRaised = false;
+        if (await healthCheck(ct))
+        {
+            log.Info($"codex-launcher: proxy {config.ForwardProxy.Listen} responds");
+        }
+        else
+        {
+            log.Info("codex-launcher: proxy is not responding — bringing the chain up");
+            await chain.EnsureRunningAsync(progress, ct);
+            chainRaised = true;
+        }
+
+        if (options.CheckOnly)
+        {
+            log.Info("codex-launcher: check-only, Codex is not started");
+            return new CodexLaunchResult(CodexLaunchOutcome.CheckOnly, chainRaised, watch.Elapsed);
+        }
+
+        WarnIfCodexRunningWithoutProxy();
+
+        // Invoke-CommandInDesktopPackage starts the app as a child of this PowerShell process,
+        // so the env set here reaches both the app and everything it spawns (the CLI core).
+        var script = BuildLaunchScript();
+        var (code, output) = await powershell.RunScriptAsync(script, ct).ConfigureAwait(false);
+        if (code != 0)
+        {
+            throw new IOException($"failed to start Codex (exit {code}): {output}");
+        }
+
+        log.Info("codex-launcher: Codex started with --proxy-server/--proxy-bypass-list and the proxy env");
+        return new CodexLaunchResult(CodexLaunchOutcome.Launched, chainRaised, watch.Elapsed);
+    }
+
+    /// <summary>The launch script: env + package lookup + the package-context start. Testable as text.</summary>
+    internal string BuildLaunchScript()
+    {
+        var codex = config.Codex;
+        var flags = $"--proxy-server={ProxyUrl} --proxy-bypass-list={BuildBypassList()}";
+        var script = new StringBuilder();
+        script.AppendLine("$ErrorActionPreference = 'Stop'");
+        script.AppendLine($"$env:HTTP_PROXY = '{Quote(ProxyUrl)}'");
+        script.AppendLine($"$env:HTTPS_PROXY = '{Quote(ProxyUrl)}'");
+        script.AppendLine($"$env:ALL_PROXY = '{Quote(ProxyUrl)}'");
+        script.AppendLine($"$env:NO_PROXY = '{Quote(ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains))}'");
+        script.AppendLine($"$pkg = Get-AppxPackage -Name '{Quote(codex.PackageName)}'");
+        script.AppendLine("if (-not $pkg) { throw 'Codex desktop app is not installed for the current user (Get-AppxPackage found no " + Quote(codex.PackageName) + ")' }");
+        script.AppendLine($"$exe = Join-Path $pkg.InstallLocation '{Quote(codex.AppExecutable)}'");
+        script.AppendLine("Invoke-CommandInDesktopPackage -PackageFamilyName $pkg.PackageFamilyName -AppId '" + Quote(codex.AppId) + "' -Command $exe -Args '" + Quote(flags) + "'");
+        script.AppendLine("Write-Output 'PNR=ok'");
+        return script.ToString();
+
+        static string Quote(string value) => value.Replace("'", "''");
+    }
+
+    /// <summary>An already running app without --proxy-server would work around the proxy: warn.</summary>
+    private void WarnIfCodexRunningWithoutProxy()
+    {
+        IReadOnlyList<FoundProcess> processes;
+        try
+        {
+            processes = processFinder.FindByNameContains(config.Codex.ProcessName);
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"codex-launcher: process scan failed: {ex.Message}");
+            return;
+        }
+
+        if (processes.Count == 0)
+        {
+            return;
+        }
+
+        var withProxy = processes.Count(p => p.CommandLine.Contains("--proxy-server=", StringComparison.Ordinal));
+        if (withProxy == 0)
+        {
+            log.Warn($"codex-launcher: Codex is already running ({processes.Count} processes) without --proxy-server — close it and use the launcher again");
+        }
+        else
+        {
+            log.Info($"codex-launcher: Codex is already running ({processes.Count} processes) — starting one more instance activates the existing window");
+        }
+    }
+}

@@ -37,6 +37,14 @@
         <SolidColorBrush x:Key="Brush.AccentSoft" Color="#33241D"/>
         <SolidColorBrush x:Key="Brush.OnAccent" Color="#241F1D"/>
 
+        <!-- Codex/OpenAI brand accent: the identity colour of the Launch Codex action — the same
+             role the Claude accent plays on the other side of the launch row (OpenAI green) -->
+        <SolidColorBrush x:Key="Brush.Codex" Color="#10A37F"/>
+        <SolidColorBrush x:Key="Brush.CodexHover" Color="#25B592"/>
+        <SolidColorBrush x:Key="Brush.CodexPress" Color="#0B8266"/>
+        <SolidColorBrush x:Key="Brush.CodexEdge" Color="#155E4C"/>
+        <SolidColorBrush x:Key="Brush.CodexSoft" Color="#12251F"/>
+
         <!-- ======================== State and surfaces ====================== -->
         <!-- The palette is tuned: body text is well over 4.5:1 on its surface, and every colour
              that carries a state word is above 4.5:1 as text — Brush.Idle never is: it is for
@@ -182,6 +190,43 @@
                     <Setter Property="BorderBrush" Value="Transparent"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- The Codex/OpenAI brand primary: the same filled shape as the implicit Button, with
+             the Codex accent brushes. The template is repeated because the base one hardcodes
+             the Claude accent in its hover/press triggers. -->
+        <Style x:Key="CodexButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Brush.Codex}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Ring" Margin="-3" CornerRadius="9" BorderThickness="1" BorderBrush="Transparent"/>
+                            <Border x:Name="Face" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                    CornerRadius="{StaticResource Radius.Control}">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource Brush.CodexHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="{StaticResource Brush.CodexPress}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource Brush.FocusRing}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#1E2E29"/>
+                                <Setter Property="Foreground" Value="#8C817A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">

@@ -18,8 +18,11 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
 }
 
 /// <summary>
-/// A sign that Claude is busy, or null when idle. Checked in order: claude* processes -> established connections to the proxy ->
-/// freshness of the activity marker (covers Claude Code in WSL, which has no claude.exe).
+/// A sign that Claude is busy, or null when idle. Checked in order: claude*/codex processes ->
+/// established connections to the proxy -> freshness of the activity marker (covers Claude Code
+/// in WSL, which has no claude.exe). The codex process name keeps the chain alive while the
+/// Codex desktop app is up (its traffic also counts through the connection check, but an idle
+/// open app must not let the chain die under it).
 /// </summary>
 public interface IClaudeUsageProbe
 {
@@ -34,23 +37,30 @@ public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
     IEstablishedConnectionCounter connections,
     int proxyPort,
-    string activityMarkerPath) : IClaudeUsageProbe
+    string activityMarkerPath,
+    string codexProcessName = "") : IClaudeUsageProbe
 {
     public string? GetInUseReason(TimeSpan idleWindow)
     {
-        int processCount;
-        try
+        var processParts = new List<string>();
+        var claudeCount = CountSafe(() => processes.FindByNameContains("claude").Count);
+        if (claudeCount > 0)
         {
-            processCount = processes.FindByNameContains("claude").Count;
-        }
-        catch (Exception)
-        {
-            processCount = 0;
+            processParts.Add($"claude processes: {claudeCount}");
         }
 
-        if (processCount > 0)
+        if (codexProcessName.Length > 0)
         {
-            return $"claude processes: {processCount}";
+            var codexCount = CountSafe(() => processes.FindByNameContains(codexProcessName).Count);
+            if (codexCount > 0)
+            {
+                processParts.Add($"codex processes: {codexCount}");
+            }
+        }
+
+        if (processParts.Count > 0)
+        {
+            return string.Join("; ", processParts);
         }
 
         int connectionCount;
@@ -85,5 +95,17 @@ public sealed class ClaudeUsageProbe(
         }
 
         return null;
+    }
+
+    private int CountSafe(Func<int> count)
+    {
+        try
+        {
+            return count();
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 }

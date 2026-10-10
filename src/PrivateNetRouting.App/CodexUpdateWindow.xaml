@@ -1,0 +1,72 @@
+<Window x:Class="PrivateNetRouting.App.CodexUpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Update Codex"
+        Width="680" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanMinimize" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Window}" Foreground="{StaticResource Brush.Text}"
+        FontFamily="{StaticResource Font.Ui}" FontSize="{StaticResource Font.Body}"
+        SnapsToDevicePixels="True" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header and a monotonic elapsed counter (freezes in the terminal state) -->
+        <Grid Grid.Row="0" Margin="0,0,0,14">
+            <StackPanel>
+                <TextBlock x:Name="HeaderText" Style="{StaticResource Text.Title}"/>
+                <TextBlock x:Name="SubHeaderText" Style="{StaticResource Text.Caption}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <TextBlock x:Name="ElapsedText" Style="{StaticResource Text.Mono}" HorizontalAlignment="Right"
+                       VerticalAlignment="Top"/>
+        </Grid>
+
+        <!-- Phases and the line that explains the current one; the card hugs its content -->
+        <Border Grid.Row="1" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="StepsPanel" Grid.Row="0"/>
+                <TextBlock x:Name="DetailText" Grid.Row="1" Style="{StaticResource Text.Caption}"
+                           TextWrapping="Wrap" Margin="0,14,0,0"/>
+                <TextBlock x:Name="HintText" Grid.Row="2" Style="{StaticResource Text.Note}"
+                           TextWrapping="Wrap" Margin="0,6,0,0"/>
+                <!-- The auto-close countdown after a successful installation -->
+                <TextBlock x:Name="CountdownText" Grid.Row="3" Style="{StaticResource Text.Caption}"
+                           TextWrapping="Wrap" Margin="0,10,0,0" Visibility="Collapsed"/>
+            </Grid>
+        </Border>
+
+        <!-- Store download and install progress: the bar plus the percentage while it is determinate -->
+        <Grid x:Name="ProgressArea" Grid.Row="2" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ProgressBar x:Name="Progress" Grid.Column="0" Minimum="0" Maximum="100" VerticalAlignment="Center"/>
+            <TextBlock x:Name="ProgressText" Grid.Column="1" Style="{StaticResource Text.Mono}" MinWidth="44"
+                       TextAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0"/>
+        </Grid>
+
+        <!-- Buttons; availability — by phase (an install the Store is registering is not interrupted).
+             Wrapped, so a narrow window reflows the row instead of clipping it. -->
+        <WrapPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="BtnStop" MinWidth="110" Style="{StaticResource SecondaryButton}" Click="OnStop"/>
+            <Button x:Name="BtnLog" MinWidth="110" Margin="8,0,0,0" Style="{StaticResource GhostButton}" Click="OnOpenLog"/>
+            <Button x:Name="BtnRetry" MinWidth="110" Margin="8,0,0,0" Visibility="Collapsed"
+                    Style="{StaticResource SecondaryButton}" Click="OnRetry"/>
+            <Button x:Name="BtnLaunch" MinWidth="140" Margin="8,0,0,0" Visibility="Collapsed"
+                    Style="{StaticResource CodexButton}" Click="OnLaunchCodex"/>
+            <Button x:Name="BtnClose" MinWidth="110" Margin="8,0,0,0" Style="{StaticResource GhostButton}" Click="OnCloseClick"/>
+        </WrapPanel>
+    </Grid>
+</Window>

@@ -88,18 +88,27 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
   the connection evidence is the proxy counters and `forward-proxy.log`, not Claude's own
   logs (the MSIX package does not keep readable ones). The browser: the isolated profile's
   `user.js` is rewritten on every launch (proxy port, `no_proxies_on`, `failover_direct`);
-  a second click reports "already running" without duplicating.
+  a second click reports "already running" without duplicating. Codex launches in the package
+  context (`Invoke-CommandInDesktopPackage` — the only way the proxy env reaches its embedded
+  CLI core); the evidence is established connections to 18081 from the `ChatGPT` processes
+  plus the `codex-launcher` log line.
 - The update window: with no chain it asks to raise one (a modal Yes/No — this is by
   design). While a MessageBox waits, the elapsed timer keeps ticking — that is not a hang.
   A full run against the live chain ends in "up to date" or a real offer; do not let a
-  night session start the installation phase.
+  night session start the installation phase. The Codex window is the Store one: its check
+  needs no chain and no UAC (the catalog is asked by product id; the version manifest only
+  over a live proxy), so it stays read-only like the Claude one.
 - Layout: the restored window hugs the content (`SizeToContent=Height`), the minimum width
   holds at 700, the maximized window keeps the content compact at the top (cards + launch
   actions scroll together, only the status bar is pinned), and both languages must fit
   without overlaps at MinWidth.
 - Guards: `pnr guard status --live` and the card's Refresh are read-only and safe; the
   on/off buttons need UAC — skip them unattended, their fail paths are covered by unit
-  tests.
+  tests. The settings sync needs no elevation and touches two files at once (Claude Code
+  `settings.json` and Codex `config.toml`) — compare before/after with `git diff`-style
+  eyes: a backup from either file must appear in the same line, and the second run must
+  report "already in place". A hosts block that lags behind the configured list carries a
+  visible red note at the end of the ban row (the CLI spells the same marker).
 - Log rotation from the CLI honestly reports "locked by another process" while the GUI
   holds the files (FileShare.ReadWrite) — that is the designed answer, not a failure.
 

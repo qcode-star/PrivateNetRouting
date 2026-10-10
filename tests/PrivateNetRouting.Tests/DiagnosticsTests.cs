@@ -255,6 +255,7 @@ public class DiagnosticsTests : IDisposable
             policy,
             banOps,
             new ClaudeSettingsGuard(config),
+            new CodexSettingsGuard(config),
             new WslConfigGuard(config, new ThrowingWslRunner(), () => IPAddress.Parse("192.0.2.1")),
             new FakeSystemProxyStore(),
             new FakeElevatedRunner(),

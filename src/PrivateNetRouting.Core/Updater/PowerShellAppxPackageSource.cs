@@ -4,8 +4,13 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Updater;
 
-/// <summary>Installed Claude Desktop MSIX package (information from Get-AppxPackage).</summary>
-public sealed record InstalledPackage(string Name, string Version, string Publisher, string InstallLocation);
+/// <summary>Installed MSIX package (information from Get-AppxPackage).</summary>
+public sealed record InstalledPackage(
+    string Name,
+    string Version,
+    string Publisher,
+    string InstallLocation,
+    string PackageFamilyName);
 
 /// <summary>Information about the installed package and installation (requires no admin rights).</summary>
 public interface IAppxPackageSource
@@ -26,7 +31,7 @@ public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, 
         var script =
             "Get-AppxPackage -Name '" + packageName.Replace("'", "''") + "' | " +
             "Sort-Object Version -Descending | " +
-            "Select-Object -First 1 -Property Name,Version,Publisher,InstallLocation | " +
+            "Select-Object -First 1 -Property Name,Version,Publisher,InstallLocation,PackageFamilyName | " +
             "ConvertTo-Json -Compress";
         var (code, output) = await powershell.RunScriptAsync(script, ct);
         if (code != 0)
@@ -71,7 +76,8 @@ public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, 
             GetString("Name"),
             GetString("Version"),
             GetString("Publisher"),
-            GetString("InstallLocation"));
+            GetString("InstallLocation"),
+            GetString("PackageFamilyName"));
 
         string GetString(string property) =>
             document.RootElement.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String

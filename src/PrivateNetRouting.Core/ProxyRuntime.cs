@@ -41,6 +41,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public ClaudeLauncher Launcher { get; }
 
+    /// <summary>Codex desktop app launcher (Microsoft Store MSIX, package-context launch).</summary>
+    public CodexLauncher CodexLauncher { get; }
+
     public BrowserLauncher Browser { get; }
 
     public WatchdogService Watchdog { get; }
@@ -49,6 +52,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
     public WatchdogSupervisor WatchdogControl { get; }
 
     public ClaudeUpdater Updater { get; }
+
+    /// <summary>Codex desktop app update through the Microsoft Store.</summary>
+    public CodexUpdater CodexUpdater { get; }
 
     public GuardService Guard { get; }
 
@@ -64,11 +70,15 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly FileLog _launcherLog;
 
+    private readonly FileLog _codexLauncherLog;
+
     private readonly FileLog _browserLog;
 
     private readonly FileLog _watchdogLog;
 
     private readonly FileLog _updaterLog;
+
+    private readonly FileLog _codexUpdaterLog;
 
     private readonly FileLog _guardLog;
 
@@ -78,7 +88,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -89,6 +99,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _chainLog = chainLog;
         Launcher = launcher;
         _launcherLog = launcherLog;
+        CodexLauncher = codexLauncher;
+        _codexLauncherLog = codexLauncherLog;
         Browser = browser;
         _browserLog = browserLog;
         Watchdog = watchdog;
@@ -96,6 +108,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         WatchdogControl = watchdogControl;
         Updater = updater;
         _updaterLog = updaterLog;
+        CodexUpdater = codexUpdater;
+        _codexUpdaterLog = codexUpdaterLog;
         _updaterHttp = updaterHttp;
         Guard = guard;
         _guardLog = guardLog;
@@ -207,6 +221,15 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             launcherLog);
 
+        var codexLauncherLog = NewLog("codex-launcher.log");
+        var codexLauncher = new CodexLauncher(
+            config,
+            chain,
+            ct => ChainHealthAsync(config, ct),
+            processes,
+            codexLauncherLog,
+            new PowerShellRunner(config.Updater.PowerShellPath));
+
         var browserLog = NewLog("browser.log");
         var browser = new BrowserLauncher(
             config,
@@ -222,7 +245,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             new TcpEstablishedConnectionCounter(),
             Socks5Client.ParseEndPoint(fp.Listen).Port,
-            fp.ActivityMarkerPath);
+            fp.ActivityMarkerPath,
+            config.Codex.ProcessName);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
@@ -249,12 +273,26 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new RunningClaudeProcessSource(),
             updaterLog);
 
+        // the Codex update goes through the Microsoft Store: the check and the install do not
+        // touch the proxy chain at all (the Store CDN is not a banned domain); the offered
+        // version is named by OpenAI's manifest under a banned host — it is asked only when the
+        // chain is already alive, through the same proxied client the Claude feed uses
+        var codexUpdaterLog = NewLog("codex-updater.log");
+        var codexUpdater = new CodexUpdater(
+            config,
+            new PowerShellAppxPackageSource(powershell, codexUpdaterLog),
+            new StoreUpdateSource(),
+            new RunningClaudeProcessSource(),
+            new CodexVersionManifest(updaterHttp, config.Codex, codexUpdaterLog),
+            codexUpdaterLog);
+
         var guardLog = NewLog("guard.log");
         var guard = new GuardService(
             config,
             new RegistryEgressPolicyStore(),
             new PowerShellBanSystemOps(config.Guard, powershell),
             new ClaudeSettingsGuard(config),
+            new CodexSettingsGuard(config),
             new WslConfigGuard(config, new WslProcessRunner()),
             new WinInetSystemProxyStore(),
             new ElevatedRunner(config.Chain, guardLog, executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile)),
@@ -268,7 +306,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             appUpdateLog);
 
         var logs = new LogStore(config.Logging.Directory);
-        var allLogs = new List<FileLog> { log, chainLog, launcherLog, browserLog, watchdogLog, updaterLog, guardLog, appUpdateLog };
+        var allLogs = new List<FileLog> { log, chainLog, launcherLog, codexLauncherLog, browserLog, watchdogLog, updaterLog, codexUpdaterLog, guardLog, appUpdateLog };
         var diagnostics = new DiagnosticsService(
             config,
             chain,
@@ -279,7 +317,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guard.GetCoreStatusAsync,
             logs);
 
-        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
+        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
@@ -395,9 +433,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
         DohPool?.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();
+        _codexLauncherLog.Dispose();
         _browserLog.Dispose();
         _watchdogLog.Dispose();
         _updaterLog.Dispose();
+        _codexUpdaterLog.Dispose();
         _guardLog.Dispose();
         _appUpdateLog.Dispose();
         _updaterHttp.Dispose();
