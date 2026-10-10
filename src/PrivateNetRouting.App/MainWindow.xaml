@@ -34,7 +34,9 @@
         Reading order: header (subject + language + help) → the chain (five stages in bring-up order,
         its control, the status rows: the proxy listeners with connection counters, the sidecar
         listeners, the config with its actions, the idle stopper) → guards → the launch actions
-        → the status bar. The body scrolls; the actions and the status bar stay put.
+        → the status bar. The body scrolls together with the launch actions (a maximized window
+        keeps the content compact at the top instead of a void between the cards and the actions);
+        only the status bar stays put.
         Both cards collapse to one compact row (overall status + the main control); the window
         then shrinks with the content (SizeToContent=Height, capped at the work area by code —
         past the cap the body scrolls). A chain operation expands the collapsed chain card and,
@@ -44,7 +46,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -357,37 +358,35 @@
                                     Click="OnGuardWslSync" IsEnabled="{Binding CanGuard}"/>
                             </Grid>
                         </StackPanel>
-                    </StackPanel>
-                </Border>
+            </StackPanel>
+        </Border>
+
+                <!-- Launch actions: the primary one, then the update. An announced Claude update is
+                     signalled by the accent dot on the update button (the tooltip carries the versions);
+                     Diagnostics and the logs folder live in the help menu of the "?" button in the header. -->
+                <StackPanel Orientation="Horizontal" Margin="0,16,0,16">
+                    <Button Content="{DynamicResource Main.Button.LaunchClaude}" MinWidth="200" Click="OnLaunchClaude"
+                            IsEnabled="{Binding CanLaunch}"/>
+                    <Button Content="{DynamicResource Main.Button.LaunchBrowser}" MinWidth="120" Margin="8,0,0,0"
+                            Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
+                    <Button Style="{StaticResource SecondaryButton}" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"
+                            MinWidth="160" Margin="8,0,0,0"
+                            ToolTipService.ShowOnDisabled="True" ToolTip="{Binding UpdateBadgeToolTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{DynamicResource Main.Button.UpdateClaude}"/>
+                            <Ellipse Width="8" Height="8" Margin="7,0,0,0" VerticalAlignment="Center"
+                                     Fill="{StaticResource Brush.Accent}"
+                                     Visibility="{Binding UpdateBadgeVisibility}"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
 
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Launch actions: the primary one, then the update. An announced Claude update is
-             signalled by the accent dot on the update button (the tooltip carries the versions);
-             Diagnostics and the logs folder live in the help menu of the "?" button in the header. -->
-        <StackPanel Grid.Row="2" Margin="24,16,24,16">
-            <StackPanel Orientation="Horizontal">
-                <Button Content="{DynamicResource Main.Button.LaunchClaude}" MinWidth="200" Click="OnLaunchClaude"
-                        IsEnabled="{Binding CanLaunch}"/>
-                <Button Content="{DynamicResource Main.Button.LaunchBrowser}" MinWidth="120" Margin="8,0,0,0"
-                        Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
-                <Button Style="{StaticResource SecondaryButton}" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"
-                        MinWidth="160" Margin="8,0,0,0"
-                        ToolTipService.ShowOnDisabled="True" ToolTip="{Binding UpdateBadgeToolTip}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{DynamicResource Main.Button.UpdateClaude}"/>
-                        <Ellipse Width="8" Height="8" Margin="7,0,0,0" VerticalAlignment="Center"
-                                 Fill="{StaticResource Brush.Accent}"
-                                 Visibility="{Binding UpdateBadgeVisibility}"/>
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-        </StackPanel>
-
         <!-- Status bar: the result of the last operation on a band of its own, separated from
              the body by a hairline — the same vocabulary as the header band above. -->
-        <Border Grid.Row="3" Background="{StaticResource Brush.Band}"
+        <Border Grid.Row="2" Background="{StaticResource Brush.Band}"
                 BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,1,0,0">
             <TextBlock Text="{Binding CheckResult}" Foreground="{Binding CheckResultBrush}"
                        Margin="24,8,24,8" TextWrapping="Wrap"/>

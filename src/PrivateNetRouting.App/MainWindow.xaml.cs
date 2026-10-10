@@ -847,7 +847,10 @@ public partial class MainWindow : Window
             _viewModel.SetChainBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
-            // a stop takes the idle stopper down with the chain — the row must not wait for the next poll
+            // a raise re-arms the stopper in the background (watchdog.autoStart) — wait for the
+            // spawn so the row shows it immediately; a stop takes the stopper down with the
+            // chain — the row must not wait for the next poll either
+            await _runtime.WatchdogControl.LastAutoStart;
             await RefreshIdleStopAsync();
         }
     }
@@ -1093,6 +1096,7 @@ public partial class MainWindow : Window
             _viewModel.SetLaunchBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
+            await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
             await RefreshChainAsync();
             await RefreshIdleStopAsync();
         }
@@ -1186,6 +1190,7 @@ public partial class MainWindow : Window
             _viewModel.SetLaunchBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
+            await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
             await RefreshChainAsync();
             await RefreshIdleStopAsync();
         }
