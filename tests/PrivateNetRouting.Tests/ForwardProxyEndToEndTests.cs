@@ -174,6 +174,37 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// Regression of the "deaf restart": StopAsync used to cancel the token shared across
+    /// starts, so a second StartAsync in the same process bound a listener whose accept loop
+    /// died the moment it started — the port answered the TCP handshake and nobody read the
+    /// requests (the health check failed silently). Each start must issue a fresh token and
+    /// the proxy must serve again.
+    /// </summary>
+    [Fact]
+    public async Task ServesAgainAfterStopAndStart()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, _) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+
+        await proxy.StopAsync();
+        await proxy.StartAsync(CancellationToken.None);
+        var endpoint = ParseIpEndPoint(proxy.ListenerEndpoints[0]);
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(endpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var status = await ReadLineAsync(stream, timeout.Token);
+        Assert.StartsWith("HTTP/1.1 200", status);
+    }
+
+    /// <summary>
     /// Regression of the GUI deadlock on exit: OnExit synchronously waits for DisposeAsync under a
     /// SynchronizationContext whose thread is blocked by that same wait (Dispatcher).
     /// Stop await continuations must go to the pool, not to the captured context.
@@ -547,10 +578,10 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return true;
     }
 
-    private static async Task<string> ReadLineAsync(NetworkStream stream)
+    private static async Task<string> ReadLineAsync(NetworkStream stream, CancellationToken ct = default)
     {
         var buffer = new byte[256];
-        var read = await stream.ReadAsync(buffer);
+        var read = await stream.ReadAsync(buffer, ct);
         var text = Encoding.ASCII.GetString(buffer, 0, read);
         return text.Split("\r\n")[0];
     }

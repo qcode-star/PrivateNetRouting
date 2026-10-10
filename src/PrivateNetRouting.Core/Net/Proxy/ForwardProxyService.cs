@@ -58,7 +58,10 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     private readonly ActivityMarker _marker;
     private readonly FileLog _log;
     private readonly bool _passHostName;
-    private readonly CancellationTokenSource _cts = new();
+
+    /// <summary>Per start: StopAsync cancels the token, and a fresh one is issued on the next
+    /// StartAsync — a reused token would kill the accept loop the moment it starts.</summary>
+    private CancellationTokenSource _cts = new();
     private readonly List<TcpListener> _listeners = [];
     private readonly object _gate = new();
     private Task? _wslBindTask;
@@ -84,6 +87,10 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     }
 
     public bool IsRunning => _running;
+
+    /// <summary>The section the service was built with. ReloadConfig swaps the sections in the
+    /// shared AppConfig, so the loaded proxy values differ from these until the process restarts.</summary>
+    public ForwardProxyConfig CapturedConfig => _config;
 
     public IReadOnlyList<string> ListenerEndpoints
     {
@@ -112,6 +119,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             return;
         }
 
+        _cts = new CancellationTokenSource();
         var listen = Socks5Client.ParseEndPoint(_config.Listen);
         var listener = BindListener(listen);
         _ = AcceptLoopAsync(listener);
