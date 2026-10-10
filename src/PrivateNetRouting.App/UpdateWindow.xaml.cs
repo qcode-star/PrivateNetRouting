@@ -63,6 +63,9 @@ public partial class UpdateWindow : Window
         InitializeComponent();
         Icon = AppIcons.WindowIcon;
         WindowTheme.UseDarkTitleBar(this);
+        // the height belongs to the content (scenarios differ: progress bar, manual URL,
+        // countdown); the cap keeps a short screen from growing the window off the work area
+        MaxHeight = SystemParameters.WorkArea.Height;
         _runtime = runtime;
         _logPath = runtime.Updater.Log.FilePath;
 

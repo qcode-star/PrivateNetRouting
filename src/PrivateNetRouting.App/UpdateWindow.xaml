@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Update Claude Desktop"
-        Width="680" Height="400" MinWidth="580" MinHeight="360"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResize" ShowInTaskbar="False"
+        Width="680" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanMinimize" ShowInTaskbar="False"
         Background="{StaticResource Brush.Window}" Foreground="{StaticResource Brush.Text}"
         FontFamily="{StaticResource Font.Ui}" FontSize="{StaticResource Font.Body}"
         SnapsToDevicePixels="True" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
