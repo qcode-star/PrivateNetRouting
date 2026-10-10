@@ -448,12 +448,18 @@ public sealed class ForwardProxyConfig
     /// <summary>How many seconds to wait for the port to be released after stopping the detached worker.</summary>
     public int WorkerStopWaitSeconds { get; set; } = 10;
 
-    /// <summary>SOCKS5 upstream "host:port" (userspace-sidecar), dialing by IP after resolution.</summary>
+    /// <summary>
+    /// SOCKS5 upstream of the socks5 mode: an external trusted proxy "host:port" — the target
+    /// name rides the CONNECT and the upstream resolves it on its side. In the tailscale mode
+    /// this field is not used: the proxy dials the sidecar's own listener (chain.daemonSocksListen)
+    /// by IP after DoH resolution.
+    /// </summary>
     public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
 
     /// <summary>
     /// Username of the external SOCKS5 upstream (RFC 1929), together with Socks5UpstreamPassword;
-    /// both empty — no authentication (the tailscale sidecar needs none).
+    /// both empty — no authentication. The credentials belong to the socks5 mode: the tailscale
+    /// sidecar's listener needs none.
     /// </summary>
     public string Socks5UpstreamUser { get; set; } = "";
 

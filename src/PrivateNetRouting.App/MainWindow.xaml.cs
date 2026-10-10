@@ -1763,7 +1763,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
-            UpstreamListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.ForwardProxy.Socks5Upstream}";
+            UpstreamListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.Chain.DaemonSocksListen}";
             RefreshTailscaleState();
         }
     }
@@ -1778,7 +1778,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var http = Socks5Client.ParseEndPoint(_runtime.Config.Chain.DaemonHttpListen).Port;
-            var socks = Socks5Client.ParseEndPoint(_runtime.Config.ForwardProxy.Socks5Upstream).Port;
+            var socks = Socks5Client.ParseEndPoint(_runtime.Config.Chain.DaemonSocksListen).Port;
             var httpListening = _tcpTable.GetListeners(http).Count > 0;
             var socksListening = _tcpTable.GetListeners(socks).Count > 0;
             (UpstreamState, UpstreamBrush) = (httpListening, socksListening) switch

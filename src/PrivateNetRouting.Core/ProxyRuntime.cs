@@ -112,8 +112,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new(Path.Combine(config.Logging.Directory, fileName), config.Logging.EffectiveLevel, config.Logging.MaxBytes, config.Logging.Keep);
         var log = NewLog(logFileName);
 
-        var socks = new Socks5Client(fp.Socks5Upstream, fp.Socks5UpstreamUser, fp.Socks5UpstreamPassword);
         var socks5 = config.Chain.EffectiveMode == ChainMode.Socks5;
+        var (upstream, upstreamUser, upstreamPassword) = ResolveUpstream(config);
+        var socks = new Socks5Client(upstream, upstreamUser, upstreamPassword);
 
         // The DoH machinery is a tailscale-mode tool: the sidecar's own resolution is poisoned by
         // the bans, so names resolve through the tailnet DoH (discovered from the netmap or taken
@@ -328,6 +329,18 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
     public void ReloadConfig() => AppConfigStore.ReloadInto(Config);
+
+    /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
+    /// trusted proxy from forwardProxy.socks5Upstream (with its RFC 1929 credentials); in the
+    /// tailscale mode — the sidecar's own listener (chain.daemonSocksListen), which needs no
+    /// authentication. Deriving it from the daemon's listener keeps the address in one place:
+    /// the proxy cannot drift from the listener it must dial.</summary>
+    internal static (string EndPoint, string User, string Password) ResolveUpstream(AppConfig config) =>
+        config.Chain.EffectiveMode == ChainMode.Socks5
+            ? (config.ForwardProxy.Socks5Upstream,
+                config.ForwardProxy.Socks5UpstreamUser,
+                config.ForwardProxy.Socks5UpstreamPassword)
+            : (config.Chain.DaemonSocksListen, "", "");
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {
