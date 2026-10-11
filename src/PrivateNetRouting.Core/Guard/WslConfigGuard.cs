@@ -813,6 +813,12 @@ public sealed class WslConfigGuard(
         for script in "${files[@]}"; do
             [ -f "$script" ] || continue
             name=$(basename "$script")
+            case "$name" in
+                *.pnr-bak-*|*.bak-*)
+                    log "[SKIP] $name - backup, not a startup script"
+                    continue
+                    ;;
+            esac
             if [ ! -x "$script" ]; then
                 log "[SKIP] $name - not executable"
                 continue

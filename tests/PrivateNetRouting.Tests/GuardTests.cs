@@ -1054,6 +1054,7 @@ public class GuardTests : IDisposable
         Assert.Contains(WslConfigGuard.BootRunnerMarker, runnerFile);
         Assert.Contains("SCRIPT_DIR=\"/etc/wsl.d/startup\"", runnerFile);
         Assert.Contains("for script in \"${files[@]}\"; do", runnerFile);
+        Assert.Contains("*.pnr-bak-*|*.bak-*)", runnerFile); // backups in the startup dir never run
         Assert.DoesNotContain("\r", runnerFile); // the distro runs bash: LF only
         var confPayload = ExtractBase64Payload(boot.Script, "WSLCONF=\"/etc/wsl.conf\"");
         Assert.Equal(
