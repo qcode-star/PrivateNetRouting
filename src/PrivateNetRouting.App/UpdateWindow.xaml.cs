@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
@@ -84,10 +85,21 @@ public partial class UpdateWindow : Window
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
         _clock.Tick += (_, _) => OnClockTick();
 
-        // the countdown after a successful installation: any click or key press keeps the window open
+        // the countdown after a successful installation: any click or key press keeps the window
+        // open. A press on a button is exempt from the preview cancel: hiding the countdown line
+        // here would shrink the window (SizeToContent=Height) and the button would slip away from
+        // under the cursor before the release — the click would miss. Buttons cancel the
+        // countdown through their bubbling Click instead, after the click has already landed.
         _autoClose = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _autoClose.Tick += (_, _) => OnAutoCloseTick();
-        PreviewMouseDown += (_, _) => CancelAutoClose();
+        PreviewMouseDown += (_, e) =>
+        {
+            if (!IsWithinButton(e.OriginalSource))
+            {
+                CancelAutoClose();
+            }
+        };
+        AddHandler(ButtonBase.ClickEvent, new RoutedEventHandler((_, _) => CancelAutoClose()));
         PreviewKeyDown += (_, _) => CancelAutoClose();
 
         Closed += (_, _) =>
@@ -506,6 +518,20 @@ public partial class UpdateWindow : Window
 
         _autoClose.Stop();
         RefreshCountdown();
+    }
+
+    /// <summary>Whether the hit-tested element sits on a button — the press belongs to it, not to the window.</summary>
+    private static bool IsWithinButton(object? source)
+    {
+        for (var node = source as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is ButtonBase)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnAutoCloseTick()
