@@ -155,10 +155,11 @@
     <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env актуален, прокси {0}</s:String>
     <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json не найден</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — отличается от конфига</s:String>
-    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true, .env прокси в порядке</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (ожидалось true)</s:String>
-    <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml не найден</s:String>
-    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code и Codex обновлены: прокси {0} (бэкап: {1})</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml и .env не найдены</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.EnvStale">Codex: .env прокси устарел или отсутствует</s:String>
+   <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code и Codex обновлены: прокси {0} (бэкап: {1})</s:String>
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code и Codex уже актуальны (прокси {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">без бэкапа (файл создан с нуля)</s:String>
     <s:String x:Key="Main.Guard.Wsl">Конфиг WSL</s:String>

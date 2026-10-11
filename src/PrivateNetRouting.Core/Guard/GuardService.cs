@@ -24,7 +24,10 @@ public sealed record SettingsSyncResult(
     string NoProxy,
     bool CodexWritten,
     string? CodexBackupPath,
-    string CodexPath);
+    string CodexPath,
+    bool CodexEnvWritten,
+    string? CodexEnvBackupPath,
+    string CodexEnvPath);
 
 public sealed record GuardSnapshot(
     LocalBanStatus Ban,
@@ -154,11 +157,12 @@ public sealed class GuardService(
                 : settings.Detail ?? (settings.State == GuardState.On
                     ? $"env proxy {settings.ExpectedProxy}, NO_PROXY up to date"
                     : $"HTTPS_PROXY={settings.CurrentProxy ?? "<none>"}, NO_PROXY={settings.CurrentNoProxy ?? "<none>"} (expected {settings.ExpectedProxy})")),
-            new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.FileMissing
-                ? "config.toml not found"
-                : codex.State == GuardState.On
-                    ? "respect_system_proxy = true"
-                    : $"respect_system_proxy={Word(codex.Enabled)} (expected true)")),
+            new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.State switch
+            {
+                GuardState.On => "respect_system_proxy = true, .env proxy env up to date",
+                GuardState.Off => "config.toml and .env not found",
+                _ => $"respect_system_proxy={Word(codex.Enabled)}, .env proxy env {(codex.EnvUpToDate ? "up to date" : "stale or missing")}",
+            })),
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
                 : string.Join("; ", wsl.Distros.Select(d =>
@@ -236,9 +240,9 @@ public sealed class GuardService(
     }
 
     /// <summary>
-    /// Both applications at once: env in Claude Code settings.json and the system-proxy flag in
-    /// Codex config.toml (the guard card's single sync action). Each file is written only on an
-    /// actual change; the log carries one line per application.
+    /// Both applications at once: env in Claude Code settings.json and the Codex layer — the
+    /// system-proxy flag in config.toml plus the proxy env in .env (the guard card's single sync
+    /// action). Each file is written only on an actual change; the log carries one line per file.
     /// </summary>
     public Task<SettingsSyncResult> SyncSettingsAsync(CancellationToken ct) =>
         Task.Run(() =>
@@ -252,13 +256,19 @@ public sealed class GuardService(
                 ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
                 codexSync.Written,
                 codexSync.BackupPath,
-                config.Guard.CodexSettingsPath);
+                config.Guard.CodexSettingsPath,
+                codexSync.EnvWritten,
+                codexSync.EnvBackupPath,
+                config.Guard.CodexEnvPath);
             log.Info(outcome.Written
                 ? $"guard settings sync: Claude env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
                 : $"guard settings sync: Claude env already up to date (proxy {outcome.ProxyUrl})");
             log.Info(outcome.CodexWritten
                 ? $"guard codex settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
                 : "guard codex settings sync: respect_system_proxy=true already in place");
+            log.Info(outcome.CodexEnvWritten
+                ? $"guard codex settings sync: proxy env written to .env (backup: {outcome.CodexEnvBackupPath ?? "none"}) — the file the embedded CLI core loads itself"
+                : "guard codex settings sync: .env proxy env already in place");
             return outcome;
         }, ct);
 

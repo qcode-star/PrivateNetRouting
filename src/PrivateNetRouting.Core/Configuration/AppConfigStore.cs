@@ -121,5 +121,6 @@ file static class AppConfigExtensions
         config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);
         config.Guard.ClaudeSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.ClaudeSettingsPath);
         config.Guard.CodexSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.CodexSettingsPath);
+        config.Guard.CodexEnvPath = Environment.ExpandEnvironmentVariables(config.Guard.CodexEnvPath);
     }
 }

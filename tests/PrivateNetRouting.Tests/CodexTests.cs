@@ -51,10 +51,13 @@ public class CodexTests : IDisposable
         return reader.ReadToEnd();
     }
 
-    private static AppConfig DefaultConfig() => new()
+    private readonly string _envPath = Path.Combine(Path.GetTempPath(), $"pnr-codex-env-{Guid.NewGuid():N}");
+
+    private AppConfig DefaultConfig() => new()
     {
         ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
         Launcher = new LauncherConfig { BypassDomains = ["corp.example.com"] },
+        Guard = new GuardConfig { CodexEnvPath = _envPath },
         Codex = new CodexConfig
         {
             PackageName = "OpenAI.Codex",
@@ -115,6 +118,24 @@ public class CodexTests : IDisposable
         Assert.Equal(0, _chain.EnsureCalls);
         Assert.Equal(1, powershell.Calls);
         Assert.Contains("PNR=ok", powershell.LastScript);
+    }
+
+    [Fact]
+    public async Task LaunchRefreshesTheEnvFileTheCoreLoads()
+    {
+        var config = DefaultConfig();
+        // what a WSL codex shell leaves behind: the NAT gateway address, unreachable from Windows
+        // once WSL is down
+        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://192.0.2.1:18082\nMY_VAR=keep\n");
+        var powershell = new FakePowerShell();
+        var launcher = CreateLauncher(config, healthy: true, powershell: powershell);
+
+        await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        var text = File.ReadAllText(config.Guard.CodexEnvPath);
+        Assert.Contains("HTTP_PROXY=http://127.0.0.1:18082\n", text);
+        Assert.Contains("MY_VAR=keep\n", text); // the foreign line survives
+        Assert.DoesNotContain("192.0.2.1", text);
     }
 
     [Fact]
@@ -572,6 +593,11 @@ public class CodexTests : IDisposable
         if (File.Exists(_logPath))
         {
             File.Delete(_logPath);
+        }
+
+        if (File.Exists(_envPath))
+        {
+            File.Delete(_envPath);
         }
     }
 }

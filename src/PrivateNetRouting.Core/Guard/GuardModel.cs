@@ -68,12 +68,14 @@ public sealed record ClaudeSettingsStatus(
 public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override);
 
 /// <summary>
-/// Status of the Codex settings layer: the flag is read from config.toml; a file that is absent
-/// (Codex is not installed or has never run) means the layer is off, a flag that is absent or
-/// false — partial.
+/// Status of the Codex settings layer: the flag is read from config.toml, the proxy env from the
+/// .env of the same CODEX_HOME (the embedded core loads it itself — see CodexEnvFile). Files that
+/// are absent (Codex is not installed or has never run) mean the layer is off, a flag or env that
+/// is absent or stale — partial.
 /// </summary>
 public sealed record CodexSettingsStatus(
     GuardState State,
     bool? Enabled,
     bool FileMissing,
+    bool EnvUpToDate,
     string? Detail = null);

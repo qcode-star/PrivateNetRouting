@@ -363,6 +363,7 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.Guard.CodexSettingsPath = Path.Combine(_tempDir, "codex-config.toml");
+        config.Guard.CodexEnvPath = Path.Combine(_tempDir, "codex-env");
         return config;
     }
 
@@ -476,6 +477,87 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.Partial, unset.State); // the file exists, the flag does not
         Assert.Null(unset.Enabled);
         Assert.False(unset.FileMissing);
+    }
+
+    // ----- .env of Codex (the file the embedded core loads itself) -----
+
+    [Fact]
+    public void CodexEnvApplyMergesKeysAndKeepsForeignLines()
+    {
+        var values = new Dictionary<string, string>
+        {
+            ["HTTP_PROXY"] = "http://127.0.0.1:18081",
+            ["HTTPS_PROXY"] = "http://127.0.0.1:18081",
+            ["ALL_PROXY"] = "http://127.0.0.1:18081",
+            ["NO_PROXY"] = "localhost,127.0.0.1",
+        };
+
+        // a fresh file: just our keys
+        Assert.Equal(
+            "HTTP_PROXY=http://127.0.0.1:18081\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1\n",
+            CodexEnvFile.Apply(null, values));
+
+        // existing keys are rewritten in place (the export form too), foreign lines and CRLF survive
+        Assert.Equal(
+            "# user comment\r\nHTTP_PROXY=http://127.0.0.1:18081\r\nMY_VAR=keep\r\nNO_PROXY=localhost,127.0.0.1\r\nHTTPS_PROXY=http://127.0.0.1:18081\r\nALL_PROXY=http://127.0.0.1:18081\r\n",
+            CodexEnvFile.Apply("# user comment\r\nexport HTTP_PROXY=http://old:1\r\nMY_VAR=keep\r\nNO_PROXY=stale\r\n", values));
+
+        // missing keys are appended, not duplicated
+        var merged = CodexEnvFile.Apply("HTTP_PROXY=http://127.0.0.1:18081\n", values);
+        Assert.Single(merged.Split('\n'), line => line.StartsWith("HTTP_PROXY=", StringComparison.Ordinal));
+        Assert.Contains("\nALL_PROXY=http://127.0.0.1:18081\n", merged);
+
+        // the status check: every key with the expected value
+        Assert.True(CodexEnvFile.UpToDate(CodexEnvFile.Apply(null, values), values));
+        Assert.False(CodexEnvFile.UpToDate("HTTP_PROXY=http://127.0.0.1:18081\n", values));
+        Assert.False(CodexEnvFile.UpToDate(null, values));
+    }
+
+    [Fact]
+    public void CodexSettingsSyncWritesTheEnvFileWithBackupAndIdempotence()
+    {
+        var config = CodexConfig();
+        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://elsewhere:3\nMY_VAR=keep\n");
+        var guard = new CodexSettingsGuard(config);
+        var before = guard.Read();
+        Assert.Equal(GuardState.Partial, before.State);
+        Assert.False(before.EnvUpToDate);
+        Assert.Equal("config.toml not found; .env proxy env stale", before.Detail);
+
+        var result = guard.Sync();
+
+        Assert.True(result.EnvWritten);
+        Assert.NotNull(result.EnvBackupPath);
+        Assert.True(File.Exists(result.EnvBackupPath));
+        var text = File.ReadAllText(config.Guard.CodexEnvPath);
+        Assert.Contains("HTTP_PROXY=http://127.0.0.1:18081\n", text);
+        Assert.Contains("MY_VAR=keep\n", text); // the foreign line survives
+        var after = guard.Read();
+        Assert.True(after.EnvUpToDate);
+
+        // the second sync finds the file already correct: no rewrite, no backup
+        var again = guard.Sync();
+        Assert.False(again.EnvWritten);
+        Assert.Null(again.EnvBackupPath);
+    }
+
+    [Fact]
+    public void CodexEnvWriteRefreshesAStaleFileForTheLauncher()
+    {
+        var config = CodexConfig();
+        // what a WSL codex shell leaves behind: the NAT gateway address
+        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://192.0.2.1:18081\nHTTPS_PROXY=http://192.0.2.1:18081\nALL_PROXY=http://192.0.2.1:18081\nNO_PROXY=localhost\n");
+
+        var (written, backup) = CodexEnvFile.Write(config);
+
+        Assert.True(written);
+        Assert.NotNull(backup);
+        Assert.Equal(
+            "HTTP_PROXY=http://127.0.0.1:18081\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1,.local\n",
+            File.ReadAllText(config.Guard.CodexEnvPath));
+        var (again, noBackup) = CodexEnvFile.Write(config);
+        Assert.False(again);
+        Assert.Null(noBackup);
     }
 
     // ----- NRPT/firewall PowerShell scripts -----
@@ -659,6 +741,13 @@ public class GuardTests : IDisposable
         // the port line is what `pnr guard status` reads back
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", script);
         Assert.DoesNotContain("127.0.0.1:18082", script);
+        // the .env of CODEX_HOME is rewritten to the gateway address: the Codex core loads it over
+        // the inherited environment, so the exports alone would be overridden by the loopback form
+        Assert.Contains("_pnr_env=\"$CODEX_HOME/.env\"", script);
+        Assert.Contains("grep -q \"^HTTP_PROXY=http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT$\"", script);
+        Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
+        Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
+        Assert.Contains("cat \"$_pnr_tmp\" > \"$_pnr_env\"", script);
     }
 
     [Fact]

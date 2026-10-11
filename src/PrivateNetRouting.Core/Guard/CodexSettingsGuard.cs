@@ -3,16 +3,19 @@ using PrivateNetRouting.Core.Configuration;
 namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
-/// The persistent guard layer of Codex (ChatGPT desktop and the CLI): the flag
-/// `[features] respect_system_proxy = true` in `~/.codex/config.toml` — Codex then honours the
-/// host system proxy, which the guard's WinINET layer points at the local forward proxy. The
-/// launcher's env variables and Chromium flags remain the primary path (they also cover the
-/// embedded CLI core); this layer covers a plain Codex start, without our launcher.
+/// The persistent guard layer of Codex (ChatGPT desktop and the CLI), two files of CODEX_HOME:
+/// the flag `[features] respect_system_proxy = true` in `~/.codex/config.toml` — Codex then
+/// honours the host system proxy, which the guard's WinINET layer points at the local forward
+/// proxy — and the proxy env (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY) in `~/.codex/.env`.
+/// The embedded CLI core loads .env after its own start: the desktop app strips the inherited
+/// proxy env variables from the processes it spawns, so this file is what actually carries the
+/// proxy to the core (the launcher's env reaches only the Chromium part, via the flags).
 ///
-/// The desktop app owns the file and rewrites it, so the edit is surgical: every other line is
+/// The desktop app owns config.toml and rewrites it, so the edit is surgical: every other line is
 /// preserved byte for byte, only the flag line is inserted or rewritten, the newline style is
-/// kept. Before a rewrite the previous version is copied to a `.pnr-bak-&lt;timestamp&gt;` name
-/// (at most three such copies are kept). Requires no special rights.
+/// kept. The .env merge is the same: our keys' lines are rewritten, foreign lines survive. Before
+/// a rewrite the previous version is copied to a `.pnr-bak-&lt;timestamp&gt;` name (at most three
+/// such copies are kept per file). Requires no special rights.
 /// </summary>
 public sealed class CodexSettingsGuard(AppConfig config)
 {
@@ -23,37 +26,60 @@ public sealed class CodexSettingsGuard(AppConfig config)
     public CodexSettingsStatus Read()
     {
         var path = config.Guard.CodexSettingsPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return new CodexSettingsStatus(GuardState.Off, null, FileMissing: true);
-        }
-
+        var envPath = config.Guard.CodexEnvPath;
         try
         {
-            var value = FindValue(File.ReadAllText(path));
-            return value switch
+            var flagExists = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+            var envExists = !string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath);
+            var flagText = flagExists ? File.ReadAllText(path) : null;
+            var envText = envExists ? File.ReadAllText(envPath) : null;
+            var envOk = CodexEnvFile.UpToDate(envText, CodexEnvFile.Values(config));
+            if (!flagExists && !envExists)
             {
-                true => new CodexSettingsStatus(GuardState.On, true, FileMissing: false),
-                false => new CodexSettingsStatus(GuardState.Partial, false, FileMissing: false)
+                // both files absent: Codex is not installed or has never run
+                return new CodexSettingsStatus(GuardState.Off, null, FileMissing: true, EnvUpToDate: false);
+            }
+
+            var value = FindValue(flagText);
+            if (value == true && envOk)
+            {
+                return new CodexSettingsStatus(GuardState.On, true, FileMissing: false, EnvUpToDate: true);
+            }
+
+            var parts = new List<string>();
+            if (flagText is null)
+            {
+                parts.Add("config.toml not found");
+            }
+            else
+            {
+                parts.Add(value switch
                 {
-                    Detail = $"{KeyName} = false (expected true)",
-                },
-                _ => new CodexSettingsStatus(GuardState.Partial, null, FileMissing: false)
-                {
-                    Detail = $"{DottedKey} is not set",
-                },
+                    false => $"{KeyName} = false (expected true)",
+                    _ => $"{DottedKey} is not set",
+                });
+            }
+
+            if (!envOk)
+            {
+                parts.Add(envText is null ? ".env not found" : ".env proxy env stale");
+            }
+
+            return new CodexSettingsStatus(GuardState.Partial, value, !flagExists, envOk)
+            {
+                Detail = string.Join("; ", parts),
             };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new CodexSettingsStatus(GuardState.Unknown, null, FileMissing: false) { Detail = ex.Message };
+            return new CodexSettingsStatus(GuardState.Unknown, null, FileMissing: false, EnvUpToDate: false) { Detail = ex.Message };
         }
     }
 
-    /// <summary>Outcome of a sync: whether the file was rewritten and which backup was made.</summary>
-    public sealed record CodexSettingsSyncResult(bool Written, string? BackupPath);
+    /// <summary>Outcome of a sync: which of the two files were rewritten and which backups were made.</summary>
+    public sealed record CodexSettingsSyncResult(bool Written, string? BackupPath, bool EnvWritten, string? EnvBackupPath);
 
-    /// <summary>Writes the flag; the file is touched only on an actual change.</summary>
+    /// <summary>Writes the flag and the .env proxy env; each file is touched only on an actual change.</summary>
     public CodexSettingsSyncResult Sync()
     {
         var path = config.Guard.CodexSettingsPath;
@@ -70,7 +96,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
         // after the new copy exists, so "at most three" counts it
         ClaudeSettingsGuard.PruneBackups(path);
-        return new CodexSettingsSyncResult(written, backup);
+
+        var (envWritten, envBackup) = CodexEnvFile.Write(config);
+        return new CodexSettingsSyncResult(written, backup, envWritten, envBackup);
     }
 
     /// <summary>Value of the flag from a config.toml text; null — absent or unparsable.</summary>

@@ -507,7 +507,7 @@ public partial class MainWindow : Window
             _ => snapshot.Policy.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
 
-        // one row, both applications: Claude Code env and the Codex system-proxy flag
+        // one row, both applications: Claude Code env and the Codex layer (config.toml flag + .env)
         var claude = snapshot.Settings.State switch
         {
             GuardState.On => Loc.F("Main.Guard.Settings.OkFmt", snapshot.Settings.ExpectedProxy),
@@ -522,9 +522,15 @@ public partial class MainWindow : Window
         {
             GuardState.On => Loc.S("Main.Guard.Settings.Codex.Ok"),
             GuardState.Off => Loc.S("Main.Guard.Settings.Codex.NoFile"),
-            GuardState.Partial => Loc.F(
-                "Main.Guard.Settings.Codex.FlagFmt",
-                snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : "unset"),
+            GuardState.Partial => string.Join("; ", new[]
+            {
+                snapshot.CodexSettings.Enabled is true
+                    ? null
+                    : Loc.F(
+                        "Main.Guard.Settings.Codex.FlagFmt",
+                        snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : "unset"),
+                snapshot.CodexSettings.EnvUpToDate ? null : Loc.S("Main.Guard.Settings.Codex.EnvStale"),
+            }.Where(part => part is not null)),
             _ => snapshot.CodexSettings.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
         SettingsDetail.Text = $"{claude}; {codex}";

@@ -422,6 +422,14 @@ public sealed class GuardConfig
     /// </summary>
     public string CodexSettingsPath { get; set; } = @"%USERPROFILE%\.codex\config.toml";
 
+    /// <summary>
+    /// .env of Codex in the same CODEX_HOME — the sync keeps the proxy env (HTTP_PROXY/
+    /// HTTPS_PROXY/ALL_PROXY/NO_PROXY) there. The embedded CLI core loads this file after its own
+    /// start: the desktop app strips the inherited proxy env from the processes it spawns, so this
+    /// file is what actually carries the proxy to the core. Environment variables are expanded.
+    /// </summary>
+    public string CodexEnvPath { get; set; } = @"%USERPROFILE%\.codex\.env";
+
     // --- WSL: startup script + settings.json of the distros (the whole layer is optional) ---
 
     /// <summary>The whole WSL guard layer: mode and list of distros with an individual sync choice.</summary>

@@ -22,13 +22,15 @@ public sealed record CodexLaunchResult(CodexLaunchOutcome Outcome, bool ChainRai
 /// <summary>
 /// Codex desktop app (OpenAI, Microsoft Store MSIX) launcher: checks the chain with a live
 /// CONNECT roundtrip, on failure brings it up idempotently (the only UAC window is starting the
-/// daemon), then starts the app with --proxy-server/--proxy-bypass-list and the proxy env
-/// variables. The launch goes through Invoke-CommandInDesktopPackage: the packaged entry-point
-/// stub drops arguments, and the package-context launch is what hands the process both the
-/// flags (the Chromium side of the app) and the env (its embedded CLI core takes the standard
-/// proxy variables; config.toml has no proxy key). An already running app without the flags is
-/// reported in the log, and with LauncherOptions.RestartRunning it is closed first — a second
-/// start of a single-instance app only activates the existing window.
+/// daemon), refreshes the proxy env in CODEX_HOME/.env, then starts the app with
+/// --proxy-server/--proxy-bypass-list and the proxy env variables. The desktop app strips the
+/// inherited proxy env from the processes it spawns, so the Chromium side of the app is proxied
+/// by the flags alone while the embedded CLI core reads the .env file itself (CodexEnvFile; the
+/// env set at the launch and config.toml's proxy-less keys reach it no other way). The launch
+/// goes through Invoke-CommandInDesktopPackage: the packaged entry-point stub drops arguments,
+/// and the package-context launch is what hands the process the flags. An already running app
+/// without the flags is reported in the log, and with LauncherOptions.RestartRunning it is
+/// closed first — a second start of a single-instance app only activates the existing window.
 /// </summary>
 public sealed class CodexLauncher(
     AppConfig config,
@@ -102,8 +104,19 @@ public sealed class CodexLauncher(
             _running.Report(running, "Codex");
         }
 
+        // The .env of CODEX_HOME is what actually carries the proxy to the embedded CLI core (the
+        // desktop app strips the proxy variables from the processes it spawns). The WSL codex
+        // layer rewrites it to the NAT gateway address in its shells, so before a launch it is
+        // refreshed back to the loopback form — a stale gateway address is unreachable from
+        // Windows once WSL is down.
+        var (envWritten, envBackup) = CodexEnvFile.Write(config);
+        if (envWritten)
+        {
+            log.Info($"codex-launcher: .env proxy env refreshed (backup: {envBackup ?? "none"})");
+        }
+
         // Invoke-CommandInDesktopPackage starts the app as a child of this PowerShell process,
-        // so the env set here reaches both the app and everything it spawns (the CLI core).
+        // so the env set here reaches the app; the flags ride the arguments.
         var script = BuildLaunchScript();
         var (code, output) = await powershell.RunScriptAsync(script, ct).ConfigureAwait(false);
         if (code != 0)

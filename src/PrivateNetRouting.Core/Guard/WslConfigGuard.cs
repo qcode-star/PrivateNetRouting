@@ -479,7 +479,11 @@ public sealed class WslConfigGuard(
     /// the direct route. The host address is recomputed at every shell start: 127.0.0.1 inside the
     /// distro is the distro itself, and the WSL NAT address changes with every WSL restart, so a
     /// baked address would rot. The port is baked at sync time (PNR_CODEX_PROXY_PORT — the line
-    /// `pnr guard status` reads back).
+    /// `pnr guard status` reads back). Besides exporting the variables, the snippet rewrites
+    /// "$CODEX_HOME/.env" to the gateway address when it exists: the Codex core loads that file
+    /// over the inherited environment (see CodexEnvFile), so the exports alone would be overridden
+    /// by the loopback form the Windows side keeps there. The Windows launcher refreshes the file
+    /// back before every launch.
     /// </summary>
     internal static string BuildCodexProxyEnvScript(int port, string noProxy) => $$"""
         # Managed by PrivateNetRouting (guard.wsl.proxyEnvPath) — do not edit by hand.
@@ -502,6 +506,25 @@ public sealed class WslConfigGuard(
                 export HTTPS_PROXY="$HTTP_PROXY"
                 export ALL_PROXY="$HTTP_PROXY"
                 export NO_PROXY="{{noProxy}}"
+                _pnr_env="$CODEX_HOME/.env"
+                if [ -f "$_pnr_env" ] && ! grep -q "^HTTP_PROXY=http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT$" "$_pnr_env"; then
+                    _pnr_tmp=$(mktemp "${_pnr_env}.pnr-XXXXXX")
+                    awk -v _proxy="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT" -v _no_proxy='{{noProxy}}' '
+                        BEGIN { _h=0; _s=0; _a=0; _n=0 }
+                        /^[ \t]*(export[ \t]+)?HTTP_PROXY[ \t]*=/  { print "HTTP_PROXY=" _proxy;  _h=1; next }
+                        /^[ \t]*(export[ \t]+)?HTTPS_PROXY[ \t]*=/ { print "HTTPS_PROXY=" _proxy; _s=1; next }
+                        /^[ \t]*(export[ \t]+)?ALL_PROXY[ \t]*=/   { print "ALL_PROXY=" _proxy;   _a=1; next }
+                        /^[ \t]*(export[ \t]+)?NO_PROXY[ \t]*=/    { print "NO_PROXY=" _no_proxy; _n=1; next }
+                        { print }
+                        END {
+                            if (!_h) print "HTTP_PROXY=" _proxy
+                            if (!_s) print "HTTPS_PROXY=" _proxy
+                            if (!_a) print "ALL_PROXY=" _proxy
+                            if (!_n) print "NO_PROXY=" _no_proxy
+                        }' "$_pnr_env" > "$_pnr_tmp" && cat "$_pnr_tmp" > "$_pnr_env"
+                    rm -f "$_pnr_tmp"
+                fi
+                unset _pnr_env _pnr_tmp
             fi
             unset _pnr_host_ip
         fi
