@@ -88,7 +88,11 @@ Two facts shape everything:
 
 The `~/.claude/settings.json` inside the distro has the same shape as on Windows, with the gateway
 address in place of the loopback one. Because the address rots, it is not edited by hand: a
-startup script at WSL start (`/etc/wsl.d/startup/…`, runs as root) refreshes it:
+startup script at WSL start (`/etc/wsl.d/startup/…`, runs as root) refreshes it. WSL executes
+nothing from that directory on its own — the wiring is the sync's job too: it points the `[boot]`
+command of `/etc/wsl.conf` at a marked runner (`/etc/wsl.d/startup.sh`) that executes the startup
+directory in name order; a foreign `[boot]` command is preserved as `00-user-boot-command.sh`
+(runs first), and an already-done state is recognized by the runner marker and not rewritten:
 
 ```bash
 #!/bin/bash

@@ -979,6 +979,192 @@ public class GuardTests : IDisposable
         Assert.Contains("syntax error", ex.Message);
     }
 
+    // ----- WSL boot layer (wsl.conf [boot] command → the marked runner) -----
+
+
+    [Fact]
+    public void WslBootLayerPlanAndWslConfEdits()
+    {
+        var runnerPath = "/etc/wsl.d/startup.sh";
+
+        // the plan: recognize the already-done state, take over a foreign runner file,
+        // preserve a foreign command, install on an empty slot
+        Assert.Equal(WslBootPlan.AlreadyOurs, WslConfigGuard.PlanBootLayer(runnerPath, runnerPath, WslBootRunnerState.Ours));
+        Assert.Equal(WslBootPlan.TakeoverRunner, WslConfigGuard.PlanBootLayer(runnerPath, runnerPath, WslBootRunnerState.Foreign));
+        Assert.Equal(WslBootPlan.TakeoverRunner, WslConfigGuard.PlanBootLayer(runnerPath, runnerPath, WslBootRunnerState.Missing));
+        Assert.Equal(WslBootPlan.InstallRunner, WslConfigGuard.PlanBootLayer(runnerPath, null, WslBootRunnerState.Missing));
+        Assert.Equal(WslBootPlan.InstallRunner, WslConfigGuard.PlanBootLayer(runnerPath, "", WslBootRunnerState.Ours));
+        Assert.Equal(WslBootPlan.AdoptForeignCommand, WslConfigGuard.PlanBootLayer(runnerPath, "docker start things", WslBootRunnerState.Missing));
+        Assert.Equal(WslBootPlan.AdoptForeignCommand, WslConfigGuard.PlanBootLayer(runnerPath, "docker start things", WslBootRunnerState.Ours));
+
+        // extraction: quoted and unquoted, case-insensitive; wrong section and comments ignored
+        Assert.Equal(runnerPath, WslConfigGuard.ExtractBootCommand("[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n"));
+        Assert.Equal(runnerPath, WslConfigGuard.ExtractBootCommand("[BOOT]\nCOMMAND = /etc/wsl.d/startup.sh\n"));
+        Assert.Null(WslConfigGuard.ExtractBootCommand("[user]\ncommand=\"x\"\n"));
+        Assert.Null(WslConfigGuard.ExtractBootCommand("[boot]\n# command=\"x\"\n"));
+        Assert.Null(WslConfigGuard.ExtractBootCommand(null));
+
+        // edit: surgical — the command line is replaced, everything else byte for byte
+        var conf = "[boot]\nsystemd=true\ncommand=\"docker start things\"\n\n[user]\ndefault=u1\n";
+        Assert.Equal(
+            "[boot]\nsystemd=true\ncommand=\"/etc/wsl.d/startup.sh\"\n\n[user]\ndefault=u1\n",
+            WslConfigGuard.SetBootCommand(conf, runnerPath));
+
+        // edit: the key is inserted after [boot] when missing, the section appended when missing
+        Assert.Equal(
+            "[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\nsystemd=true\n",
+            WslConfigGuard.SetBootCommand("[boot]\nsystemd=true\n", runnerPath));
+        Assert.EndsWith(
+            "\n\n[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n",
+            WslConfigGuard.SetBootCommand("[user]\ndefault=u1\n", runnerPath));
+        Assert.Equal("[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n", WslConfigGuard.SetBootCommand(null, runnerPath));
+
+        // paths are Linux-side: no separator rewriting
+        Assert.Equal("/etc/wsl.d/startup.sh", WslConfigGuard.BootRunnerPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
+        Assert.Equal("/etc/wsl.d/startup/00-user-boot-command.sh", WslConfigGuard.UserCommandPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
+    }
+
+    [Fact]
+    public async Task WslSyncInstallsBootRunnerWhenCommandIsEmpty()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nWSLCONF=written\nSETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.True(d1.BootRunnerWritten);
+        Assert.False(d1.UserCommandWritten);
+        Assert.True(d1.WslConfWritten);
+
+        var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("RUNNER="));
+        Assert.DoesNotContain("USERCMD=", boot.Script);
+        var runnerPayload = ExtractBase64Payload(boot.Script, "RUNNER=\"/etc/wsl.d/startup.sh\"");
+        var runnerFile = Encoding.UTF8.GetString(Convert.FromBase64String(runnerPayload));
+        Assert.StartsWith("#!/bin/bash", runnerFile);
+        Assert.Contains(WslConfigGuard.BootRunnerMarker, runnerFile);
+        Assert.Contains("SCRIPT_DIR=\"/etc/wsl.d/startup\"", runnerFile);
+        Assert.Contains("for script in \"${files[@]}\"; do", runnerFile);
+        Assert.DoesNotContain("\r", runnerFile); // the distro runs bash: LF only
+        var confPayload = ExtractBase64Payload(boot.Script, "WSLCONF=\"/etc/wsl.conf\"");
+        Assert.Equal(
+            "[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n",
+            Encoding.UTF8.GetString(Convert.FromBase64String(confPayload)));
+    }
+
+    [Fact]
+    public async Task WslSyncPreservesForeignBootCommandAsTheFirstStartupScript()
+    {
+        var conf = "[boot]\nsystemd=true\ncommand=\"docker start things\"\n\n[user]\ndefault=u1\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=present\n"
+                + conf + "\nWSLCONF=END\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nUSERCMD=written\nBACKUP_WSLCONF=/etc/wsl.conf.pnr-bak-20261014-120000\n"
+                + "WSLCONF=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.True(d1.BootRunnerWritten);
+        Assert.True(d1.UserCommandWritten);
+        Assert.True(d1.WslConfWritten);
+        Assert.Equal("/etc/wsl.conf.pnr-bak-20261014-120000", Assert.Single(d1.BootBackups ?? []));
+
+        var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("USERCMD="));
+        var userPayload = ExtractBase64Payload(boot.Script, "USERCMD=\"/etc/wsl.d/startup/00-user-boot-command.sh\"");
+        var userScript = Encoding.UTF8.GetString(Convert.FromBase64String(userPayload));
+        Assert.EndsWith("docker start things", userScript); // the user's command, verbatim
+        Assert.Equal("755", GetChmodTarget(boot.Script, "USERCMD="));
+
+        var confPayload = ExtractBase64Payload(boot.Script, "WSLCONF=\"/etc/wsl.conf\"");
+        var newConf = Encoding.UTF8.GetString(Convert.FromBase64String(confPayload));
+        Assert.Equal(
+            "[boot]\nsystemd=true\ncommand=\"/etc/wsl.d/startup.sh\"\n\n[user]\ndefault=u1\n",
+            newConf); // the user's own lines survive byte for byte, only the command changes
+    }
+
+    [Fact]
+    public async Task WslSyncRecognizesItsOwnBootLayerAndSkipsIt()
+    {
+        var conf = "[boot]\nsystemd=true\ncommand=\"/etc/wsl.d/startup.sh\"\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\nRUNNER=ours\n"
+                + "WSLCONF=present\n" + conf + "\nWSLCONF=END\nSETTINGS=missing\n",
+            WriteOutput = "SETTINGS=written\nSCRIPT=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.False(d1.BootRunnerWritten);
+        Assert.False(d1.UserCommandWritten);
+        Assert.False(d1.WslConfWritten);
+        Assert.Empty(d1.BootBackups ?? []);
+        Assert.DoesNotContain(runner.Scripts, s => s.Script.Contains("RUNNER=")); // no boot pass at all
+    }
+
+    [Fact]
+    public async Task WslSyncTakesOverAForeignFileAtTheRunnerPath()
+    {
+        // the pre-application scheme: the command already points at the runner path,
+        // but the file there is a foreign wrapper without the marker — replaced, not wrapped
+        var conf = "[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=foreign\nWSLCONF=present\n"
+                + conf + "\nWSLCONF=END\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.True(d1.BootRunnerWritten);
+        Assert.False(d1.UserCommandWritten);
+        Assert.False(d1.WslConfWritten);
+        var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("RUNNER="));
+        Assert.DoesNotContain("USERCMD=", boot.Script);
+        Assert.DoesNotContain("WSLCONF=", boot.Script);
+    }
+
+    /// <summary>The path chmod is applied to in a boot-layer write block (by its echo marker).</summary>
+    private static string GetChmodTarget(string script, string marker)
+    {
+        var index = script.IndexOf(marker, StringComparison.Ordinal);
+        var line = script[index..].Split('\n').First(l => l.TrimStart().StartsWith("chmod", StringComparison.Ordinal));
+        return line.Trim().Split(' ')[1];
+    }
+
     private static string ExtractBase64Payload(string script, string afterMarker)
     {
         // echo '<b64>' | base64 -d > <path>

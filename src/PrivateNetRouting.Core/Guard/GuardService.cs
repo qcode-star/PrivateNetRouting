@@ -296,7 +296,29 @@ public sealed class GuardService(
                     (false, true) => "settings already up to date, script written",
                     _ => "settings+script already up to date",
                 };
+                var boot = new List<string>();
+                if (distro.BootRunnerWritten)
+                {
+                    boot.Add("boot runner");
+                }
+
+                if (distro.UserCommandWritten)
+                {
+                    boot.Add("user boot command");
+                }
+
+                if (distro.WslConfWritten)
+                {
+                    boot.Add("wsl.conf entry");
+                }
+
+                if (boot.Count > 0)
+                {
+                    what += $", boot layer: {string.Join(" + ", boot)} written";
+                }
+
                 var backups = new[] { distro.SettingsBackup, distro.ScriptBackup }
+                    .Concat(distro.BootBackups ?? [])
                     .Where(b => b is not null)
                     .ToList();
                 log.Info($"guard wsl sync: {distro.Distro} proxy {distro.ProxyUrl}, {what}" +

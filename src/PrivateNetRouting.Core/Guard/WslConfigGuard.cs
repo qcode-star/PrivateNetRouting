@@ -7,6 +7,34 @@ using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.Core.Guard;
 
+/// <summary>State of the boot runner file (/etc/wsl.d/startup.sh by default) inside a distro.</summary>
+internal enum WslBootRunnerState
+{
+    Missing,
+    Ours,
+    Foreign,
+}
+
+/// <summary>What the boot-layer step has to do for one distro.</summary>
+internal enum WslBootPlan
+{
+    /// <summary>The runner is in place and marked, wsl.conf already points at it — nothing to do.</summary>
+    AlreadyOurs,
+
+    /// <summary>No usable [boot] command — write the runner and point the command at it.</summary>
+    InstallRunner,
+
+    /// <summary>
+    /// The command already points at the runner path but the file is not ours (a foreign runner,
+    /// e.g. the wrapper of the pre-application scheme) — replace the file, keep the command:
+    /// wrapping a runner of the same directory into that directory would recurse.
+    /// </summary>
+    TakeoverRunner,
+
+    /// <summary>A foreign command occupies the slot — preserve it as the first script of the startup directory and point wsl.conf at the runner.</summary>
+    AdoptForeignCommand,
+}
+
 /// <summary>Status of one distro from guard.wsl.distros.</summary>
 public sealed record WslDistroStatus(
     string Distro,
@@ -39,7 +67,11 @@ public sealed record WslDistroSyncResult(
     bool ScriptWritten,
     string? ScriptBackup,
     bool ProxyEnvWritten = false,
-    string? ProxyEnvBackup = null);
+    string? ProxyEnvBackup = null,
+    bool BootRunnerWritten = false,
+    bool UserCommandWritten = false,
+    bool WslConfWritten = false,
+    IReadOnlyList<string>? BootBackups = null);
 
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
@@ -62,6 +94,14 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// shell, but it exports the proxy only to the shells Codex itself starts — the desktop app
 /// passes CODEX_HOME into the distro for its processes, and the codex command name is the
 /// fallback; ordinary terminals, apt, pip and git keep the direct route.
+///
+/// The same sync wires the boot layer of every synced distro: the [boot] command of
+/// /etc/wsl.conf is pointed at a marked runner (/etc/wsl.d/startup.sh, see BuildBootRunner)
+/// that executes every script of the startup directory in name order. A foreign command
+/// occupying the slot is preserved as 00-user-boot-command.sh (runs first); a foreign file
+/// already sitting at the runner path is replaced — wrapping it into the directory it serves
+/// would recurse. The state is recognized by the runner marker: an already-done distro is
+/// not rewritten (PlanBootLayer).
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -222,6 +262,33 @@ public sealed class WslConfigGuard(
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
 
+        // boot layer: the [boot] command of /etc/wsl.conf → the marked runner that executes
+        // the startup directory; the plan decides what (if anything) to write (see PlanBootLayer)
+        var scriptPath = config.Guard.WslStartupScript;
+        var runnerPath = BootRunnerPath(scriptPath);
+        var bootCommand = ExtractBootCommand(read.WslConfText);
+        var bootPlan = PlanBootLayer(runnerPath, bootCommand, read.BootRunner);
+        var bootRunnerWritten = false;
+        var userCommandWritten = false;
+        var wslConfWritten = false;
+        List<string> bootBackups = [];
+        if (bootPlan != WslBootPlan.AlreadyOurs)
+        {
+            var bootScript = BuildBootSyncScript(
+                bootPlan, runnerPath, UserCommandPath(scriptPath), StartupDir(scriptPath),
+                bootCommand, SetBootCommand(read.WslConfText, runnerPath), stamp);
+            var bootOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], bootScript, Encoding.UTF8, ct);
+            RequireCompleted(bootOutput, $"boot layer sync in '{distro.Name}'");
+            bootRunnerWritten = bootOutput.Contains("RUNNER=written", StringComparison.Ordinal);
+            userCommandWritten = bootOutput.Contains("USERCMD=written", StringComparison.Ordinal);
+            wslConfWritten = bootOutput.Contains("WSLCONF=written", StringComparison.Ordinal);
+            bootBackups = bootOutput.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
+                .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
+                .ToList();
+        }
+
         // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
         // the backup is made only when the content actually changes
         var root = read.SettingsRoot ?? [];
@@ -252,7 +319,6 @@ public sealed class WslConfigGuard(
         RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
         // startup script: refreshes the proxy address on every distro start
-        var scriptPath = config.Guard.WslStartupScript;
         var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config.ForwardProxy));
         var rootScript = $"""
             SCRIPT="{scriptPath}"
@@ -319,7 +385,11 @@ public sealed class WslConfigGuard(
             ScriptWritten: scriptWritten,
             ScriptBackup: scriptWritten ? FindBackupName(scriptOutput) : null,
             ProxyEnvWritten: envWritten,
-            ProxyEnvBackup: envBackup);
+            ProxyEnvBackup: envBackup,
+            BootRunnerWritten: bootRunnerWritten,
+            UserCommandWritten: userCommandWritten,
+            WslConfWritten: wslConfWritten,
+            BootBackups: bootBackups);
     }
 
     /// <summary>
@@ -367,7 +437,9 @@ public sealed class WslConfigGuard(
         string? SettingsProxy,
         JsonObject? SettingsRoot,
         bool ProxyEnvPresent = false,
-        int? ProxyEnvPort = null);
+        int? ProxyEnvPort = null,
+        string? WslConfText = null,
+        WslBootRunnerState BootRunner = WslBootRunnerState.Missing);
 
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
@@ -375,6 +447,7 @@ public sealed class WslConfigGuard(
         var scriptPath = config.Guard.WslStartupScript;
         var envPath = config.Guard.Wsl.ProxyEnvPath;
         var settingsPath = $"/home/{distro.User}/.claude/settings.json";
+        var runnerPath = BootRunnerPath(scriptPath);
         var probe = $"""
             if [ -f {scriptPath} ]; then
                 echo SCRIPT=present
@@ -388,6 +461,23 @@ public sealed class WslConfigGuard(
                 grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
             else
                 echo PROXYENV=missing
+            fi
+            if [ -f {runnerPath} ]; then
+                if grep -q '{BootRunnerMarker}' {runnerPath} 2>/dev/null; then
+                    echo RUNNER=ours
+                else
+                    echo RUNNER=foreign
+                fi
+            else
+                echo RUNNER=missing
+            fi
+            if [ -f /etc/wsl.conf ]; then
+                echo WSLCONF=present
+                cat /etc/wsl.conf
+                echo
+                echo WSLCONF=END
+            else
+                echo WSLCONF=missing
             fi
             if [ -f {settingsPath} ]; then
                 echo SETTINGS=present
@@ -408,7 +498,8 @@ public sealed class WslConfigGuard(
     {
         bool scriptPresent = false, settingsFilePresent = false, proxyEnvPresent = false;
         int? port = null, proxyEnvPort = null;
-        string? user = null, proxy = null;
+        string? user = null, proxy = null, wslConf = null;
+        var bootRunner = WslBootRunnerState.Missing;
         JsonObject? root = null;
 
         var lines = output.Split('\n');
@@ -428,6 +519,24 @@ public sealed class WslConfigGuard(
                     break;
                 case "PROXYENV=missing":
                     proxyEnvPresent = false;
+                    break;
+                case "RUNNER=ours":
+                    bootRunner = WslBootRunnerState.Ours;
+                    break;
+                case "RUNNER=foreign":
+                    bootRunner = WslBootRunnerState.Foreign;
+                    break;
+                case "RUNNER=missing":
+                    bootRunner = WslBootRunnerState.Missing;
+                    break;
+                case "WSLCONF=present":
+                    // wsl.conf body — up to the WSLCONF=END line (or the end of the output)
+                    var confEnd = Array.IndexOf(lines, "WSLCONF=END", i + 1);
+                    wslConf = string.Join('\n', lines[(i + 1)..(confEnd > 0 ? confEnd : lines.Length)]);
+                    i = confEnd > 0 ? confEnd : lines.Length;
+                    break;
+                case "WSLCONF=missing":
+                    wslConf = null;
                     break;
                 case "SETTINGS=present":
                     settingsFilePresent = true;
@@ -468,7 +577,7 @@ public sealed class WslConfigGuard(
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner);
     }
 
     /// <summary>
@@ -530,6 +639,287 @@ public sealed class WslConfigGuard(
         fi
         unset _pnr_codex_shell
         """;
+
+    /// <summary>Marker line inside the boot runner by which the sync recognizes its own file.</summary>
+    internal const string BootRunnerMarker = "PNR-BOOT-RUNNER";
+
+    /// <summary>
+    /// The boot runner next to the startup directory: /etc/wsl.d/startup/10-….sh →
+    /// /etc/wsl.d/startup.sh. Manual string work: the paths are Linux-side and
+    /// System.IO.Path would rewrite the separators on Windows.
+    /// </summary>
+    internal static string BootRunnerPath(string startupScriptPath)
+    {
+        var script = startupScriptPath.TrimEnd('/');
+        var dirEnd = script.LastIndexOf('/');
+        var startupDir = dirEnd > 0 ? script[..dirEnd] : "/etc/wsl.d/startup";
+        var rootEnd = startupDir.LastIndexOf('/');
+        return (rootEnd > 0 ? startupDir[..rootEnd] : "/etc") + "/startup.sh";
+    }
+
+    /// <summary>The preserved foreign [boot] command, as the first script of the startup directory.</summary>
+    internal static string UserCommandPath(string startupScriptPath)
+    {
+        var script = startupScriptPath.TrimEnd('/');
+        var dirEnd = script.LastIndexOf('/');
+        return (dirEnd > 0 ? script[..dirEnd] : "/etc/wsl.d/startup") + "/00-user-boot-command.sh";
+    }
+
+    private static string StartupDir(string startupScriptPath)
+    {
+        var script = startupScriptPath.TrimEnd('/');
+        var dirEnd = script.LastIndexOf('/');
+        return dirEnd > 0 ? script[..dirEnd] : "/etc/wsl.d/startup";
+    }
+
+    /// <summary>
+    /// Value of the [boot] command key (unquoted); null when the section, the key or the
+    /// value is missing or empty. Other sections and comment lines are ignored.
+    /// </summary>
+    internal static string? ExtractBootCommand(string? wslConfText)
+    {
+        if (string.IsNullOrEmpty(wslConfText))
+        {
+            return null;
+        }
+
+        var inBoot = false;
+        foreach (var raw in wslConfText.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith('['))
+            {
+                inBoot = line.Equals("[boot]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (!inBoot)
+            {
+                continue;
+            }
+
+            var eq = line.IndexOf('=');
+            if (eq <= 0 || !line[..eq].Trim().Equals("command", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = line[(eq + 1)..].Trim();
+            if (value.Length >= 2 && value[0] == value[^1] && (value[0] == '"' || value[0] == '\''))
+            {
+                value = value[1..^1].Trim();
+            }
+
+            return value.Length == 0 ? null : value;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Surgical edit: only the [boot] command line changes (normalized to command="…"),
+    /// every other line survives byte for byte; a missing key is inserted after [boot],
+    /// a missing section is appended, a missing file is created.
+    /// </summary>
+    internal static string SetBootCommand(string? original, string command)
+    {
+        var line = $"command=\"{command}\"";
+        if (string.IsNullOrEmpty(original))
+        {
+            return $"[boot]\n{line}\n";
+        }
+
+        var lines = original.Split('\n').ToList();
+        var boot = lines.FindIndex(l => l.Trim().Equals("[boot]", StringComparison.OrdinalIgnoreCase));
+        if (boot < 0)
+        {
+            var head = original.EndsWith("\n") ? original : original + "\n";
+            return $"{head}\n[boot]\n{line}\n";
+        }
+
+        var sectionEnd = lines.FindIndex(boot + 1, l => l.TrimStart().StartsWith('['));
+        if (sectionEnd < 0)
+        {
+            sectionEnd = lines.Count;
+        }
+
+        for (var i = boot + 1; i < sectionEnd; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith(';'))
+            {
+                continue;
+            }
+
+            var eq = trimmed.IndexOf('=');
+            if (eq <= 0 || !trimmed[..eq].Trim().Equals("command", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            lines[i] = line;
+            return string.Join('\n', lines);
+        }
+
+        lines.Insert(boot + 1, line);
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>The boot-layer plan for one distro from the state read inside it.</summary>
+    internal static WslBootPlan PlanBootLayer(string runnerPath, string? bootCommand, WslBootRunnerState runnerState)
+    {
+        if (bootCommand == runnerPath)
+        {
+            return runnerState == WslBootRunnerState.Ours ? WslBootPlan.AlreadyOurs : WslBootPlan.TakeoverRunner;
+        }
+
+        return string.IsNullOrWhiteSpace(bootCommand) ? WslBootPlan.InstallRunner : WslBootPlan.AdoptForeignCommand;
+    }
+
+    /// <summary>
+    /// The boot runner the [boot] command of /etc/wsl.conf points at: it executes every
+    /// executable script of the startup directory in name order (00-… first). Semantics of
+    /// the hand-written wrapper of the pre-application scheme it replaces: the same boot
+    /// log, one failing script does not stop the rest. The marker line is what the sync
+    /// recognizes its own file by.
+    /// </summary>
+    internal static string BuildBootRunner(string startupDir) => $$"""
+        #!/bin/bash
+        # {{BootRunnerMarker}}: managed by PrivateNetRouting (guard.wsl) — do not edit by hand.
+        # Runs at WSL start (the [boot] command of /etc/wsl.conf points here) and executes
+        # every executable script of {{startupDir}} in name order (00-… first).
+        # Logs to /var/log/wsl-boot.log; one failing script does not stop the rest unless
+        # FAIL_FAST=true is set in the environment.
+        LOG_FILE="/var/log/wsl-boot.log"
+        SCRIPT_DIR="{{startupDir}}"
+        FAIL_FAST="${FAIL_FAST:-false}"
+
+        export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
+
+        [ -d "$SCRIPT_DIR" ] || mkdir -p "$SCRIPT_DIR"
+        log "=== [START] WSL boot sequence (PrivateNetRouting runner) ==="
+
+        shopt -s nullglob
+        files=("$SCRIPT_DIR"/*)
+        shopt -u nullglob
+
+        for script in "${files[@]}"; do
+            [ -f "$script" ] || continue
+            name=$(basename "$script")
+            if [ ! -x "$script" ]; then
+                log "[SKIP] $name - not executable"
+                continue
+            fi
+            log "--- [EXEC] $name ---"
+            if "$script" >> "$LOG_FILE" 2>&1; then
+                log "[OK] $name"
+            else
+                log "[FAIL] $name (exit $?)"
+                if [ "$FAIL_FAST" = "true" ]; then
+                    log "[ABORT] FAIL_FAST is on, stopping the sequence"
+                    exit 1
+                fi
+            fi
+        done
+
+        log "=== [DONE] WSL boot sequence ==="
+        """;
+
+    /// <summary>The foreign [boot] command preserved as a script (the 00- name keeps it first).</summary>
+    internal static string BuildUserCommandScript(string command) => $$"""
+        #!/bin/bash
+        # The [boot] command previously written in /etc/wsl.conf, preserved by
+        # PrivateNetRouting when its boot runner took over the wsl.conf entry.
+        # The 00- name keeps it ahead of the other startup scripts.
+        {{command}}
+        """;
+
+    /// <summary>
+    /// One root pass for the whole boot layer: the runner (all plans), the preserved
+    /// foreign command (adoption only) and the wsl.conf edit (when the command must
+    /// change). Every block is the usual idempotent write: compare, backup, replace.
+    /// </summary>
+    private static string BuildBootSyncScript(
+        WslBootPlan plan,
+        string runnerPath,
+        string userCommandPath,
+        string startupDir,
+        string? userCommand,
+        string wslConfText,
+        string stamp)
+    {
+        static string Payload(string content) => Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+
+        var sb = new StringBuilder();
+        sb.Append($$"""
+            RUNNER="{{runnerPath}}"
+            NEW="/tmp/.pnr-runner-{{stamp}}"
+            echo '{{Payload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW"
+            mkdir -p "$(dirname "$RUNNER")"
+            if [ -f "$RUNNER" ] && cmp -s "$NEW" "$RUNNER"; then
+                echo RUNNER=unchanged
+            else
+                if [ -f "$RUNNER" ]; then cp -p "$RUNNER" "$RUNNER.pnr-bak-{{stamp}}" && echo BACKUP_RUNNER={{runnerPath}}.pnr-bak-{{stamp}}; fi
+                cat "$NEW" > "$RUNNER"
+                chmod 755 "$RUNNER"
+                echo RUNNER=written
+            fi
+            rm -f "$NEW"
+            ls -1t {{runnerPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+
+            """);
+
+        if (plan == WslBootPlan.AdoptForeignCommand && !string.IsNullOrWhiteSpace(userCommand))
+        {
+            sb.Append($$"""
+                USERCMD="{{userCommandPath}}"
+                NEW="/tmp/.pnr-usercmd-{{stamp}}"
+                echo '{{Payload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW"
+                mkdir -p "$(dirname "$USERCMD")"
+                if [ -f "$USERCMD" ] && cmp -s "$NEW" "$USERCMD"; then
+                    echo USERCMD=unchanged
+                else
+                    if [ -f "$USERCMD" ]; then cp -p "$USERCMD" "$USERCMD.pnr-bak-{{stamp}}" && echo BACKUP_USERCMD={{userCommandPath}}.pnr-bak-{{stamp}}; fi
+                    cat "$NEW" > "$USERCMD"
+                    chmod 755 "$USERCMD"
+                    echo USERCMD=written
+                fi
+                rm -f "$NEW"
+                ls -1t {{userCommandPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+
+                """);
+        }
+
+        if (plan is WslBootPlan.InstallRunner or WslBootPlan.AdoptForeignCommand)
+        {
+            sb.Append($$"""
+                WSLCONF="/etc/wsl.conf"
+                NEW="/tmp/.pnr-wslconf-{{stamp}}"
+                echo '{{Payload(wslConfText)}}' | base64 -d > "$NEW"
+                if [ -f "$WSLCONF" ] && cmp -s "$NEW" "$WSLCONF"; then
+                    echo WSLCONF=unchanged
+                else
+                    if [ -f "$WSLCONF" ]; then cp -p "$WSLCONF" "$WSLCONF.pnr-bak-{{stamp}}" && echo BACKUP_WSLCONF=/etc/wsl.conf.pnr-bak-{{stamp}}; fi
+                    cat "$NEW" > "$WSLCONF"
+                    chmod 644 "$WSLCONF"
+                    echo WSLCONF=written
+                fi
+                rm -f "$NEW"
+                ls -1t /etc/wsl.conf.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+
+                """);
+        }
+
+        sb.Append("echo PNR=ok\n");
+        return sb.ToString();
+    }
 
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
     internal static string BuildStartupScript(string user, int port) => $$"""

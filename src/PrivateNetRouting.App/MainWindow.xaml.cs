@@ -788,6 +788,7 @@ public partial class MainWindow : Window
         var lines = result.Distros.Select(d => d.Skipped
             ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
             : d.SettingsWritten || d.ScriptWritten || d.ProxyEnvWritten
+                || d.BootRunnerWritten || d.UserCommandWritten || d.WslConfWritten
                 ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten))
                 : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten)));
         _viewModel.SetCheckText(string.Join("; ", lines));

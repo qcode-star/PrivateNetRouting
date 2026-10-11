@@ -894,6 +894,7 @@ internal static class Program
                     }
 
                     Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten || distro.ProxyEnvWritten
+                        || distro.BootRunnerWritten || distro.UserCommandWritten || distro.WslConfWritten
                         ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {(distro.ProxyEnvWritten ? "+ codex proxy env " : "")}written"
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                 }
