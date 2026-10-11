@@ -5,7 +5,8 @@ A personal Windows toolkit (WPF, .NET 10 LTS) that runs Claude Desktop and the C
 supervisor, launchers for both apps and for an isolated browser profile, idle auto-stop, an MSIX
 package updater for Claude and a Microsoft Store updater for Codex, direct-access guards, and
 read-only diagnostics. It provides a GUI and a headless CLI. Development rules are in
-[AGENTS.md](AGENTS.md).
+[AGENTS.md](AGENTS.md). Hands-on guides: [running Claude through the proxy](docs/claude-proxy.md)
+and [running the Codex desktop app through the proxy](docs/codex-proxy.md) — Windows and WSL.
 
 ## Install
 
