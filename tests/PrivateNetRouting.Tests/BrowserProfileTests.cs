@@ -1,0 +1,356 @@
+using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Launcher;
+using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.SystemOps;
+
+namespace PrivateNetRouting.Tests;
+
+/// <summary>
+/// Creation of the browser profile: the files of both families (Firefox user.js, the Chromium
+/// WebRTC policy), the command line shared by the button and the desktop shortcut, the executable
+/// lookup and the service that ties them to the config.
+/// </summary>
+public class BrowserProfileTests : IDisposable
+{
+    private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-bprofile-{Guid.NewGuid():N}.log");
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"pnr-bprofile-dir-{Guid.NewGuid():N}");
+    private readonly string _desktop = Path.Combine(Path.GetTempPath(), $"pnr-bprofile-desktop-{Guid.NewGuid():N}");
+    private readonly FileLog _log;
+    private readonly FakeShortcuts _shortcuts = new();
+    private readonly List<Action<AppConfig>> _persisted = [];
+
+    public BrowserProfileTests()
+    {
+        _log = new FileLog(_logPath);
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_desktop);
+    }
+
+    private static AppConfig NewConfig() => new()
+    {
+        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081", Socks5Upstream = "127.0.0.1:18099" },
+        Chain = new ChainConfig { DaemonSocksListen = "127.0.0.1:18083" },
+        Launcher = new LauncherConfig { BypassDomains = ["corp.example.com"] },
+        Browser = new BrowserConfig { DirectTlds = ["ru", "by"] },
+    };
+
+    private BrowserProfileService CreateService(AppConfig config, Func<string, bool>? fileExists = null) =>
+        new(
+            config,
+            _shortcuts,
+            _log,
+            fileExists,
+            mutate =>
+            {
+                _persisted.Add(mutate);
+                mutate(config);
+            },
+            () => _desktop);
+
+    private string ProfileDir(string name = "profile") => Path.Combine(_root, name);
+
+    // ----- Firefox: user.js -----
+
+    [Fact]
+    public void FirefoxUserJsCarriesTheEgressRemoteDnsAndTheGuards()
+    {
+        var js = BrowserProfileFiles.RenderFirefoxUserJs("127.0.0.1", 18083, "localhost, *.ru");
+
+        // the egress SOCKS5 for all protocols, names resolved on its side, no silent direct fallback
+        Assert.Contains(@"user_pref(""network.proxy.type"", 1);", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks"", ""127.0.0.1"");", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks_port"", 18083);", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks_version"", 5);", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks_remote_dns"", true);", js);
+        Assert.Contains(@"user_pref(""network.proxy.failover_direct"", false);", js);
+        Assert.Contains(@"user_pref(""network.proxy.no_proxies_on"", ""localhost, *.ru"");", js);
+        Assert.Contains(@"user_pref(""network.proxy.http"", """");", js);
+        Assert.Contains(@"user_pref(""network.proxy.ssl"", """");", js);
+        Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
+
+        // the tabs of the last session come back
+        Assert.Contains(@"user_pref(""browser.startup.page"", 3);", js);
+
+        // no startup offers
+        Assert.Contains(@"user_pref(""browser.aboutwelcome.enabled"", false);", js);
+        Assert.Contains(@"user_pref(""browser.shell.checkDefaultBrowser"", false);", js);
+        Assert.Contains(@"user_pref(""browser.discovery.enabled"", false);", js);
+        Assert.Contains(@"user_pref(""datareporting.policy.dataSubmissionEnabled"", false);", js);
+
+        // WebRTC and the built-in VPN would go around the proxy and reveal the real address
+        Assert.Contains(@"user_pref(""media.peerconnection.enabled"", false);", js);
+        Assert.Contains(@"user_pref(""media.navigator.enabled"", false);", js);
+        Assert.Contains(@"user_pref(""browser.ipProtection.enabled"", false);", js);
+    }
+
+    // ----- Chromium: the WebRTC policy in the profile -----
+
+    [Fact]
+    public void ChromiumSeedWritesTheWebRtcPolicy()
+    {
+        var dir = ProfileDir("chrome");
+
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+
+        var preferences = File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.ChromiumPreferencesRelativePath));
+        Assert.Contains("\"ip_handling_policy\":\"disable_non_proxied_udp\"", preferences);
+        Assert.False(File.Exists(Path.Combine(dir, BrowserProfileFiles.FirefoxUserJsName)));
+    }
+
+    [Fact]
+    public void ChromiumSeedKeepsTheKeysOfAnExistingProfile()
+    {
+        var dir = ProfileDir("chrome-used");
+        var path = Path.Combine(dir, BrowserProfileFiles.ChromiumPreferencesRelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """{"profile":{"exit_type":"Crashed"},"spellcheck":{"dictionaries":["en-US"]}}""");
+
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+
+        var preferences = File.ReadAllText(path);
+        Assert.Contains("\"exit_type\":\"Crashed\"", preferences); // the browser's own keys survive
+        Assert.Contains("en-US", preferences);
+        Assert.Contains("disable_non_proxied_udp", preferences);
+    }
+
+    [Fact]
+    public void ChromiumSeedSurvivesAnUnreadablePreferencesFile()
+    {
+        var dir = ProfileDir("chrome-broken");
+        var path = Path.Combine(dir, BrowserProfileFiles.ChromiumPreferencesRelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{ this is not json");
+
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+
+        Assert.Contains("disable_non_proxied_udp", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void FirefoxCreateIsIdempotent()
+    {
+        var dir = ProfileDir("firefox");
+
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18084, "localhost");
+
+        // the second pass refreshes the file instead of piling up: the egress of the profile follows the config
+        var js = File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.FirefoxUserJsName));
+        Assert.Contains(@"user_pref(""network.proxy.socks_port"", 18084);", js);
+        Assert.DoesNotContain("18083", js);
+    }
+
+    [Fact]
+    public void FirefoxSeedAcceptsTheTermsOfUseForAFreshProfile()
+    {
+        var dir = ProfileDir("firefox-tou");
+
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
+
+        // the welcome/terms page of a fresh profile is skipped; the value sits above any shipped
+        // version, so the page does not come back after a browser update either
+        var prefs = File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.FirefoxPrefsJsName));
+        Assert.Contains(
+            $@"user_pref(""termsofuse.acceptedVersion"", {BrowserProfileFiles.FirefoxTermsOfUseVersion});",
+            prefs);
+        Assert.Contains(@"user_pref(""termsofuse.acceptedDate"", """, prefs);
+        // user.js must NOT carry it: a value pinned there would override the browser at every start
+        Assert.DoesNotContain(
+            "termsofuse",
+            File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.FirefoxUserJsName)));
+    }
+
+    [Fact]
+    public void FirefoxSeedNeverRewritesAnExistingPrefsJs()
+    {
+        var dir = ProfileDir("firefox-started");
+        var prefsPath = Path.Combine(dir, BrowserProfileFiles.FirefoxPrefsJsName);
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(prefsPath, """
+            // Mozilla User Preferences
+
+            user_pref("termsofuse.acceptedVersion", 4);
+            user_pref("browser.startup.homepage", "https://example.org");
+            """);
+
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
+
+        // the file belongs to the browser once it has started; only our user.js is refreshed
+        var prefs = File.ReadAllText(prefsPath);
+        Assert.Contains(@"user_pref(""termsofuse.acceptedVersion"", 4);", prefs);
+        Assert.DoesNotContain("99", prefs);
+        Assert.Contains("example.org", prefs);
+    }
+
+    // ----- the command line shared by the button and the shortcut -----
+
+    [Fact]
+    public void FirefoxCommandLineCarriesTheProfile()
+    {
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\profiles\ff", "127.0.0.1:18083", "bypass");
+
+        Assert.Equal(["-profile", @"C:\profiles\ff", "--new-instance"], args);
+        Assert.Equal(@"-profile C:\profiles\ff --new-instance", BrowserProfileCommandLine.ToCommandLine(args));
+    }
+
+    [Fact]
+    public void ChromeCommandLineCarriesTheEgressTheProfileAndTheSession()
+    {
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Chrome, @"C:\profiles\ch", "127.0.0.1:18083", "localhost;*.ru");
+
+        Assert.Equal(
+            [
+                "--proxy-server=socks5://127.0.0.1:18083",
+                "--proxy-bypass-list=localhost;*.ru",
+                @"--user-data-dir=C:\profiles\ch",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--restore-last-session",
+            ],
+            args);
+    }
+
+    [Fact]
+    public void ShortcutCommandLineQuotesOnlyWhatHasSpaces()
+    {
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\my profiles\ff", "127.0.0.1:18083", "bypass");
+
+        Assert.Equal("-profile \"C:\\my profiles\\ff\" --new-instance", BrowserProfileCommandLine.ToCommandLine(args));
+    }
+
+    // ----- the executable lookup -----
+
+    [Fact]
+    public void LocatorPrefersTheFirstExistingStandardPlace()
+    {
+        var candidates = BrowserExecutableLocator.Candidates(BrowserKind.Chrome);
+        Assert.True(candidates.Count >= 3);
+        Assert.All(candidates, path => Assert.DoesNotContain('%', path)); // the variables are expanded already
+
+        Assert.Equal(
+            candidates[1],
+            BrowserExecutableLocator.Find(BrowserKind.Chrome, path => path == candidates[1]));
+        Assert.Null(BrowserExecutableLocator.Find(BrowserKind.Firefox, _ => false));
+    }
+
+    // ----- the service -----
+
+    [Fact]
+    public void CreateWritesTheProfileTheShortcutAndTheConfig()
+    {
+        var config = NewConfig();
+        var dir = ProfileDir();
+        var service = CreateService(config, path => path == @"C:\fake\firefox.exe");
+
+        var result = service.Create(new BrowserProfileRequest(
+            BrowserKind.Firefox,
+            dir,
+            @"C:\fake\firefox.exe",
+            CreateDesktopShortcut: true));
+
+        Assert.Equal(dir, result.ProfileDir);
+        Assert.Contains(@"user_pref(""network.proxy.socks_port"", 18083);", File.ReadAllText(Path.Combine(dir, "user.js")));
+
+        // the shortcut goes to the desktop with the egress baked in
+        var shortcut = Assert.Single(_shortcuts.Created);
+        Assert.Equal(Path.Combine(_desktop, "PrivateNetRouting Firefox.lnk"), shortcut.ShortcutPath);
+        Assert.Equal(@"C:\fake\firefox.exe", shortcut.TargetPath);
+        Assert.Equal($"-profile {dir} --new-instance", shortcut.Arguments);
+        Assert.Contains("Firefox", shortcut.Description);
+
+        // and the config knows the profile at once
+        Assert.True(config.Browser.IsConfigured);
+        Assert.Equal(BrowserKind.Firefox, config.Browser.Kind);
+        Assert.Equal(dir, config.Browser.ProfileDir);
+        Assert.Equal(shortcut.ShortcutPath, config.Browser.ShortcutPath);
+        Assert.Single(_persisted); // the user config file got the same values
+    }
+
+    [Fact]
+    public void CreateWithoutTheShortcutLeavesTheDesktopAloneAndClearsThePath()
+    {
+        var config = NewConfig();
+        var service = CreateService(config, path => path == @"C:\fake\chrome.exe");
+
+        var result = service.Create(new BrowserProfileRequest(
+            BrowserKind.Chrome,
+            ProfileDir("no-shortcut"),
+            @"C:\fake\chrome.exe",
+            CreateDesktopShortcut: false));
+
+        Assert.Equal("", result.ShortcutPath);
+        Assert.Empty(_shortcuts.Created);
+        Assert.Equal("", config.Browser.ShortcutPath);
+        Assert.Equal(BrowserKind.Chrome, config.Browser.Kind);
+        Assert.True(File.Exists(Path.Combine(result.ProfileDir, BrowserProfileFiles.ChromiumPreferencesRelativePath)));
+    }
+
+    [Fact]
+    public void CreateRefusesAMissingExecutable()
+    {
+        var config = NewConfig();
+        var service = CreateService(config, _ => false);
+
+        Assert.Throws<FileNotFoundException>(() => service.Create(new BrowserProfileRequest(
+            BrowserKind.Firefox,
+            ProfileDir("missing"),
+            @"C:\gone\firefox.exe",
+            CreateDesktopShortcut: true)));
+
+        Assert.False(config.Browser.IsConfigured);
+        Assert.Empty(_shortcuts.Created);
+    }
+
+    [Fact]
+    public void CreateRefusesAnEmptyExecutable()
+    {
+        var service = CreateService(NewConfig(), _ => true);
+
+        var error = Assert.Throws<FileNotFoundException>(() => service.Create(new BrowserProfileRequest(
+            BrowserKind.Firefox,
+            ProfileDir("empty"),
+            "  ",
+            CreateDesktopShortcut: false)));
+
+        Assert.Contains("not specified", error.Message);
+    }
+
+    [Fact]
+    public void SuggestProfileDirKeepsTheFamiliesApart()
+    {
+        var firefox = BrowserProfileService.SuggestProfileDir(BrowserKind.Firefox);
+        var chrome = BrowserProfileService.SuggestProfileDir(BrowserKind.Chrome);
+
+        Assert.NotEqual(firefox, chrome);
+        Assert.Contains("firefox", firefox);
+        Assert.Contains("chrome", chrome);
+    }
+
+    private sealed class FakeShortcuts : IShortcutFactory
+    {
+        public List<(string ShortcutPath, string TargetPath, string Arguments, string WorkingDirectory, string Description)> Created { get; } = [];
+
+        public void CreateShortcut(string shortcutPath, string targetPath, string arguments, string workingDirectory, string description) =>
+            Created.Add((shortcutPath, targetPath, arguments, workingDirectory, description));
+    }
+
+    public void Dispose()
+    {
+        _log.Dispose();
+        foreach (var path in new[] { _logPath })
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+
+        foreach (var dir in new[] { _root, _desktop })
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
+}

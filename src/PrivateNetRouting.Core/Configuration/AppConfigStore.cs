@@ -112,10 +112,9 @@ file static class AppConfigExtensions
             Environment.ExpandEnvironmentVariables(config.ForwardProxy.ActivityMarkerPath);
         config.Chain.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.StateDir);
         config.Launcher.AliasPath = Environment.ExpandEnvironmentVariables(config.Launcher.AliasPath);
-        config.Browser.Firefox.Path = Environment.ExpandEnvironmentVariables(config.Browser.Firefox.Path);
-        config.Browser.Firefox.ProfileDir = Environment.ExpandEnvironmentVariables(config.Browser.Firefox.ProfileDir);
-        config.Browser.Chromium.Path = Environment.ExpandEnvironmentVariables(config.Browser.Chromium.Path);
-        config.Browser.Chromium.ProfileDir = Environment.ExpandEnvironmentVariables(config.Browser.Chromium.ProfileDir);
+        config.Browser.ExecutablePath = Environment.ExpandEnvironmentVariables(config.Browser.ExecutablePath);
+        config.Browser.ProfileDir = Environment.ExpandEnvironmentVariables(config.Browser.ProfileDir);
+        config.Browser.ShortcutPath = Environment.ExpandEnvironmentVariables(config.Browser.ShortcutPath);
         config.Updater.CacheDir = Environment.ExpandEnvironmentVariables(config.Updater.CacheDir);
         config.Updater.PowerShellPath = Environment.ExpandEnvironmentVariables(config.Updater.PowerShellPath);
         config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);

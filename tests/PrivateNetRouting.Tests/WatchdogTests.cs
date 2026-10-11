@@ -180,6 +180,32 @@ public class WatchdogTests : IDisposable
         Assert.Null(probe.GetInUseReason(TimeSpan.FromMinutes(10)));
     }
 
+    [Fact]
+    public void UsageProbeCountsTheEgressListenerOfTheBrowserProfile()
+    {
+        // The browser profile goes straight to the chain's egress, past the application proxy:
+        // its live connections must keep the chain from being stopped under an open browser.
+        var ports = new Dictionary<int, int> { [18081] = 0, [18083] = 3 };
+        var probe = new ClaudeUsageProbe(
+            new FakeFinder(0),
+            new PortsCounter(ports),
+            proxyPort: 18081,
+            activityMarkerPath: "Z:\\definitely\\missing",
+            codexProcessName: "",
+            egressPort: 18083);
+
+        Assert.Equal("established connections to the egress 18083: 3", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
+
+        // Without an egress port (the socks5 mode: stopping the chain does not cut the browser)
+        // the same connections mean nothing.
+        var withoutEgress = new ClaudeUsageProbe(
+            new FakeFinder(0),
+            new PortsCounter(ports),
+            proxyPort: 18081,
+            activityMarkerPath: "Z:\\definitely\\missing");
+        Assert.Null(withoutEgress.GetInUseReason(TimeSpan.FromMinutes(10)));
+    }
+
     private WatchdogService Create(
         FakeUsage usage,
         FakeWsl? wsl,
@@ -303,5 +329,11 @@ public class WatchdogTests : IDisposable
     private sealed class FakeCounter(int count) : IEstablishedConnectionCounter
     {
         public int CountOnLocalPort(int port) => count;
+    }
+
+    /// <summary>Connection counts per local port — the probe asks about the proxy and the egress separately.</summary>
+    private sealed class PortsCounter(Dictionary<int, int> counts) : IEstablishedConnectionCounter
+    {
+        public int CountOnLocalPort(int port) => counts.TryGetValue(port, out var count) ? count : 0;
     }
 }

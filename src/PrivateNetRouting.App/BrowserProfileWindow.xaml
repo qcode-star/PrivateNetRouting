@@ -1,0 +1,68 @@
+<Window x:Class="PrivateNetRouting.App.BrowserProfileWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Create browser profile"
+        Width="660" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource Brush.Window}" Foreground="{StaticResource Brush.Text}"
+        FontFamily="{StaticResource Font.Ui}" FontSize="{StaticResource Font.Body}"
+        SnapsToDevicePixels="True" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <StackPanel Margin="24">
+        <TextBlock x:Name="HeaderText" Style="{StaticResource Text.Title}"/>
+        <TextBlock x:Name="IntroText" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+        <TextBlock x:Name="ExistingText" Style="{StaticResource Text.Note}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Margin="0,6,0,0"/>
+
+        <!-- Family of the profile: the two options of the dialog -->
+        <TextBlock x:Name="KindLabel" Style="{StaticResource Text.Section}" Margin="0,20,0,0"/>
+        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+            <RadioButton x:Name="KindFirefox" GroupName="BrowserKind" VerticalContentAlignment="Center"
+                         Checked="OnKindChanged"/>
+            <RadioButton x:Name="KindChrome" GroupName="BrowserKind" VerticalContentAlignment="Center"
+                         Margin="28,0,0,0" Checked="OnKindChanged"/>
+        </StackPanel>
+
+        <!-- The profile directory: any folder the owner picks; the profile is created inside it -->
+        <TextBlock x:Name="FolderLabel" Style="{StaticResource Text.Section}" Margin="0,20,0,0"/>
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="FolderBox" Padding="8,6" VerticalContentAlignment="Center"
+                     TextChanged="OnFolderChanged"
+                     AutomationProperties.Name="{DynamicResource BrowserProfile.Folder}"/>
+            <Button x:Name="BrowseButton" Grid.Column="1" Style="{StaticResource SecondaryButton}" MinWidth="120"
+                    Margin="8,0,0,0" Click="OnBrowseFolder"/>
+        </Grid>
+
+        <!-- The browser executable: found automatically in the standard places, replaceable by hand -->
+        <TextBlock x:Name="ExeLabel" Style="{StaticResource Text.Section}" Margin="0,20,0,0"/>
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ExeText" Style="{StaticResource Text.Mono}" TextWrapping="Wrap"
+                       VerticalAlignment="Center"/>
+            <Button x:Name="SpecifyExeButton" Grid.Column="1" Style="{StaticResource SecondaryButton}" MinWidth="120"
+                    Margin="8,0,0,0" Click="OnSpecifyExecutable"/>
+        </Grid>
+        <TextBlock x:Name="ExeWarning" Style="{StaticResource Text.Note}" Foreground="{StaticResource Brush.Warn}"
+                   TextWrapping="Wrap" Visibility="Collapsed" Margin="0,8,0,0"/>
+
+        <!-- The shortcut leads straight to the browser with the egress baked in -->
+        <CheckBox x:Name="ShortcutCheck" Margin="0,20,0,0" VerticalContentAlignment="Center"
+                  Checked="OnShortcutToggled" Unchecked="OnShortcutToggled"/>
+        <TextBlock x:Name="ShortcutPathText" Style="{StaticResource Text.Mono}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Margin="0,8,0,0"/>
+
+        <TextBlock x:Name="StatusText" Style="{StaticResource Text.Note}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Margin="0,16,0,0"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button x:Name="CancelButton" Style="{StaticResource GhostButton}" MinWidth="120" Click="OnCancel"/>
+            <Button x:Name="CreateButton" MinWidth="140" Margin="8,0,0,0" Click="OnCreate"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

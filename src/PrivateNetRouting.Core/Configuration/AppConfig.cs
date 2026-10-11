@@ -202,78 +202,73 @@ public sealed class ChainConfig
 }
 
 /// <summary>
-/// Browser launcher with an isolated profile and its own proxy:
-/// Firefox — a separate profile with user.js (rewritten on every launch, the bypass
-/// list is always fresh), Chromium-like — via command-line flags. The browser's system
-/// settings are not touched. Bypass domains are shared with the Claude launcher (launcher.bypassDomains).
+/// The browser profile, created once through the application's dialog (the "?" help menu →
+/// "Create browser profile…"): a separate profile whose traffic goes straight to the chain's own
+/// egress — the SOCKS5 the chain itself dials through (BrowserEgress) — and not through the
+/// application's forward proxy. The profile is self-sufficient: its desktop shortcut starts the
+/// browser without the application (the chain, however, has to be up — the egress lives in it).
+/// A profile that has not been created yet has an empty Type (and empty paths).
 /// </summary>
 public sealed class BrowserConfig
 {
-    /// <summary>Which browser to launch: "firefox" | "chromium" (Chromium-like: Edge, Chrome, ...; unknown value — firefox).</summary>
-    public string Type { get; set; } = "firefox";
+    /// <summary>Family of the profile: "firefox" | "chrome" ("chromium" is accepted too); empty — the profile has not been created yet.</summary>
+    public string Type { get; set; } = "";
 
-    [JsonIgnore]
-    public BrowserKind EffectiveType => BrowserKindParser.Parse(Type);
+    /// <summary>Browser executable of the profile; empty — looked up in the standard places at launch. Environment variables are expanded.</summary>
+    public string ExecutablePath { get; set; } = "";
 
-    /// <summary>URL opened in the browser (a public Anthropic domain).</summary>
-    public string Url { get; set; } = "https://claude.ai";
+    /// <summary>Profile directory (the browser's own data lives only here); empty — the profile has not been created yet.</summary>
+    public string ProfileDir { get; set; } = "";
 
-    /// <summary>Private window: Firefox -private-window / Chromium --incognito.</summary>
-    public bool Private { get; set; }
+    /// <summary>Desktop shortcut created together with the profile; empty — none.</summary>
+    public string ShortcutPath { get; set; } = "";
 
-    /// <summary>
-    /// WebRTC off in the launched browser: it goes around the proxy and reveals the real
-    /// address to the site (only the profile is touched — the browser's system settings stay
-    /// intact). Firefox — media.peerconnection.enabled=false in user.js, a full switch-off;
-    /// Chromium-like — the WebRTC policy that forbids non-proxied UDP (the family has no full
-    /// off switch, only this restriction). A site that needs calls will not work then.
-    /// </summary>
-    public bool DisableWebRtc { get; set; } = true;
+    /// <summary>Timeout of the egress reachability probe before a launch, sec.</summary>
+    public int ProbeTimeoutSeconds { get; set; } = 5;
 
     /// <summary>
-    /// Top-level domains that go around the proxy:
-    /// local sites must not go out to a foreign exit. Without the dot, added as *.tld.
+    /// Top-level domains that go around the egress (*.tld): local sites must not leave through a
+    /// foreign exit. The bypass zone domains are shared with the Claude launcher (launcher.bypassDomains);
+    /// there is no separate list here.
     /// </summary>
     public List<string> DirectTlds { get; set; } = ["ru", "su", "by", "kz"];
 
-    public BrowserFirefoxConfig Firefox { get; set; } = new();
+    /// <summary>Family of the profile; null — not created yet (or an unknown value in the config).</summary>
+    [JsonIgnore]
+    public BrowserKind? Kind => BrowserKindParser.ParseOrNull(Type);
 
-    public BrowserChromiumConfig Chromium { get; set; } = new();
+    /// <summary>The profile is ready to launch: the family is known, the executable and the profile directory are set.</summary>
+    [JsonIgnore]
+    public bool IsConfigured => Kind is not null
+        && !string.IsNullOrWhiteSpace(ExecutablePath)
+        && !string.IsNullOrWhiteSpace(ProfileDir);
 }
 
-public sealed class BrowserFirefoxConfig
-{
-    /// <summary>firefox.exe; if not found — fallback to the Program Files (x86) directory. Environment variables are expanded.</summary>
-    public string Path { get; set; } = @"%ProgramFiles%\Mozilla Firefox\firefox.exe";
-
-    /// <summary>Isolated profile directory (cookies and logins live only here).</summary>
-    public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\ff-profile";
-}
-
-public sealed class BrowserChromiumConfig
-{
-    /// <summary>Browser of the Chromium-like family; default — Edge, if not found — fallback to Program Files. Environment variables are expanded.</summary>
-    public string Path { get; set; } = @"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe";
-
-    /// <summary>Isolated profile directory (--user-data-dir; required — a running instance ignores the flags).</summary>
-    public string ProfileDir { get; set; } = @"%APPDATA%\PrivateNetRouting\browser\chromium-profile";
-}
-
-/// <summary>Family of the launched browser; an unknown config value — Firefox (like logging.level → info).</summary>
+/// <summary>Family of the profile; an unknown or empty config value — not configured (null), not a silent default.</summary>
 public enum BrowserKind
 {
     Firefox,
-    Chromium,
+    Chrome,
 }
 
 public static class BrowserKindParser
 {
-    public static BrowserKind Parse(string? value) =>
+    /// <summary>"firefox" | "chrome" | "chromium" → the family; anything else (including empty) — null.</summary>
+    public static BrowserKind? ParseOrNull(string? value) =>
         value?.Trim().ToLowerInvariant() switch
         {
-            "chromium" => BrowserKind.Chromium,
-            _ => BrowserKind.Firefox,
+            "firefox" => BrowserKind.Firefox,
+            "chrome" or "chromium" => BrowserKind.Chrome,
+            _ => null,
         };
+
+    /// <summary>The canonical spelling for the config file.</summary>
+    public static string ToConfigValue(BrowserKind kind) =>
+        kind == BrowserKind.Chrome ? "chrome" : "firefox";
+
+    /// <summary>The display name of the family (log lines and the shortcut description; the UI takes its own from the dictionaries).</summary>
+    public static string DisplayName(BrowserKind kind) =>
+        kind == BrowserKind.Chrome ? "Chrome" : "Firefox";
 }
 
 /// <summary>

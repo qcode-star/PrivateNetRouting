@@ -22,7 +22,7 @@ public class AppConfigTests : IDisposable
         Assert.True(config.ForwardProxy.DohDiscovery.Enabled); // the netmap fills the pool for a new user
         Assert.Empty(config.ForwardProxy.DohSeed); // optional; discovery is the source
         Assert.True(config.Ui.CheckUpdatesOnStart);
-        Assert.True(config.Browser.DisableWebRtc); // WebRTC would go around the proxy
+        Assert.False(config.Browser.IsConfigured); // the profile is created through the dialog, not by default
     }
 
     [Fact]
@@ -98,39 +98,57 @@ public class AppConfigTests : IDisposable
     public void BrowserSectionDefaultsRoundTripAndExpand()
     {
         var config = AppConfigStore.LoadOrCreate(_path);
-        Assert.Equal(BrowserKind.Firefox, config.Browser.EffectiveType);
-        Assert.Equal("https://claude.ai", config.Browser.Url);
-        Assert.False(config.Browser.Private);
+        Assert.Null(config.Browser.Kind); // not created yet: no family, no paths
+        Assert.False(config.Browser.IsConfigured);
+        Assert.Equal(5, config.Browser.ProbeTimeoutSeconds);
         Assert.Equal(["ru", "su", "by", "kz"], config.Browser.DirectTlds);
-        Assert.Equal(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrivateNetRouting", "browser", "ff-profile"),
-            config.Browser.Firefox.ProfileDir);
 
         config.Browser.Type = "chromium";
-        config.Browser.Firefox.ProfileDir = @"%TEMP%\ff-profile";
-        config.Browser.Chromium.Path = @"C:\fake\chrome.exe";
+        config.Browser.ExecutablePath = @"%ProgramFiles%\Google\Chrome\Application\chrome.exe";
+        config.Browser.ProfileDir = @"%TEMP%\chrome-profile";
+        config.Browser.ShortcutPath = @"%TEMP%\PrivateNetRouting Chrome.lnk";
         AppConfigStore.Save(config, _path);
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
-        Assert.Equal(BrowserKind.Chromium, loaded.Browser.EffectiveType);
+        Assert.Equal(BrowserKind.Chrome, loaded.Browser.Kind);
+        Assert.True(loaded.Browser.IsConfigured);
         Assert.Equal(
-            Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "ff-profile"),
-            loaded.Browser.Firefox.ProfileDir);
-        Assert.Equal(@"C:\fake\chrome.exe", loaded.Browser.Chromium.Path);
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            loaded.Browser.ExecutablePath);
+        Assert.Equal(
+            Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "chrome-profile"),
+            loaded.Browser.ProfileDir);
+        Assert.Equal(
+            Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "PrivateNetRouting Chrome.lnk"),
+            loaded.Browser.ShortcutPath);
     }
 
     [Fact]
-    public void BrowserTypeUnknownValueFallsBackToFirefox()
+    public void BrowserFamilyParserAcceptsBothSpellingsAndRefusesUnknown()
     {
+        Assert.Equal(BrowserKind.Firefox, BrowserKindParser.ParseOrNull("Firefox"));
+        Assert.Equal(BrowserKind.Chrome, BrowserKindParser.ParseOrNull("chrome"));
+        Assert.Equal(BrowserKind.Chrome, BrowserKindParser.ParseOrNull("chromium"));
+        Assert.Null(BrowserKindParser.ParseOrNull("netscape"));
+        Assert.Null(BrowserKindParser.ParseOrNull(""));
+        Assert.Null(BrowserKindParser.ParseOrNull(null));
+    }
+
+    [Fact]
+    public void BrowserProfileWithoutPathsIsNotConfigured()
+    {
+        // A hand-edited config that names a family but no paths: the launcher must offer the
+        // profile dialog instead of starting something undefined.
         File.WriteAllText(_path, """
             {
-              "browser": { "type": "netscape" }
+              "browser": { "type": "firefox" }
             }
             """);
 
         var config = AppConfigStore.LoadOrCreate(_path);
 
-        Assert.Equal(BrowserKind.Firefox, config.Browser.EffectiveType);
+        Assert.Equal(BrowserKind.Firefox, config.Browser.Kind);
+        Assert.False(config.Browser.IsConfigured);
     }
 
     [Fact]

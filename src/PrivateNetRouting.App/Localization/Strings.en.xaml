@@ -102,10 +102,46 @@
     <s:String x:Key="Main.Launch.RestartedFmt">Claude restarted through the proxy ({0} s)</s:String>
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude is turned off in the config (apps.claude = false) — nothing to launch</s:String>
 
-    <!-- Browser launch (isolated profile) -->
-    <s:String x:Key="Main.Browser.DoneFmt">Browser launched (chain ready in {0} s)</s:String>
+    <!-- Browser profile: created once through the dialog, then started as it is -->
+    <s:String x:Key="Main.Browser.Done">Browser started with its own profile (the chain egress answers)</s:String>
+    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Browser started, but the chain egress is not responding — the pages will not open</s:String>
     <s:String x:Key="Main.Browser.Cancelled">browser launch cancelled</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
+    <s:String x:Key="Main.Browser.NotConfigured">the browser profile is not set up — create it from the "?" menu</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferTitle">The browser profile is not set up</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferFmt">The browser has no profile yet: it goes straight to the chain's own egress, past the application proxy. Create the profile now?</s:String>
+    <s:String x:Key="Main.Browser.ProfileCreatedFmt">browser profile created: {0}</s:String>
+    <s:String x:Key="Main.Browser.EgressDownTitle">The browser's proxy is not responding</s:String>
+    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">The chain's egress {0} is not answering. Raise the chain and start the browser?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownProceedFmt">The upstream {0} is not answering. Start the browser anyway?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownDeclined">browser not started: the egress is not responding</s:String>
+
+    <!-- Browser profile dialog -->
+    <s:String x:Key="BrowserProfile.Title">Create browser profile</s:String>
+    <s:String x:Key="BrowserProfile.Header">Create a browser profile</s:String>
+    <s:String x:Key="BrowserProfile.Intro">A separate browser profile: its traffic goes straight to the chain's own egress, past the application proxy, so the browser works on its own — from the application button or from the desktop shortcut. WebRTC is off in it, the tabs of the last session come back on start, and the startup offers are off.</s:String>
+    <s:String x:Key="BrowserProfile.ExistingFmt">Already set up: {0} — {1}. Creating a new profile replaces the setting; the folder of the old one stays on disk untouched.</s:String>
+    <s:String x:Key="BrowserProfile.Kind">Browser</s:String>
+    <s:String x:Key="BrowserProfile.Kind.Firefox">Firefox</s:String>
+    <s:String x:Key="BrowserProfile.Kind.Chrome">Chrome</s:String>
+    <s:String x:Key="BrowserProfile.Folder">Profile folder</s:String>
+    <s:String x:Key="BrowserProfile.FolderPickTitle">Select the profile folder</s:String>
+    <s:String x:Key="BrowserProfile.Browse">Browse…</s:String>
+    <s:String x:Key="BrowserProfile.FolderRequired">Specify the profile folder</s:String>
+    <s:String x:Key="BrowserProfile.FolderIsFileFmt">This path is a file, not a folder: {0}</s:String>
+    <s:String x:Key="BrowserProfile.FolderNotEmptyFmt">The folder is not empty: {0}. The profile files will be written next to the existing ones. Continue?</s:String>
+    <s:String x:Key="BrowserProfile.Executable">Browser executable</s:String>
+    <s:String x:Key="BrowserProfile.ExeNone">(not found)</s:String>
+    <s:String x:Key="BrowserProfile.ExeMissing">The browser was not found in the standard places — point at the executable yourself.</s:String>
+    <s:String x:Key="BrowserProfile.ExePickTitle">Select the browser executable</s:String>
+    <s:String x:Key="BrowserProfile.ExeFilter">Browser executable (*.exe)|*.exe|All files (*.*)|*.*</s:String>
+    <s:String x:Key="BrowserProfile.Specify">Specify…</s:String>
+    <s:String x:Key="BrowserProfile.Shortcut">Create a desktop shortcut</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutPathFmt">Shortcut: {0}</s:String>
+    <s:String x:Key="BrowserProfile.ConfirmTitle">Create the profile here?</s:String>
+    <s:String x:Key="BrowserProfile.Create">Create</s:String>
+    <s:String x:Key="BrowserProfile.Cancel">Cancel</s:String>
+    <s:String x:Key="BrowserProfile.ErrorTitle">The profile was not created</s:String>
     <s:String x:Key="Main.Codex.DoneFmt">Codex launched (chain ready in {0} s)</s:String>
     <s:String x:Key="Main.Codex.Cancelled">Codex launch cancelled</s:String>
     <s:String x:Key="Main.Codex.RestartedFmt">Codex restarted through the proxy ({0} s)</s:String>
@@ -256,6 +292,7 @@
     <s:String x:Key="Main.Help">Help</s:String>
     <s:String x:Key="Main.Help.Diagnostics">Diagnostics…</s:String>
     <s:String x:Key="Main.Help.OpenLogs">Open logs</s:String>
+    <s:String x:Key="Main.Help.CreateBrowserProfile">Create browser profile…</s:String>
     <s:String x:Key="Main.Help.CheckUpdates">Check for updates…</s:String>
     <s:String x:Key="Main.Help.About">About</s:String>
 

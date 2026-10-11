@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Launcher;
@@ -8,12 +10,14 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
-/// Browser launcher: bypass lists (Chromium and Firefox), user.js, Firefox and Chromium
-/// command lines, the "check → up → launch" order, modes, exe path fallback, "already running".
+/// Browser launcher: bypass lists (Chromium and Firefox), the egress probe, the launch command
+/// lines of both families, the dead-egress contract (question, chain raise in the tailscale mode,
+/// plain proceed over an external upstream), check-only and "already running".
 /// </summary>
 public class BrowserLauncherTests : IDisposable
 {
     private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-browser-{Guid.NewGuid():N}.log");
+    private readonly string _profileDir = Path.Combine(Path.GetTempPath(), $"pnr-test-profile-{Guid.NewGuid():N}");
     private readonly FileLog _log;
     private readonly FakeChain _chain = new();
     private readonly FakeProcessFinder _processes = new();
@@ -24,47 +28,49 @@ public class BrowserLauncherTests : IDisposable
         _log = new FileLog(_logPath);
     }
 
-    private static AppConfig NewConfig(BrowserKind kind = BrowserKind.Firefox) => new()
+    private static AppConfig NewConfig(BrowserKind kind = BrowserKind.Firefox, int egressPort = 18083) => new()
     {
-        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
+        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081", Socks5Upstream = "127.0.0.1:18099" },
+        Chain = new ChainConfig { DaemonSocksListen = $"127.0.0.1:{egressPort}" },
         Launcher = new LauncherConfig { BypassDomains = ["corp.example.com", ".team.example.net"] },
         Browser = new BrowserConfig
         {
-            Type = kind == BrowserKind.Chromium ? "chromium" : "firefox",
+            Type = kind == BrowserKind.Chrome ? "chrome" : "firefox",
             DirectTlds = ["ru", "by"],
-            Firefox = new BrowserFirefoxConfig
-            {
-                Path = @"C:\fake\firefox.exe",
-                ProfileDir = Path.Combine(AppContext.BaseDirectory, "pnr-test-ff-profile"),
-            },
-            Chromium = new BrowserChromiumConfig
-            {
-                Path = @"C:\fake\msedge.exe",
-                ProfileDir = Path.Combine(AppContext.BaseDirectory, "pnr-test-chromium-profile"),
-            },
         },
     };
 
-    private BrowserLauncher Create(
-        AppConfig? config = null,
-        bool healthy = true,
-        ChainException? chainFailure = null,
-        Func<string, bool>? fileExists = null)
+    private AppConfig ConfiguredConfig(BrowserKind kind = BrowserKind.Firefox, int egressPort = 18083)
     {
-        config ??= NewConfig();
+        var config = NewConfig(kind, egressPort);
+        config.Browser.ExecutablePath = @"C:\fake\browser.exe";
+        config.Browser.ProfileDir = _profileDir;
+        return config;
+    }
+
+    private BrowserLauncher Create(AppConfig config, ChainException? chainFailure = null)
+    {
         _chain.Failure = chainFailure;
         return new BrowserLauncher(
             config,
             _chain,
-            _ => Task.FromResult(healthy),
-            _processes,
             _log,
-            fileExists ?? (_ => true),
+            _processes,
             psi =>
             {
                 _started.Add(psi);
                 return null;
-            });
+            },
+            path => path == config.Browser.ExecutablePath);
+    }
+
+    /// <summary>A live listener on an ephemeral port: the probe of a ready egress.</summary>
+    private static TcpListener StartListener(out int port)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        return listener;
     }
 
     [Fact]
@@ -97,278 +103,371 @@ public class BrowserLauncherTests : IDisposable
         Assert.EndsWith("*.ru, *.su", list);
     }
 
-    [Fact]
-    public void UserJsCarriesProxyAndAllPrefsOfTheOldScheme()
-    {
-        var js = FirefoxUserJs.Render("127.0.0.1", 18082, "localhost, *.ru");
+    // ----- the egress the profile goes through -----
 
-        Assert.Contains(@"user_pref(""network.proxy.type"", 1);", js);
-        Assert.Contains(@"user_pref(""network.proxy.http"", ""127.0.0.1"");", js);
-        Assert.Contains(@"user_pref(""network.proxy.http_port"", 18082);", js);
-        Assert.Contains(@"user_pref(""network.proxy.ssl"", ""127.0.0.1"");", js);
-        Assert.Contains(@"user_pref(""network.proxy.ssl_port"", 18082);", js);
-        Assert.Contains(@"user_pref(""network.proxy.share_proxy_settings"", true);", js);
-        Assert.Contains(@"user_pref(""network.proxy.failover_direct"", false);", js);
-        Assert.Contains(@"user_pref(""network.proxy.no_proxies_on"", ""localhost, *.ru"");", js);
-        Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
-        Assert.Contains(@"user_pref(""browser.shell.checkDefaultBrowser"", false);", js);
-        Assert.Contains(@"user_pref(""datareporting.policy.dataSubmissionEnabled"", false);", js);
-        // WebRTC goes around the proxy and reveals the real address: off unless the owner lifts it
-        Assert.Contains(@"user_pref(""media.peerconnection.enabled"", false);", js);
-        Assert.Contains(@"user_pref(""media.navigator.enabled"", false);", js);
+    [Fact]
+    public void TailscaleEgressIsTheSidecarListenerAndSocks5IsTheExternalUpstream()
+    {
+        var config = ConfiguredConfig();
+        Assert.Equal(config.Chain.DaemonSocksListen, BrowserEgress.Resolve(config));
+        Assert.True(Create(config).ChainOwnsEgress); // a dead one is fixed by a chain bring-up
+
+        config.Chain.Mode = "socks5";
+        Assert.Equal(config.ForwardProxy.Socks5Upstream, BrowserEgress.Resolve(config));
+        Assert.False(Create(config).ChainOwnsEgress); // external: there is nothing of ours to raise
     }
 
     [Fact]
-    public void UserJsLeavesWebRtcAloneWhenTheConfigAllowsIt()
+    public async Task EgressProbeSeesALiveListenerAndARefusedPort()
     {
-        var js = FirefoxUserJs.Render("127.0.0.1", 18082, "localhost, *.ru", disableWebRtc: false);
+        var listener = StartListener(out var port);
+        try
+        {
+            var launcher = Create(ConfiguredConfig(egressPort: port));
+            Assert.True(await launcher.IsEgressReachableAsync(CancellationToken.None));
+        }
+        finally
+        {
+            listener.Stop();
+        }
 
-        Assert.DoesNotContain("peerconnection", js);
-        Assert.DoesNotContain("media.navigator", js);
-        Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
+        // nothing listens on the port any more: refused, and the launcher says so in the log
+        var dead = Create(ConfiguredConfig(egressPort: port));
+        Assert.False(await dead.IsEgressReachableAsync(CancellationToken.None));
+        Assert.Contains("is not responding", ReadLog());
     }
 
     [Fact]
-    public async Task HealthyChainLaunchesFirefoxWithProfileAndNewInstance()
+    public async Task EgressProbeHonoursCancellation()
+    {
+        var launcher = Create(ConfiguredConfig());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => launcher.IsEgressReachableAsync(cts.Token));
+    }
+
+    // ----- launch -----
+
+    [Fact]
+    public async Task ReadyEgressLaunchesFirefoxWithTheProfileAndNoUrl()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(egressPort: port);
+        try
+        {
+            var result = await Create(config)
+                .LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+            Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
+            Assert.True(result.EgressResponded);
+            Assert.Equal(0, _chain.EnsureCalls); // a ready egress needs no bring-up
+            var psi = Assert.Single(_started);
+            Assert.Equal(@"C:\fake\browser.exe", psi.FileName);
+            Assert.Equal(["-profile", _profileDir, "--new-instance"], psi.ArgumentList);
+
+            // user.js is refreshed on every application launch: the egress address and the bypass list
+            var userJs = await File.ReadAllTextAsync(Path.Combine(_profileDir, "user.js"));
+            Assert.Contains(@"user_pref(""network.proxy.socks"", ""127.0.0.1"");", userJs);
+            Assert.Contains($@"user_pref(""network.proxy.socks_port"", {port});", userJs);
+            Assert.Contains("*.ru", userJs);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task PrivateAndUrlOptionsOnlyComeFromTheCaller()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(egressPort: port);
+        try
+        {
+            await Create(config).LaunchAsync(
+                new BrowserLauncherOptions(Private: true, Url: "https://example.org"),
+                null,
+                CancellationToken.None);
+
+            Assert.Equal(
+                ["-profile", _profileDir, "--new-instance", "-private-window", "https://example.org"],
+                Assert.Single(_started).ArgumentList);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task ChromeLaunchesThroughTheEgressWithTheProfileFlags()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(BrowserKind.Chrome, port);
+        try
+        {
+            var result = await Create(config).LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+            Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
+            var psi = Assert.Single(_started);
+            Assert.Equal(
+                [
+                    $"--proxy-server=socks5://127.0.0.1:{port}",
+                    "--proxy-bypass-list=<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local;corp.example.com;*.corp.example.com;team.example.net;*.team.example.net;*.ru;*.by",
+                    // WebRTC is handled by the profile's policy alone: the command-line switch of
+                    // the family is gone from current builds (verified live on Chrome 155)
+                    $"--user-data-dir={_profileDir}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--restore-last-session",
+                ],
+                psi.ArgumentList);
+
+            // Chromium has no user.js; the profile files are written by the creation dialog alone
+            Assert.False(File.Exists(Path.Combine(_profileDir, "user.js")));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task UnconfiguredProfileRefusesToLaunch()
     {
         var config = NewConfig();
+        config.Browser.ExecutablePath = "";
+        config.Browser.ProfileDir = "";
         var launcher = Create(config);
 
-        var result = await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+        Assert.False(launcher.IsConfigured);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
 
+        Assert.Contains("not created", error.Message);
+        Assert.Empty(_started);
+    }
+
+    // ----- a dead egress -----
+
+    [Fact]
+    public async Task DeadEgressInTailscaleRaisesTheChainAfterAConfirmation()
+    {
+        var listener = StartListener(out var port);
+        listener.Stop();
+        var config = ConfiguredConfig(egressPort: port);
+        var asked = 0;
+
+        var result = await Create(config).LaunchAsync(
+            BrowserLauncherOptions.Default with
+            {
+                ConfirmDeadEgress = _ =>
+                {
+                    asked++;
+                    return Task.FromResult(true);
+                },
+            },
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(1, asked);
+        Assert.Equal(1, _chain.EnsureCalls); // the egress belongs to our chain: the answer raises it
         Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
-        Assert.False(result.ChainRaised);
-        Assert.Equal(0, _chain.EnsureCalls);
-        var psi = Assert.Single(_started);
-        Assert.Equal(@"C:\fake\firefox.exe", psi.FileName);
-        Assert.Equal(
-            ["-profile", config.Browser.Firefox.ProfileDir, "--new-instance", "https://claude.ai"],
-            psi.ArgumentList);
-        // user.js is rewritten on every launch, with the proxy address from the app config
-        var userJs = await File.ReadAllTextAsync(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js"));
-        Assert.Contains(@"user_pref(""network.proxy.http_port"", 18082);", userJs);
-        Assert.Contains("team.example.net", userJs);
-        Assert.Contains("*.ru", userJs);
-        Assert.Contains(@"user_pref(""media.peerconnection.enabled"", false);", userJs);
-        Assert.Contains("WebRTC off", ReadLog());
-    }
-
-    [Fact]
-    public async Task ConfiguredWebRtcIsNotSwitchedOffInUserJs()
-    {
-        var config = NewConfig();
-        config.Browser.DisableWebRtc = false;
-        var launcher = Create(config);
-
-        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        var userJs = await File.ReadAllTextAsync(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js"));
-        Assert.DoesNotContain("peerconnection", userJs);
-        Assert.Contains("WebRTC on", ReadLog());
-    }
-
-    [Fact]
-    public async Task PrivateOptionOpensPrivateWindow()
-    {
-        var config = NewConfig();
-        var launcher = Create(config);
-
-        await launcher.LaunchAsync(new BrowserLauncherOptions(Private: true), null, CancellationToken.None);
-
-        var psi = Assert.Single(_started);
-        Assert.Equal(
-            ["-profile", config.Browser.Firefox.ProfileDir, "--new-instance", "-private-window", "https://claude.ai"],
-            psi.ArgumentList);
-    }
-
-    [Fact]
-    public async Task ConfigPrivateWindowOpensPrivateWindowToo()
-    {
-        var config = NewConfig();
-        config.Browser.Private = true;
-        var launcher = Create(config);
-
-        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        var psi = Assert.Single(_started);
-        Assert.Contains("-private-window", psi.ArgumentList);
-    }
-
-    [Fact]
-    public async Task UrlOptionOverridesConfig()
-    {
-        var launcher = Create(NewConfig());
-
-        await launcher.LaunchAsync(new BrowserLauncherOptions(Url: "https://example.org"), null, CancellationToken.None);
-
-        Assert.Equal("https://example.org", Assert.Single(_started).ArgumentList[^1]);
-    }
-
-    [Fact]
-    public async Task ChromiumLaunchesWithProxyFlagsAndUserDataDir()
-    {
-        var config = NewConfig(BrowserKind.Chromium);
-        var launcher = Create(config);
-
-        var result = await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
-        var psi = Assert.Single(_started);
-        Assert.Equal(@"C:\fake\msedge.exe", psi.FileName);
-        Assert.Equal(
-            [
-                "--proxy-server=http://127.0.0.1:18082",
-                "--proxy-bypass-list=<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local;corp.example.com;*.corp.example.com;team.example.net;*.team.example.net;*.ru;*.by",
-                // No full WebRTC switch exists in the family: the policy is the most it can be pinned down
-                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-                $"--user-data-dir={config.Browser.Chromium.ProfileDir}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "https://claude.ai",
-            ],
-            psi.ArgumentList);
-        // Chromium has no user.js; the browser itself creates the profile on first launch
-        Assert.False(File.Exists(Path.Combine(config.Browser.Chromium.ProfileDir, "user.js")));
-    }
-
-    [Fact]
-    public async Task ConfiguredWebRtcLeavesTheChromiumPolicyOut()
-    {
-        var config = NewConfig(BrowserKind.Chromium);
-        config.Browser.DisableWebRtc = false;
-        var launcher = Create(config);
-
-        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        Assert.DoesNotContain(
-            Assert.Single(_started).ArgumentList,
-            arg => arg.Contains("webrtc", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task ChromiumPrivateAddsIncognito()
-    {
-        var config = NewConfig(BrowserKind.Chromium);
-        var launcher = Create(config);
-
-        await launcher.LaunchAsync(new BrowserLauncherOptions(Private: true), null, CancellationToken.None);
-
-        var args = Assert.Single(_started).ArgumentList;
-        Assert.Equal("--incognito", args[^2]);
-        Assert.Equal("https://claude.ai", args[^1]);
-    }
-
-    [Fact]
-    public async Task DeadChainIsRaisedBeforeBrowserLaunch()
-    {
-        var launcher = Create(healthy: false);
-
-        var result = await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
-        Assert.True(result.ChainRaised);
-        Assert.Equal(1, _chain.EnsureCalls);
+        Assert.False(result.EgressResponded);
         Assert.Single(_started);
     }
 
     [Fact]
-    public async Task ChainFailureStopsLaunch()
+    public async Task DeadEgressOverAnExternalUpstreamOnlyAsksAndLaunchesAnyway()
     {
-        var launcher = Create(healthy: false, chainFailure: new ChainException("daemon", new IOException("UAC declined")));
+        var listener = StartListener(out var port);
+        listener.Stop();
+        var config = ConfiguredConfig(BrowserKind.Chrome, port);
+        config.Chain.Mode = "socks5";
+        config.ForwardProxy.Socks5Upstream = $"127.0.0.1:{port}"; // the dead port is the external upstream
 
-        await Assert.ThrowsAsync<ChainException>(() =>
-            launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
+        var result = await Create(config).LaunchAsync(
+            BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(true) },
+            null,
+            CancellationToken.None);
 
+        Assert.Equal(0, _chain.EnsureCalls); // nothing of ours is in that path
+        Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
+        Assert.False(result.EgressResponded);
+        Assert.Single(_started);
+    }
+
+    [Fact]
+    public async Task RefusedQuestionOverADeadEgressStartsNothing()
+    {
+        var listener = StartListener(out var port);
+        listener.Stop();
+
+        var result = await Create(ConfiguredConfig(egressPort: port)).LaunchAsync(
+            BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(false) },
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(BrowserLaunchOutcome.Cancelled, result.Outcome);
+        Assert.Equal(0, _chain.EnsureCalls);
         Assert.Empty(_started);
     }
 
     [Fact]
-    public async Task CheckOnlyRaisesChainWithoutStartingBrowser()
+    public async Task DeadEgressWithoutAQuestionFailsTheLaunch()
     {
-        var config = NewConfig();
-        var launcher = Create(config, healthy: false);
-
-        var result = await launcher.LaunchAsync(new BrowserLauncherOptions(CheckOnly: true), null, CancellationToken.None);
-
-        Assert.Equal(BrowserLaunchOutcome.CheckOnly, result.Outcome);
-        Assert.Equal(1, _chain.EnsureCalls);
-        Assert.Empty(_started);
-        Assert.False(File.Exists(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js")));
-    }
-
-    [Fact]
-    public async Task PrepareOnlyWritesUserJsButDoesNotStartBrowser()
-    {
-        var config = NewConfig();
-        var launcher = Create(config);
-
-        var result = await launcher.LaunchAsync(new BrowserLauncherOptions(PrepareOnly: true), null, CancellationToken.None);
-
-        Assert.Equal(BrowserLaunchOutcome.Prepared, result.Outcome);
-        Assert.Empty(_started);
-        var userJs = await File.ReadAllTextAsync(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js"));
-        Assert.Contains(@"user_pref(""network.proxy.http_port"", 18082);", userJs);
-    }
-
-    [Fact]
-    public async Task PrepareOnlyChromiumNeedsNoPreparation()
-    {
-        var config = NewConfig(BrowserKind.Chromium);
-        var launcher = Create(config);
-
-        var result = await launcher.LaunchAsync(new BrowserLauncherOptions(PrepareOnly: true), null, CancellationToken.None);
-
-        Assert.Equal(BrowserLaunchOutcome.Prepared, result.Outcome);
-        Assert.Empty(_started);
-        Assert.False(Directory.Exists(config.Browser.Chromium.ProfileDir));
-    }
-
-    [Fact]
-    public async Task MissingExecutableFallsBackToSecondStandardPath()
-    {
-        var fallback = Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe");
-        var launcher = Create(fileExists: path => path == fallback);
-
-        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
-
-        Assert.Equal(fallback, Assert.Single(_started).FileName);
-        Assert.Contains("using fallback", ReadLog());
-    }
-
-    [Fact]
-    public async Task MissingEverywhereFailsWithClearError()
-    {
-        var launcher = Create(fileExists: _ => false);
+        var listener = StartListener(out var port);
+        listener.Stop();
 
         var error = await Assert.ThrowsAsync<IOException>(() =>
-            launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
+            Create(ConfiguredConfig(egressPort: port))
+                .LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
 
-        Assert.Contains("browser executable not found", error.Message);
+        Assert.Contains("not responding", error.Message);
         Assert.Empty(_started);
     }
 
     [Fact]
-    public void IsOurBrowserRunningMatchesProfileDir()
+    public async Task ChainFailureDuringTheRaiseReachesTheCaller()
     {
-        var config = NewConfig();
+        var listener = StartListener(out var port);
+        listener.Stop();
+        var launcher = Create(
+            ConfiguredConfig(egressPort: port),
+            chainFailure: new ChainException("daemon", new IOException("UAC declined")));
+
+        await Assert.ThrowsAsync<ChainException>(() => launcher.LaunchAsync(
+            BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(true) },
+            null,
+            CancellationToken.None));
+
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public async Task CheckOnlyReportsTheEgressWithoutStartingAnything()
+    {
+        var listener = StartListener(out var port);
+        try
+        {
+            var config = ConfiguredConfig(egressPort: port);
+            var result = await Create(config)
+                .LaunchAsync(new BrowserLauncherOptions(CheckOnly: true), null, CancellationToken.None);
+
+            Assert.Equal(BrowserLaunchOutcome.CheckOnly, result.Outcome);
+            Assert.True(result.EgressResponded);
+            Assert.Equal(0, _chain.EnsureCalls); // the chain is not touched: `pnr chain up` is the way
+            Assert.Empty(_started);
+            Assert.False(File.Exists(Path.Combine(_profileDir, "user.js")));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    // ----- executable and "already running" -----
+
+    [Fact]
+    public async Task MissingConfiguredExecutableFallsBackToTheStandardPlaces()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(egressPort: port);
+        config.Browser.ExecutablePath = @"C:\gone\firefox.exe";
+        var fallback = BrowserExecutableLocator.Candidates(BrowserKind.Firefox)[0];
+        var launcher = new BrowserLauncher(
+            config,
+            _chain,
+            _log,
+            _processes,
+            psi =>
+            {
+                _started.Add(psi);
+                return null;
+            },
+            path => path == fallback);
+        try
+        {
+            await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+            Assert.Equal(fallback, Assert.Single(_started).FileName);
+            Assert.Contains("the configured executable is not available", ReadLog());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task MissingEverywhereFailsWithAClearError()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(egressPort: port);
+        var launcher = new BrowserLauncher(
+            config,
+            _chain,
+            _log,
+            _processes,
+            psi =>
+            {
+                _started.Add(psi);
+                return null;
+            },
+            _ => false);
+        try
+        {
+            var error = await Assert.ThrowsAsync<IOException>(() =>
+                launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
+
+            Assert.Contains("browser executable not found", error.Message);
+            Assert.Empty(_started);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public void IsOurBrowserRunningMatchesTheProfileDirectory()
+    {
+        var config = ConfiguredConfig();
+        config.Browser.ExecutablePath = @"C:\fake\firefox.exe";
         var launcher = Create(config);
 
         Assert.False(launcher.IsOurBrowserRunning());
 
-        _processes.Processes = [new FoundProcess(1, $"firefox.exe -profile \"{config.Browser.Firefox.ProfileDir}\" --new-instance https://claude.ai")];
+        _processes.Processes = [new FoundProcess(1, $"firefox.exe -profile \"{_profileDir}\" --new-instance")];
         Assert.True(launcher.IsOurBrowserRunning());
 
-        _processes.Processes = [new FoundProcess(2, "firefox.exe -profile \"C:\\daily\\profile\" https://claude.ai")];
+        _processes.Processes = [new FoundProcess(2, @"firefox.exe -profile C:\daily\profile")];
         Assert.False(launcher.IsOurBrowserRunning());
     }
 
     [Fact]
-    public void IsOurBrowserRunningMatchesChromiumUserDataDir()
+    public void IsOurBrowserRunningIsFalseWithoutAProfile()
     {
-        var config = NewConfig(BrowserKind.Chromium);
+        var config = NewConfig();
+        config.Browser.ExecutablePath = "";
+        config.Browser.ProfileDir = "";
         var launcher = Create(config);
 
-        _processes.Processes = [new FoundProcess(3, $"msedge.exe --user-data-dir={config.Browser.Chromium.ProfileDir} --no-first-run")];
+        _processes.Processes = [new FoundProcess(3, "firefox.exe -profile C:\\somewhere")];
+
+        Assert.False(launcher.IsOurBrowserRunning());
+    }
+
+    [Fact]
+    public void IsOurBrowserRunningMatchesTheChromeUserDataDir()
+    {
+        var config = ConfiguredConfig(BrowserKind.Chrome);
+        config.Browser.ExecutablePath = @"C:\fake\chrome.exe";
+        var launcher = Create(config);
+
+        _processes.Processes = [new FoundProcess(3, $"chrome.exe --user-data-dir={_profileDir} --no-first-run")];
+
         Assert.True(launcher.IsOurBrowserRunning());
     }
 
@@ -418,16 +517,9 @@ public class BrowserLauncherTests : IDisposable
             File.Delete(_logPath);
         }
 
-        foreach (var profile in new[]
-                 {
-                     Path.Combine(AppContext.BaseDirectory, "pnr-test-ff-profile"),
-                     Path.Combine(AppContext.BaseDirectory, "pnr-test-chromium-profile"),
-                 })
+        if (Directory.Exists(_profileDir))
         {
-            if (Directory.Exists(profile))
-            {
-                Directory.Delete(profile, recursive: true);
-            }
+            Directory.Delete(_profileDir, recursive: true);
         }
     }
 }

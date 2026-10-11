@@ -102,10 +102,46 @@
     <s:String x:Key="Main.Launch.RestartedFmt">Claude перезапущен через прокси ({0} с)</s:String>
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude отключён в конфиге (apps.claude = false) — запускать нечего</s:String>
 
-    <!-- Browser launch (isolated profile) -->
-    <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
+    <!-- Профиль браузера: создаётся один раз диалогом, дальше запускается как есть -->
+    <s:String x:Key="Main.Browser.Done">Браузер запущен со своим профилем (выход цепочки отвечает)</s:String>
+    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Браузер запущен, но выход цепочки не отвечает — страницы не откроются</s:String>
     <s:String x:Key="Main.Browser.Cancelled">запуск браузера отменён</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
+    <s:String x:Key="Main.Browser.NotConfigured">профиль браузера не настроен — создайте его в меню «?»</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferTitle">Профиль браузера не создан</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferFmt">У браузера ещё нет профиля: он ходит напрямую в собственный выход цепочки, мимо прокси приложения. Создать профиль сейчас?</s:String>
+    <s:String x:Key="Main.Browser.ProfileCreatedFmt">профиль браузера создан: {0}</s:String>
+    <s:String x:Key="Main.Browser.EgressDownTitle">Прокси браузера не отвечает</s:String>
+    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">Выход цепочки {0} не отвечает. Поднять цепочку и запустить браузер?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownProceedFmt">Апстрим {0} не отвечает. Запустить браузер всё равно?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownDeclined">браузер не запущен: выход не отвечает</s:String>
+
+    <!-- Диалог создания профиля браузера -->
+    <s:String x:Key="BrowserProfile.Title">Создание прокси-профиля браузера</s:String>
+    <s:String x:Key="BrowserProfile.Header">Создать прокси-профиль браузера</s:String>
+    <s:String x:Key="BrowserProfile.Intro">Отдельный профиль браузера: его трафик идёт напрямую в собственный выход цепочки, мимо прокси приложения, поэтому браузер работает сам по себе — и по кнопке в приложении, и по ярлыку на рабочем столе. В нём выключен WebRTC, вкладки прошлой сессии возвращаются при запуске, стартовые предложения отключены.</s:String>
+    <s:String x:Key="BrowserProfile.ExistingFmt">Уже настроено: {0} — {1}. Создание нового профиля заменит настройку; папка старого останется на диске нетронутой.</s:String>
+    <s:String x:Key="BrowserProfile.Kind">Браузер</s:String>
+    <s:String x:Key="BrowserProfile.Kind.Firefox">Firefox</s:String>
+    <s:String x:Key="BrowserProfile.Kind.Chrome">Chrome</s:String>
+    <s:String x:Key="BrowserProfile.Folder">Папка профиля</s:String>
+    <s:String x:Key="BrowserProfile.FolderPickTitle">Выберите папку профиля</s:String>
+    <s:String x:Key="BrowserProfile.Browse">Обзор…</s:String>
+    <s:String x:Key="BrowserProfile.FolderRequired">Укажите папку профиля</s:String>
+    <s:String x:Key="BrowserProfile.FolderIsFileFmt">По этому пути файл, а не папка: {0}</s:String>
+    <s:String x:Key="BrowserProfile.FolderNotEmptyFmt">Папка не пуста: {0}. Файлы профиля лягут рядом с существующими. Продолжить?</s:String>
+    <s:String x:Key="BrowserProfile.Executable">Исполняемый файл браузера</s:String>
+    <s:String x:Key="BrowserProfile.ExeNone">(не найден)</s:String>
+    <s:String x:Key="BrowserProfile.ExeMissing">Браузер не найден в стандартных местах — укажите исполняемый файл сами.</s:String>
+    <s:String x:Key="BrowserProfile.ExePickTitle">Выберите исполняемый файл браузера</s:String>
+    <s:String x:Key="BrowserProfile.ExeFilter">Исполняемый файл браузера (*.exe)|*.exe|Все файлы (*.*)|*.*</s:String>
+    <s:String x:Key="BrowserProfile.Specify">Указать…</s:String>
+    <s:String x:Key="BrowserProfile.Shortcut">Создать ярлык на рабочем столе</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutPathFmt">Ярлык: {0}</s:String>
+    <s:String x:Key="BrowserProfile.ConfirmTitle">Создать профиль здесь?</s:String>
+    <s:String x:Key="BrowserProfile.Create">Создать</s:String>
+    <s:String x:Key="BrowserProfile.Cancel">Отмена</s:String>
+    <s:String x:Key="BrowserProfile.ErrorTitle">Профиль не создан</s:String>
     <s:String x:Key="Main.Codex.DoneFmt">Codex запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Codex.Cancelled">Запуск Codex отменён</s:String>
     <s:String x:Key="Main.Codex.RestartedFmt">Codex перезапущен через прокси ({0} с)</s:String>
@@ -256,6 +292,7 @@
     <s:String x:Key="Main.Help">Справка</s:String>
     <s:String x:Key="Main.Help.Diagnostics">Диагностика…</s:String>
     <s:String x:Key="Main.Help.OpenLogs">Открыть логи</s:String>
+    <s:String x:Key="Main.Help.CreateBrowserProfile">Создать прокси-профиль браузера…</s:String>
     <s:String x:Key="Main.Help.CheckUpdates">Проверить обновления…</s:String>
     <s:String x:Key="Main.Help.About">О программе</s:String>
 

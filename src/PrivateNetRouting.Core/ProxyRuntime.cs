@@ -46,6 +46,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public BrowserLauncher Browser { get; }
 
+    /// <summary>Creation of the browser profile (the "?" help menu dialog): the profile files, the desktop shortcut and the write-back into the user config.</summary>
+    public BrowserProfileService BrowserProfile { get; }
+
     public WatchdogService Watchdog { get; }
 
     /// <summary>Idle stopper lifecycle from the outside: the detached worker start/stop, liveness by command lines.</summary>
@@ -88,7 +91,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
@@ -103,6 +106,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _codexLauncherLog = codexLauncherLog;
         Browser = browser;
         _browserLog = browserLog;
+        BrowserProfile = browserProfile;
         Watchdog = watchdog;
         _watchdogLog = watchdogLog;
         WatchdogControl = watchdogControl;
@@ -234,19 +238,27 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var browser = new BrowserLauncher(
             config,
             chain,
-            ct => ChainHealthAsync(config, ct),
-            processes,
-            browserLog);
+            browserLog,
+            processes);
+        var browserProfile = new BrowserProfileService(config, new WScriptShortcutFactory(), browserLog);
 
         IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
             ? null
             : new WslClaudeHostStopper(config.Watchdog.WslDistro, new WslProcessRunner());
+        // The idle stopper also reads the chain's egress listener: the browser profile goes straight
+        // there (mitigating the application proxy), so its live connections are what keeps the chain
+        // from being stopped under an open browser. In the socks5 mode the egress is external —
+        // stopping the chain does not cut the browser, and the port means nothing (0).
+        var egressPort = config.Chain.EffectiveMode == ChainMode.Socks5
+            ? 0
+            : Socks5Client.ParseEndPoint(config.Chain.DaemonSocksListen).Port;
         var usage = new ClaudeUsageProbe(
             processes,
             new TcpEstablishedConnectionCounter(),
             Socks5Client.ParseEndPoint(fp.Listen).Port,
             fp.ActivityMarkerPath,
-            config.Codex.ProcessName);
+            config.Codex.ProcessName,
+            egressPort);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
@@ -317,7 +329,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             guard.GetCoreStatusAsync,
             logs);
 
-        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
+        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserProfile, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -1229,10 +1230,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Browser launch: the chain is checked with a live CONNECT roundtrip and brought up
-    /// idempotently if it is down; the bring-up runs in the chain card, in the main window.
-    /// An already running instance of ours is not duplicated (Firefox on the same profile hits a
-    /// lock) — a note in the result line.
+    /// Browser launch: the profile created once by the "?" menu goes straight to the chain's own
+    /// egress, so the application brings nothing into its path — the profile only has to exist and
+    /// the egress has to answer (a dead one in the tailscale mode is offered a chain bring-up, the
+    /// chain card draws it). An already running instance of ours is not duplicated (a second
+    /// Firefox on the same profile hits the profile lock) — a note in the result line.
     /// </summary>
     private async void OnLaunchBrowser(object sender, RoutedEventArgs e) => await RunBrowserLaunchAsync();
 
@@ -1247,6 +1249,21 @@ public partial class MainWindow : Window
         if (_launchBusy)
         {
             return;
+        }
+
+        if (!_runtime.Browser.IsConfigured)
+        {
+            // The first click without a profile: a warning with an offer to create one right here.
+            if (!OfferBrowserProfileCreation())
+            {
+                _viewModel.SetCheckResult("Main.Browser.NotConfigured");
+                return;
+            }
+
+            if (!_runtime.Browser.IsConfigured)
+            {
+                return; // the dialog was closed without creating anything
+            }
         }
 
         bool browserRunning;
@@ -1269,22 +1286,61 @@ public partial class MainWindow : Window
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
         var success = false;
-        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        var chainWasDown = false; // set by the confirmation: the launch raises the chain only then
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
         {
-            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
-            chainWasDown = !healthy;
-            if (!healthy)
+            // The question about an egress that did not answer, asked by the launcher before the
+            // launch. The egress of the tailscale mode is the chain's own listener: yes raises the
+            // chain (drawn in the card, exactly like a manual bring-up) and the launch goes on.
+            // Over an external socks5 upstream there is nothing to raise — the question is only
+            // whether to start with an upstream that is down. The launcher's callback runs off the
+            // UI thread, so the question and the bring-up are marshalled back here.
+            var confirmDeadEgress = (CancellationToken ct) => Dispatcher.InvokeAsync(async () =>
             {
-                BeginOperation();
-            }
+                var egress = _runtime.Browser.EgressEndpoint;
+                if (!_runtime.Browser.ChainOwnsEgress)
+                {
+                    return MessageBox.Show(
+                        this,
+                        Loc.F("Main.Browser.EgressDownProceedFmt", egress),
+                        Loc.S("Main.Browser.EgressDownTitle"),
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning) == MessageBoxResult.Yes;
+                }
 
-            var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.Browser.LaunchAsync(BrowserLauncherOptions.Default, progress, cts.Token);
-            _viewModel.SetCheckResult("Main.Browser.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
-            success = true;
+                if (MessageBox.Show(
+                        this,
+                        Loc.F("Main.Browser.EgressDownRaiseFmt", egress),
+                        Loc.S("Main.Browser.EgressDownTitle"),
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                {
+                    return false;
+                }
+
+                BeginOperation();
+                chainWasDown = true;
+                await _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct);
+                return true;
+            }).Task.Unwrap();
+
+            var options = BrowserLauncherOptions.Default with
+            {
+                ConfirmDeadEgress = confirmDeadEgress,
+            };
+            var result = await _runtime.Browser.LaunchAsync(options, new Progress<ChainStep>(OnChainStep), cts.Token);
+            if (result.Outcome == BrowserLaunchOutcome.Cancelled)
+            {
+                _viewModel.SetCheckResult("Main.Browser.EgressDownDeclined");
+            }
+            else
+            {
+                _viewModel.SetCheckResult(
+                    result.EgressResponded ? "Main.Browser.Done" : "Main.Browser.DoneOverDeadEgress");
+                success = true;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1320,6 +1376,39 @@ public partial class MainWindow : Window
             await RefreshChainAsync();
             await RefreshIdleStopAsync();
         }
+    }
+
+    /// <summary>
+    /// The first click on "Browser" without a profile: a warning with an offer to create one, then
+    /// the dialog itself. True — the profile exists after the dialog.
+    /// </summary>
+    private bool OfferBrowserProfileCreation()
+    {
+        var answer = MessageBox.Show(
+            this,
+            Loc.S("Main.Browser.CreateOfferFmt"),
+            Loc.S("Main.Browser.CreateOfferTitle"),
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return answer == MessageBoxResult.Yes && ShowBrowserProfileDialog();
+    }
+
+    /// <summary>The creation dialog (modal, the same from the help menu and from the first click); true — the profile exists after it.</summary>
+    private bool ShowBrowserProfileDialog()
+    {
+        var dialog = new BrowserProfileWindow(_runtime.Config, _runtime.BrowserProfile, _runtime.Browser.Log)
+        {
+            Owner = this,
+        };
+        var created = dialog.ShowDialog() == true;
+        if (created && dialog.Result is { } result)
+        {
+            _viewModel.SetCheckResult(
+                "Main.Browser.ProfileCreatedFmt",
+                result.ProfileDir + (result.ShortcutPath.Length > 0 ? $" (+ {Path.GetFileName(result.ShortcutPath)})" : ""));
+        }
+
+        return created;
     }
 
     /// <summary>
@@ -1519,12 +1608,19 @@ public partial class MainWindow : Window
         };
         menu.Items.Add(MakeHelpItem("Main.Help.Diagnostics", OnDiagnostics));
         menu.Items.Add(MakeHelpItem("Main.Help.OpenLogs", OnOpenLogs));
+        menu.Items.Add(MakeHelpItem("Main.Help.CreateBrowserProfile", OnCreateBrowserProfile));
         menu.Items.Add(MakeHelpItem("Main.Help.CheckUpdates", OnCheckAppUpdates));
         menu.Items.Add(new Separator());
         menu.Items.Add(MakeHelpItem("Main.Help.About", OnAbout));
         HelpButton.ContextMenu = menu;
         menu.IsOpen = true;
     }
+
+    /// <summary>
+    /// Creation (or re-creation) of the browser profile from the help menu: the same dialog the
+    /// first click on "Browser" offers. The dialog is modal — the profile is either written or not.
+    /// </summary>
+    private void OnCreateBrowserProfile(object sender, RoutedEventArgs e) => ShowBrowserProfileDialog();
 
     private static MenuItem MakeHelpItem(string key, RoutedEventHandler onClick)
     {

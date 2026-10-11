@@ -432,6 +432,7 @@ internal static class Program
     {
         var options = BrowserLauncherOptions.Default;
         string? url = null;
+        var assumeYes = false;
         for (var i = 0; i < rest.Count; i++)
         {
             switch (rest[i])
@@ -439,11 +440,11 @@ internal static class Program
                 case "--check-only":
                     options = options with { CheckOnly = true };
                     break;
-                case "--prepare-only":
-                    options = options with { PrepareOnly = true };
-                    break;
                 case "--private":
                     options = options with { Private = true };
+                    break;
+                case "--yes":
+                    assumeYes = true;
                     break;
                 case "--url":
                     if (i + 1 >= rest.Count)
@@ -455,7 +456,7 @@ internal static class Program
                     url = rest[++i];
                     break;
                 default:
-                    Console.Error.WriteLine($"unknown option: {rest[i]} (--check-only | --prepare-only | --private | --url <url>)");
+                    Console.Error.WriteLine($"unknown option: {rest[i]} (--check-only | --private | --yes | --url <url>)");
                     return 1;
             }
         }
@@ -467,23 +468,62 @@ internal static class Program
 
         var config = AppConfigStore.LoadOrCreate();
         await using var runtime = ProxyRuntime.FromConfig(config);
-        if (!options.CheckOnly && runtime.Browser.IsOurBrowserRunning())
+        if (!runtime.Browser.IsConfigured)
         {
-            Console.WriteLine("browser is already running with our profile — bringing it up is up to the taskbar");
+            Console.Error.WriteLine(
+                "the browser profile is not created yet — create it in the application (\"?\" → \"Create browser profile…\")");
+            return 1;
+        }
+
+        if (options.CheckOnly)
+        {
+            // read-only: the chain is not touched, use `pnr chain up` for that
+            var reachable = await runtime.Browser.IsEgressReachableAsync(CancellationToken.None);
+            Console.WriteLine(reachable
+                ? $"OK: the egress {runtime.Browser.EgressEndpoint} responds"
+                : $"the egress {runtime.Browser.EgressEndpoint} is not responding");
+            return reachable ? 0 : 1;
+        }
+
+        if (runtime.Browser.IsOurBrowserRunning())
+        {
+            Console.WriteLine("the browser is already running with our profile — bringing it up is up to the taskbar");
             return 0;
+        }
+
+        // A dead egress: in the tailscale mode the egress is the chain's own listener and a
+        // confirmed answer raises the chain (the launcher does that); over an external upstream
+        // there is nothing to raise — the question is only whether to start anyway.
+        Task<bool> ConfirmDeadEgress(CancellationToken ct)
+        {
+            var egress = runtime.Browser.EgressEndpoint;
+            if (assumeYes)
+            {
+                return Task.FromResult(true);
+            }
+
+            Console.Write(runtime.Browser.ChainOwnsEgress
+                ? $"the chain's egress {egress} is not responding. Raise the chain and start the browser? [y/N]: "
+                : $"the upstream {egress} is not responding. Start the browser anyway? [y/N]: ");
+            return Task.FromResult(Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes");
         }
 
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
-        var result = await runtime.Browser.LaunchAsync(options, progress, CancellationToken.None);
+        var result = await runtime.Browser.LaunchAsync(
+            options with { ConfirmDeadEgress = ConfirmDeadEgress },
+            progress,
+            CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
-        if (result.Outcome != BrowserLaunchOutcome.Launched)
+        if (result.Outcome == BrowserLaunchOutcome.Cancelled)
         {
-            Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
+            Console.WriteLine("launch cancelled: the egress is not responding");
             return 0;
         }
 
-        Console.WriteLine($"browser launched (proxy {runtime.Browser.ProxyUrl}, chain raised: {result.ChainRaised})");
+        Console.WriteLine(result.EgressResponded
+            ? $"browser launched over the ready egress {runtime.Browser.EgressEndpoint}"
+            : $"browser launched over the egress {runtime.Browser.EgressEndpoint} that had not answered");
         return 0;
     }
 
@@ -1026,10 +1066,14 @@ internal static class Program
                                  bringing the chain up if needed (splash is GUI-only);
                                  --restart closes a copy already running without our proxy
                                  and starts it again through the proxy
-            pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]
-                                 start the browser with an isolated profile and the app's
-                                 proxy (firefox user.js / chromium flags, browser.* config);
-                                 --prepare-only writes the profile without opening it
+            pnr browser [--check-only] [--private] [--yes] [--url <url>]
+                                 start the browser with the profile created once through the
+                                 application ("?" -> "Create browser profile..."): it goes straight
+                                 to the chain's own egress (browser.* config), not through the
+                                 application proxy, so the browser works without the application
+                                 (the chain has to be up); --check-only only reports whether the
+                                 egress answers (exit code 1 when it does not), --yes raises the
+                                 chain / starts anyway without the console question
             pnr codex launch [--check-only] [--restart]
                                  start the Codex desktop app (OpenAI, Microsoft Store MSIX)
                                  with --proxy-server/--proxy-bypass-list and the proxy env
