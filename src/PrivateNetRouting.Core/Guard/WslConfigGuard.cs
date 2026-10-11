@@ -61,7 +61,11 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// the Windows proxies exist. The snippet is a profile.d file, so it is read by every login
 /// shell, but it exports the proxy only to the shells Codex itself starts — the desktop app
 /// passes CODEX_HOME into the distro for its processes, and the codex command name is the
-/// fallback; ordinary terminals, apt, pip and git keep the direct route.
+/// fallback; ordinary terminals, apt, pip and git keep the direct route. The startup script
+/// also keeps a loopback relay in the distro (see BuildStartupScript): it forwards
+/// 127.0.0.1:&lt;proxy port&gt; to the gateway, so the loopback proxy form the Windows side keeps
+/// in the shared CODEX_HOME/.env works inside the distro too and neither the snippet's rewrite
+/// nor its exports are a single point of failure.
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -483,7 +487,9 @@ public sealed class WslConfigGuard(
     /// "$CODEX_HOME/.env" to the gateway address when it exists: the Codex core loads that file
     /// over the inherited environment (see CodexEnvFile), so the exports alone would be overridden
     /// by the loopback form the Windows side keeps there. The Windows launcher refreshes the file
-    /// back before every launch.
+    /// back before every launch. As a second line of defence the snippet revives the loopback
+    /// relay (see BuildStartupScript) when it is not answering: the relay makes the loopback form
+    /// valid inside the distro even if this rewrite never ran.
     /// </summary>
     internal static string BuildCodexProxyEnvScript(int port, string noProxy) => $$"""
         # Managed by PrivateNetRouting (guard.wsl.proxyEnvPath) — do not edit by hand.
@@ -500,6 +506,11 @@ public sealed class WslConfigGuard(
             *codex*|*Codex*) _pnr_codex_shell=1 ;;
         esac
         if [ "$_pnr_codex_shell" = "1" ]; then
+            # Revive the loopback relay when it is not answering (the WSL startup script starts
+            # it; it exits after 10 idle minutes so it never keeps the WSL VM up on its own).
+            if ! timeout 1 bash -c "</dev/tcp/127.0.0.1/$PNR_CODEX_PROXY_PORT" 2>/dev/null; then
+                setsid nohup python3 /etc/wsl.d/pnr-proxy-relay.py >/dev/null 2>&1 < /dev/null &
+            fi
             _pnr_host_ip=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
             if [ -n "$_pnr_host_ip" ]; then
                 export HTTP_PROXY="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT"
@@ -531,7 +542,18 @@ public sealed class WslConfigGuard(
         unset _pnr_codex_shell
         """;
 
-    /// <summary>Startup script text (proxy address and port come from the application config).</summary>
+    /// <summary>
+    /// Startup script text (proxy address and port come from the application config). Besides the
+    /// Claude Code env it installs and starts the loopback relay: a small python3 forwarder that
+    /// listens on 127.0.0.1:&lt;port&gt; inside the distro and forwards raw TCP to the Windows-side
+    /// proxy on the NAT gateway (the gateway address is read at WSL start and is stable for the
+    /// lifetime of the WSL instance). It exists because the desktop app passes a shared
+    /// CODEX_HOME into the distro, and the .env the Windows side keeps there holds the loopback
+    /// proxy form — which the Codex core loads over its environment; with the relay that form is
+    /// valid on both sides of the WSL boundary and the profile snippet's gateway rewrite is no
+    /// longer a single point of failure. The relay exits after 10 idle minutes so it never keeps
+    /// the WSL VM up on its own; the codex profile snippet revives it on demand.
+    /// </summary>
     internal static string BuildStartupScript(string user, int port) => $$"""
         #!/bin/bash
         # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy
@@ -586,6 +608,79 @@ public sealed class WslConfigGuard(
 
         chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
         echo "$TAG proxy $PROXY written to $SETTINGS"
+
+        # Loopback relay: 127.0.0.1 inside the distro is the distro itself, while the shared
+        # CODEX_HOME/.env holds the loopback proxy form (written by the Windows side, which
+        # cannot reach the gateway address once WSL is down). Forward raw TCP to the gateway
+        # so that form works here too. Reinstalled on every start; an old instance is killed
+        # first (safe to run by hand).
+        RELAY="/etc/wsl.d/pnr-proxy-relay.py"
+        cat > "$RELAY" <<RELEOF
+        #!/usr/bin/env python3
+        # Managed by PrivateNetRouting (guard.wslStartupScript). Loopback relay for the
+        # application's forward proxy: forwards raw TCP from 127.0.0.1 inside this distro
+        # to the Windows-side proxy on the WSL NAT gateway. Exits after 10 minutes without
+        # an incoming connection so it never keeps the WSL VM up on its own; the codex
+        # profile snippet revives it on demand.
+        import socket
+        import threading
+
+        PORT = $PORT
+        TARGET = ("$HOST_IP", PORT)
+        IDLE_SECONDS = 600
+
+        def pump(src, dst):
+            try:
+                while True:
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    dst.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+        def handle(client):
+            try:
+                upstream = socket.create_connection(TARGET, timeout=5)
+            except OSError:
+                client.close()
+                return
+            threads = [
+                threading.Thread(target=pump, args=(client, upstream), daemon=True),
+                threading.Thread(target=pump, args=(upstream, client), daemon=True),
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            client.close()
+            upstream.close()
+
+        def main():
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", PORT))
+            server.listen(64)
+            server.settimeout(IDLE_SECONDS)
+            while True:
+                try:
+                    client, _ = server.accept()
+                except socket.timeout:
+                    return
+                threading.Thread(target=handle, args=(client,), daemon=True).start()
+
+        if __name__ == "__main__":
+            main()
+        RELEOF
+        chmod 755 "$RELAY"
+        pkill -f "pnr-proxy-relay.py" 2>/dev/null || true
+        setsid nohup python3 "$RELAY" >/dev/null 2>&1 < /dev/null &
+        echo "$TAG loopback relay 127.0.0.1:$PORT -> $HOST_IP:$PORT started"
         """;
 
     private static GuardState Aggregate(IReadOnlyList<WslDistroStatus> distros)

@@ -124,6 +124,16 @@ refreshes the `.env` back to the loopback form before every launch, so the two d
 fight over the file. (The sed above is the minimal shape: it rewrites existing lines only. The
 application's version of the same merge also adds missing keys and preserves foreign lines.)
 
+One shared `.env` serving two worlds with different address semantics is fragile, so the WSL
+startup script keeps a second line of defence: a small python3 relay that listens on
+`127.0.0.1:<port>` inside the distro and forwards raw TCP to the Windows-side proxy on the NAT
+gateway (the gateway address is read at WSL start and is stable for the WSL instance's lifetime).
+With the relay up, the loopback form the Windows side keeps in the shared `.env` is valid inside
+the distro too — the rewrite above becomes an optimisation rather than a requirement, and the
+scheme survives a core started outside a login shell, where the snippet never runs. The relay
+exits after ten idle minutes so it does not keep the WSL VM alive on its own; the startup script
+restarts it at the next WSL boot, and the profile snippet revives it on demand.
+
 ## Updates
 
 The app updates through the Microsoft Store; the Store's own CDN needs neither the proxy nor
