@@ -66,7 +66,14 @@ public static class CodexEnvFile
         return string.Join(newline, lines) + newline;
     }
 
-    /// <summary>Whether the text holds every maintained key with the expected value.</summary>
+    /// <summary>
+    /// Whether the text holds every maintained key with the expected value. The proxy addresses
+    /// accept both resting forms the tooling writes: the exact Windows values, or the WSL gateway
+    /// form the profile snippet leaves behind after a codex session in the distro (same port, a
+    /// private IPv4 host). The file has no single form at rest — every consumer refreshes it
+    /// before use (the Windows launcher back to the loopback, the WSL snippet to the gateway), so
+    /// a gateway form at rest is not stale. NO_PROXY must still match exactly.
+    /// </summary>
     public static bool UpToDate(string? text, IReadOnlyDictionary<string, string> values)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -84,7 +91,33 @@ public static class CodexEnvFile
             }
         }
 
-        return values.All(pair => found.TryGetValue(pair.Key, out var value) && value == pair.Value);
+        return values.All(pair => found.TryGetValue(pair.Key, out var value)
+            && (value == pair.Value || IsWslGatewayForm(value, pair.Value)));
+    }
+
+    /// <summary>
+    /// The WSL form of a maintained value: the same scheme and port as the expected Windows value,
+    /// but the host is a private IPv4 — the NAT gateway address the profile snippet computes
+    /// inside the distro. It rotates between WSL restarts, so "the current gateway" cannot be
+    /// demanded; a foreign port, a hostname or a public host is still a mismatch. A non-URL value
+    /// (NO_PROXY) never matches this form.
+    /// </summary>
+    private static bool IsWslGatewayForm(string value, string expected)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != "http"
+            || !Uri.TryCreate(expected, UriKind.Absolute, out var expectedUri)
+            || uri.Port != expectedUri.Port
+            || !System.Net.IPAddress.TryParse(uri.Host, out var ip)
+            || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        var octets = ip.GetAddressBytes();
+        return octets[0] == 10
+            || (octets[0] == 172 && octets[1] is >= 16 and <= 31)
+            || (octets[0] == 192 && octets[1] == 168);
     }
 
     /// <summary>

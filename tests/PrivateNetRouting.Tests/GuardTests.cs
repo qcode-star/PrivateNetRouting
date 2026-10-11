@@ -514,6 +514,29 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void CodexEnvUpToDateAcceptsTheWslGatewayForm()
+    {
+        var values = new Dictionary<string, string>
+        {
+            ["HTTP_PROXY"] = "http://127.0.0.1:18081",
+            ["HTTPS_PROXY"] = "http://127.0.0.1:18081",
+            ["ALL_PROXY"] = "http://127.0.0.1:18081",
+            ["NO_PROXY"] = "localhost,127.0.0.1",
+        };
+
+        static string GatewayEnv(string host, string noProxy = "localhost,127.0.0.1", int port = 18081) =>
+            $"HTTP_PROXY=http://{host}:{port}\nHTTPS_PROXY=http://{host}:{port}\nALL_PROXY=http://{host}:{port}\nNO_PROXY={noProxy}\n";
+
+        // what a WSL codex shell leaves behind: the NAT gateway form — the file rests, not stale
+        Assert.True(CodexEnvFile.UpToDate(GatewayEnv("172.20.0.1"), values));
+
+        // a foreign port, a public host or a drifted NO_PROXY is still a mismatch
+        Assert.False(CodexEnvFile.UpToDate(GatewayEnv("172.20.0.1", port: 2081), values));
+        Assert.False(CodexEnvFile.UpToDate(GatewayEnv("192.0.2.1"), values));
+        Assert.False(CodexEnvFile.UpToDate(GatewayEnv("172.20.0.1", noProxy: "localhost"), values));
+    }
+
+    [Fact]
     public void CodexSettingsSyncWritesTheEnvFileWithBackupAndIdempotence()
     {
         var config = CodexConfig();
