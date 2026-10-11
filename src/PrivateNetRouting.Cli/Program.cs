@@ -333,9 +333,44 @@ internal static class Program
         return failed ? 1 : 0;
     }
 
+    /// <summary>
+    /// The restart offer of the CLI: an application started outside the launcher keeps its own
+    /// flags (it is single-instance — a second start only activates its window). true — close it
+    /// and start again through the proxy, false — launch without a restart, null — the owner
+    /// declined, the launch is cancelled. --restart answers "yes" without asking; a redirected
+    /// stdin never asks and continues without a restart, so scripts keep working.
+    /// </summary>
+    private static bool? ConfirmRestart(RunningAppInfo running, string appName, bool forceRestart)
+    {
+        if (running.State != RunningAppState.WithoutProxy)
+        {
+            return false;
+        }
+
+        Console.WriteLine(running.ForeignProxyUrl is null
+            ? $"{appName} is already running ({running.ProcessCount} processes) without our proxy — a new start would only activate its window"
+            : $"{appName} is already running ({running.ProcessCount} processes) with a different proxy [{running.ForeignProxyUrl}] — a new start would only activate its window");
+
+        if (forceRestart)
+        {
+            Console.WriteLine($"{appName} is closed and started again through the proxy (--restart)");
+            return true;
+        }
+
+        if (Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine($"not restarting {appName}: no interactive input (pass --restart to close it and start again through the proxy)");
+            return false;
+        }
+
+        Console.Write($"close {appName} and start it again through the proxy? [y/N]: ");
+        return Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes" ? true : null;
+    }
+
     private static async Task<int> RunLaunchAsync(List<string> rest)
     {
         var checkOnly = false;
+        var forceRestart = false;
         foreach (var argument in rest)
         {
             switch (argument)
@@ -345,8 +380,11 @@ internal static class Program
                     break;
                 case "--no-splash":
                     break; // the bring-up is drawn by the GUI window; accepted for shortcut compatibility
+                case "--restart":
+                    forceRestart = true;
+                    break;
                 default:
-                    Console.Error.WriteLine($"unknown option: {argument} (--check-only | --no-splash)");
+                    Console.Error.WriteLine($"unknown option: {argument} (--check-only | --no-splash | --restart)");
                     return 1;
             }
         }
@@ -356,7 +394,21 @@ internal static class Program
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
-        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly), progress, CancellationToken.None);
+        var restart = false;
+        if (!checkOnly)
+        {
+            var answer = ConfirmRestart(runtime.Launcher.InspectRunning(), "Claude", forceRestart);
+            if (answer is null)
+            {
+                runtime.Launcher.NoteRestartDeclined();
+                Console.WriteLine("launch cancelled: the running copy works without the proxy");
+                return 0;
+            }
+
+            restart = answer.Value;
+        }
+
+        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         if (result.Outcome == LaunchOutcome.CheckOnly)
         {
@@ -364,7 +416,9 @@ internal static class Program
             return 0;
         }
 
-        Console.WriteLine($"claude launched (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})");
+        Console.WriteLine(result.RestartedExisting
+            ? $"claude restarted through the proxy (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})"
+            : $"claude launched (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})");
         return 0;
     }
 
@@ -439,12 +493,13 @@ internal static class Program
                 return await RunCodexUpdateAsync(options);
             default:
                 Console.WriteLine("""
-                    usage: pnr codex launch [--check-only]
+                    usage: pnr codex launch [--check-only] [--restart]
                            pnr codex update [--check]
 
                     launch  start the Codex desktop app with --proxy-server/--proxy-bypass-list
                             and the proxy env (Invoke-CommandInDesktopPackage, codex.* config),
-                            bringing the chain up if needed
+                            bringing the chain up if needed; --restart closes a copy that is
+                            already running without our proxy and starts it again
                     update  update the app through the Microsoft Store (versions check first,
                             a running Codex is closed before the Store replaces the package)
                     """);
@@ -455,6 +510,7 @@ internal static class Program
     private static async Task<int> RunCodexLaunchAsync(List<string> rest)
     {
         var checkOnly = false;
+        var forceRestart = false;
         foreach (var argument in rest)
         {
             switch (argument)
@@ -462,8 +518,11 @@ internal static class Program
                 case "--check-only":
                     checkOnly = true;
                     break;
+                case "--restart":
+                    forceRestart = true;
+                    break;
                 default:
-                    Console.Error.WriteLine($"unknown option: {argument} (--check-only)");
+                    Console.Error.WriteLine($"unknown option: {argument} (--check-only | --restart)");
                     return 1;
             }
         }
@@ -473,7 +532,21 @@ internal static class Program
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
-        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly), progress, CancellationToken.None);
+        var restart = false;
+        if (!checkOnly)
+        {
+            var answer = ConfirmRestart(runtime.CodexLauncher.InspectRunning(), "Codex", forceRestart);
+            if (answer is null)
+            {
+                runtime.CodexLauncher.NoteRestartDeclined();
+                Console.WriteLine("codex launch cancelled: the running copy works without the proxy");
+                return 0;
+            }
+
+            restart = answer.Value;
+        }
+
+        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         if (result.Outcome == CodexLaunchOutcome.CheckOnly)
         {
@@ -481,7 +554,9 @@ internal static class Program
             return 0;
         }
 
-        Console.WriteLine($"codex launched (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})");
+        Console.WriteLine(result.RestartedExisting
+            ? $"codex restarted through the proxy (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})"
+            : $"codex launched (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})");
         return 0;
     }
 
@@ -791,8 +866,8 @@ internal static class Program
                         continue;
                     }
 
-                    Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten
-                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script written"
+                    Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten || distro.ProxyEnvWritten
+                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {(distro.ProxyEnvWritten ? "+ codex proxy env " : "")}written"
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                 }
 
@@ -918,18 +993,21 @@ internal static class Program
             pnr logs rotate [<name>...]
                                  rotate log files (current -> .1 -> ...); a file held
                                  by the running app is reported as locked
-            pnr launch [--check-only] [--no-splash]
+            pnr launch [--check-only] [--no-splash] [--restart]
                                  start Claude with --proxy-server/--proxy-bypass-list,
-                                 bringing the chain up if needed (splash is GUI-only)
+                                 bringing the chain up if needed (splash is GUI-only);
+                                 --restart closes a copy already running without our proxy
+                                 and starts it again through the proxy
             pnr browser [--check-only] [--prepare-only] [--private] [--url <url>]
                                  start the browser with an isolated profile and the app's
                                  proxy (firefox user.js / chromium flags, browser.* config);
                                  --prepare-only writes the profile without opening it
-            pnr codex launch [--check-only]
+            pnr codex launch [--check-only] [--restart]
                                  start the Codex desktop app (OpenAI, Microsoft Store MSIX)
                                  with --proxy-server/--proxy-bypass-list and the proxy env
                                  (package-context launch, codex.* config), bringing the
-                                 chain up if needed
+                                 chain up if needed; --restart closes a copy already running
+                                 without our proxy and starts it again
             pnr codex update [--check]
                                  update the app through the Microsoft Store: the Store catalog
                                  is asked first (no chain, no UAC), a running Codex is closed

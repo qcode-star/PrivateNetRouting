@@ -82,7 +82,12 @@ public static class BrowserBypassList
 /// <summary>user.js of the Firefox isolated profile: rewritten on every launch.</summary>
 public static class FirefoxUserJs
 {
-    public static string Render(string proxyHost, int proxyPort, string noProxies) => $"""
+    /// <param name="disableWebRtc">
+    /// WebRTC off (browser.disableWebRtc): media.peerconnection.enabled cuts off RTCPeerConnection
+    /// itself, media.navigator.enabled — probing for cameras and microphones. WebRTC would go around
+    /// the proxy, and the site would learn the real address.
+    /// </param>
+    public static string Render(string proxyHost, int proxyPort, string noProxies, bool disableWebRtc = true) => $"""
         // Managed by PrivateNetRouting — rewritten on every launch: proxy address and bypass list stay fresh.
         user_pref("network.proxy.type", 1);
         user_pref("network.proxy.http", "{proxyHost}");
@@ -95,7 +100,15 @@ public static class FirefoxUserJs
         user_pref("network.trr.mode", 5);
         user_pref("browser.shell.checkDefaultBrowser", false);
         user_pref("datareporting.policy.dataSubmissionEnabled", false);
+        {WebRtcPrefs(disableWebRtc)}
         """;
+
+    private static string WebRtcPrefs(bool disableWebRtc) => disableWebRtc
+        ? """
+          user_pref("media.peerconnection.enabled", false);
+          user_pref("media.navigator.enabled", false);
+          """
+        : "";
 }
 
 /// <summary>
@@ -104,7 +117,8 @@ public static class FirefoxUserJs
 /// launcher), then starts the browser with the application proxy and without system settings: Firefox —
 /// a separate profile with user.js and --new-instance (otherwise the URL goes to the everyday instance without
 /// a proxy), chromium-like — --proxy-server/--user-data-dir (a separate directory is mandatory:
-/// an already running instance ignores the command-line flags).
+/// an already running instance ignores the command-line flags). WebRTC is off by default
+/// (browser.disableWebRtc): it goes around the proxy and reveals the real address to the site.
 /// </summary>
 public sealed class BrowserLauncher(
     AppConfig config,
@@ -201,6 +215,14 @@ public sealed class BrowserLauncher(
             };
             info.ArgumentList.Add($"--proxy-server={ProxyUrl}");
             info.ArgumentList.Add($"--proxy-bypass-list={BuildChromiumBypassList()}");
+            if (config.Browser.DisableWebRtc)
+            {
+                // The family has no full WebRTC switch: the policy does the most it can — WebRTC
+                // traffic is forbidden from going around the proxy, so the real address does not leak
+                // (a site that needs calls still works over the proxied path).
+                info.ArgumentList.Add("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+            }
+
             info.ArgumentList.Add($"--user-data-dir={config.Browser.Chromium.ProfileDir}");
             info.ArgumentList.Add("--no-first-run");
             info.ArgumentList.Add("--no-default-browser-check");
@@ -267,8 +289,14 @@ public sealed class BrowserLauncher(
         Directory.CreateDirectory(dir);
         File.WriteAllText(
             Path.Combine(dir, "user.js"),
-            FirefoxUserJs.Render(endpoint.Address.ToString(), endpoint.Port, BuildFirefoxNoProxies()));
-        log.Info($"browser: user.js updated (proxy {config.ForwardProxy.Listen}, bypass list rewritten)");
+            FirefoxUserJs.Render(
+                endpoint.Address.ToString(),
+                endpoint.Port,
+                BuildFirefoxNoProxies(),
+                config.Browser.DisableWebRtc));
+        log.Info(
+            $"browser: user.js updated (proxy {config.ForwardProxy.Listen}, bypass list rewritten, "
+            + $"WebRTC {(config.Browser.DisableWebRtc ? "off" : "on")})");
     }
 
     private void Start(ProcessStartInfo info, string exe)

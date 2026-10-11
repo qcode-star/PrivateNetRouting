@@ -17,7 +17,7 @@ public enum CodexLaunchOutcome
     CheckOnly,
 }
 
-public sealed record CodexLaunchResult(CodexLaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed);
+public sealed record CodexLaunchResult(CodexLaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed, bool RestartedExisting = false);
 
 /// <summary>
 /// Codex desktop app (OpenAI, Microsoft Store MSIX) launcher: checks the chain with a live
@@ -27,7 +27,8 @@ public sealed record CodexLaunchResult(CodexLaunchOutcome Outcome, bool ChainRai
 /// stub drops arguments, and the package-context launch is what hands the process both the
 /// flags (the Chromium side of the app) and the env (its embedded CLI core takes the standard
 /// proxy variables; config.toml has no proxy key). An already running app without the flags is
-/// only monitored, with a warning in the log (it cannot stop the launch).
+/// reported in the log, and with LauncherOptions.RestartRunning it is closed first — a second
+/// start of a single-instance app only activates the existing window.
 /// </summary>
 public sealed class CodexLauncher(
     AppConfig config,
@@ -36,9 +37,24 @@ public sealed class CodexLauncher(
     IProcessFinder processFinder,
     FileLog log,
     IPowerShellExecutor powershell,
-    Func<ProcessStartInfo, Process?>? startProcess = null)
+    Func<ProcessStartInfo, Process?>? startProcess = null,
+    IRunningAppCloser? appCloser = null)
 {
     private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
+
+    /// <summary>
+    /// The scan is filtered by the package name in the command line: a bare process name is not
+    /// enough (another application may share the executable name), while the MSIX install path
+    /// always carries the package name.
+    /// </summary>
+    private readonly RunningApp _running = new(
+        processFinder,
+        config.Codex.ProcessName,
+        config.Codex.PackageName,
+        "http://" + config.ForwardProxy.Listen,
+        appCloser ?? new WindowsRunningAppCloser(),
+        log,
+        "codex-launcher");
 
     /// <summary>Launcher log.</summary>
     public FileLog Log => log;
@@ -69,7 +85,22 @@ public sealed class CodexLauncher(
             return new CodexLaunchResult(CodexLaunchOutcome.CheckOnly, chainRaised, watch.Elapsed);
         }
 
-        WarnIfCodexRunningWithoutProxy();
+        var running = _running.Inspect();
+        var restarted = false;
+        if (options.RestartRunning && running.State == RunningAppState.WithoutProxy)
+        {
+            // The owner has already agreed to the restart (GUI dialog, CLI question): a second
+            // start of a single-instance app would only activate the existing window, so the
+            // running copy is closed first. A copy that carries our proxy is left alone.
+            restarted = (await _running
+                    .CloseAsync("Codex", TimeSpan.FromSeconds(config.Launcher.RestartGraceSeconds), ct)
+                    .ConfigureAwait(false))
+                .AnythingClosed;
+        }
+        else
+        {
+            _running.Report(running, "Codex");
+        }
 
         // Invoke-CommandInDesktopPackage starts the app as a child of this PowerShell process,
         // so the env set here reaches both the app and everything it spawns (the CLI core).
@@ -81,8 +112,18 @@ public sealed class CodexLauncher(
         }
 
         log.Info("codex-launcher: Codex started with --proxy-server/--proxy-bypass-list and the proxy env");
-        return new CodexLaunchResult(CodexLaunchOutcome.Launched, chainRaised, watch.Elapsed);
+        return new CodexLaunchResult(CodexLaunchOutcome.Launched, chainRaised, watch.Elapsed, restarted);
     }
+
+    /// <summary>
+    /// The already-running state of the app: a copy started outside the launcher keeps its own
+    /// flags until it is closed, so the GUI and the CLI ask the owner about a restart before
+    /// the launch (LauncherOptions.RestartRunning).
+    /// </summary>
+    public RunningAppInfo InspectRunning() => _running.Inspect();
+
+    /// <summary>The owner has refused the restart offer: the log keeps the reason nothing started.</summary>
+    public void NoteRestartDeclined() => _running.NoteDeclined("Codex");
 
     /// <summary>The launch script: env + package lookup + the package-context start. Testable as text.</summary>
     internal string BuildLaunchScript()
@@ -103,35 +144,5 @@ public sealed class CodexLauncher(
         return script.ToString();
 
         static string Quote(string value) => value.Replace("'", "''");
-    }
-
-    /// <summary>An already running app without --proxy-server would work around the proxy: warn.</summary>
-    private void WarnIfCodexRunningWithoutProxy()
-    {
-        IReadOnlyList<FoundProcess> processes;
-        try
-        {
-            processes = processFinder.FindByNameContains(config.Codex.ProcessName);
-        }
-        catch (Exception ex)
-        {
-            log.Warn($"codex-launcher: process scan failed: {ex.Message}");
-            return;
-        }
-
-        if (processes.Count == 0)
-        {
-            return;
-        }
-
-        var withProxy = processes.Count(p => p.CommandLine.Contains("--proxy-server=", StringComparison.Ordinal));
-        if (withProxy == 0)
-        {
-            log.Warn($"codex-launcher: Codex is already running ({processes.Count} processes) without --proxy-server — close it and use the launcher again");
-        }
-        else
-        {
-            log.Info($"codex-launcher: Codex is already running ({processes.Count} processes) — starting one more instance activates the existing window");
-        }
     }
 }

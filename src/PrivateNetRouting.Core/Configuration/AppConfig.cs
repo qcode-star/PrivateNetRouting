@@ -65,6 +65,13 @@ public sealed class LauncherConfig
 
     /// <summary>Proxy bypass zones: each goes into the bypass-list in two forms (zone and *.zone).</summary>
     public List<string> BypassDomains { get; set; } = [];
+
+    /// <summary>
+    /// How long to wait for an already running Claude/Codex to close itself after a window close
+    /// request, before the remaining processes of the restart are killed; sec. The restart is
+    /// offered by the launcher when the running copy carries no proxy flags of ours.
+    /// </summary>
+    public int RestartGraceSeconds { get; set; } = 15;
 }
 
 /// <summary>
@@ -196,6 +203,15 @@ public sealed class BrowserConfig
 
     /// <summary>Private window: Firefox -private-window / Chromium --incognito.</summary>
     public bool Private { get; set; }
+
+    /// <summary>
+    /// WebRTC off in the launched browser: it goes around the proxy and reveals the real
+    /// address to the site (only the profile is touched — the browser's system settings stay
+    /// intact). Firefox — media.peerconnection.enabled=false in user.js, a full switch-off;
+    /// Chromium-like — the WebRTC policy that forbids non-proxied UDP (the family has no full
+    /// off switch, only this restriction). A site that needs calls will not work then.
+    /// </summary>
+    public bool DisableWebRtc { get; set; } = true;
 
     /// <summary>
     /// Top-level domains that go around the proxy:
@@ -433,6 +449,13 @@ public sealed class GuardWslConfig
 
     /// <summary>Distros: the name and user (owner of ~/.claude) are required, the rest is ignored.</summary>
     public List<WslDistroConfig> Distros { get; set; } = [];
+
+    /// <summary>
+    /// Path of the Codex proxy env layer inside the distro: a profile snippet that exports the
+    /// application proxy to the shells Codex starts (its own WSL processes carry CODEX_HOME) and
+    /// to nothing else. The same path in every distro.
+    /// </summary>
+    public string ProxyEnvPath { get; set; } = "/etc/profile.d/20-pnr-codex-proxy.sh";
 }
 
 public sealed class WslDistroConfig
@@ -445,6 +468,12 @@ public sealed class WslDistroConfig
 
     /// <summary>Sync the Claude config into this distro; false — status only.</summary>
     public bool Sync { get; set; } = true;
+
+    /// <summary>
+    /// Sync the Codex proxy env layer into this distro (guard.wsl.proxyEnvPath): without it a
+    /// project opened in WSL keeps the direct route — 127.0.0.1 there is the distro itself.
+    /// </summary>
+    public bool ProxyEnv { get; set; } = true;
 }
 
 public sealed class LoggingConfig

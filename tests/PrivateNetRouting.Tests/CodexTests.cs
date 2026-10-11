@@ -21,7 +21,11 @@ public class CodexTests : IDisposable
         _log = new FileLog(_logPath);
     }
 
-    private CodexLauncher CreateLauncher(AppConfig? config = null, bool healthy = true, FakePowerShell? powershell = null)
+    private CodexLauncher CreateLauncher(
+        AppConfig? config = null,
+        bool healthy = true,
+        FakePowerShell? powershell = null,
+        IRunningAppCloser? closer = null)
     {
         config ??= DefaultConfig();
         powershell ??= new FakePowerShell();
@@ -31,7 +35,20 @@ public class CodexTests : IDisposable
             _ => Task.FromResult(healthy),
             _processes,
             _log,
-            powershell);
+            powershell,
+            appCloser: closer);
+    }
+
+    /// <summary>A process of the installed Codex package (the scan is filtered by the package name).</summary>
+    private static FoundProcess CodexProcess(int id, string extraArgs = "") =>
+        new(id, $@"C:\Program Files\WindowsApps\OpenAI.Codex_26.0.0.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe{extraArgs}");
+
+    // FileLog keeps the file open for writing, so read with ReadWrite sharing
+    private string ReadLog()
+    {
+        using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static AppConfig DefaultConfig() => new()
@@ -124,6 +141,97 @@ public class CodexTests : IDisposable
         Assert.Equal(CodexLaunchOutcome.CheckOnly, result.Outcome);
         Assert.Equal(1, _chain.EnsureCalls);
         Assert.Equal(0, powershell.Calls);
+    }
+
+    // --- an already running copy: reported, and closed only on the owner's answer ---
+
+    [Fact]
+    public void RunningCodexWithOurProxyNeedsNoRestart()
+    {
+        _processes.Processes = [CodexProcess(42, " --proxy-server=http://127.0.0.1:18082")];
+        var launcher = CreateLauncher();
+
+        var running = launcher.InspectRunning();
+
+        Assert.Equal(RunningAppState.Proxied, running.State);
+        Assert.Equal(1, running.ProcessCount);
+    }
+
+    [Fact]
+    public void RunningCodexWithAnotherProxyIsAlsoARestartCandidate()
+    {
+        _processes.Processes = [CodexProcess(42, " --proxy-server=http://127.0.0.1:9999")];
+        var launcher = CreateLauncher();
+
+        var running = launcher.InspectRunning();
+
+        Assert.Equal(RunningAppState.WithoutProxy, running.State);
+        Assert.Equal("http://127.0.0.1:9999", running.ForeignProxyUrl);
+    }
+
+    [Fact]
+    public void ForeignChatGptProcessesAreNotMistakenForCodex()
+    {
+        // another application may share the executable name: only the package path counts
+        _processes.Processes = [new FoundProcess(7, @"C:\Program Files\WindowsApps\OpenAI.ChatGPT-Desktop_1.0\app\ChatGPT.exe")];
+        var launcher = CreateLauncher();
+
+        Assert.Equal(RunningAppState.NotRunning, launcher.InspectRunning().State);
+    }
+
+    [Fact]
+    public async Task RunningCopyWithoutProxyIsWarnedAboutWhenTheRestartIsNotAsked()
+    {
+        _processes.Processes = [CodexProcess(42)];
+        var launcher = CreateLauncher();
+
+        var result = await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.False(result.RestartedExisting);
+        Assert.Contains("without --proxy-server", ReadLog());
+    }
+
+    [Fact]
+    public async Task RestartClosesTheRunningCopyBeforeStarting()
+    {
+        _processes.Processes = [CodexProcess(42), CodexProcess(43, " --type=renderer")];
+        var closer = new FakeAppCloser { Alive = { 42, 43 } };
+        var launcher = CreateLauncher(closer: closer);
+
+        var result = await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.True(result.RestartedExisting);
+        Assert.Equal(2, closer.GracefulCalls.Count);
+        Assert.Empty(closer.KillCalls); // the window close of the main process was enough
+        Assert.Empty(closer.Alive);
+        Assert.Contains("closed to restart through the proxy", ReadLog());
+    }
+
+    [Fact]
+    public async Task RestartKillsWhatSurvivedTheWindowClose()
+    {
+        _processes.Processes = [CodexProcess(42)];
+        var closer = new FakeAppCloser { Alive = { 42 }, NoWindow = { 42 } };
+        var launcher = CreateLauncher(closer: closer);
+
+        var result = await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.True(result.RestartedExisting);
+        Assert.Equal(new[] { 42 }, closer.KillCalls);
+        Assert.Empty(closer.Alive);
+    }
+
+    [Fact]
+    public async Task CheckOnlyNeverClosesARunningCopy()
+    {
+        _processes.Processes = [CodexProcess(42)];
+        var closer = new FakeAppCloser { Alive = { 42 } };
+        var launcher = CreateLauncher(closer: closer);
+
+        await launcher.LaunchAsync(new LauncherOptions(CheckOnly: true, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.Empty(closer.GracefulCalls);
+        Assert.Empty(closer.KillCalls);
     }
 
     [Fact]

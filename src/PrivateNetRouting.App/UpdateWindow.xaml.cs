@@ -564,8 +564,18 @@ public partial class UpdateWindow : Window
         BtnLaunch.IsEnabled = false;
         try
         {
+            // A copy that survived the update without our proxy would swallow the new start
+            // (single instance): the same offer as in the main window.
+            var running = _runtime.Launcher.InspectRunning();
+            if (!LaunchPrompts.ConfirmRestart(this, running, "App.Name.Claude"))
+            {
+                _runtime.Launcher.NoteRestartDeclined();
+                SetHintKey("Update.Launch.Declined");
+                return;
+            }
+
             // the launcher itself will check/bring up the chain and pass the proxy flags
-            await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+            await _runtime.Launcher.LaunchAsync(LaunchPrompts.OptionsFor(running), null, CancellationToken.None);
             SetHintKey("Update.Launch.Done");
         }
         catch (Exception ex)

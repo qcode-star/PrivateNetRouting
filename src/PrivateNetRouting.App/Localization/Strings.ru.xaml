@@ -90,10 +90,16 @@
     <s:String x:Key="Main.LanguageSavedFmt">язык сохранён в конфиге: {0}</s:String>
 
     <!-- Claude launch -->
+    <s:String x:Key="App.Name.Claude">Claude</s:String>
+    <s:String x:Key="App.Name.Codex">Codex</s:String>
     <s:String x:Key="Main.Launch.Busy">запуск (подтверди UAC, если появится)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Launch.Cancelled">запуск отменён</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
+    <s:String x:Key="Main.Launch.RestartOfferTitle">Приложение уже запущено</s:String>
+    <s:String x:Key="Main.Launch.RestartOfferFmt">{0} уже запущен (процессов: {1}) без прокси приложения, а новый запуск лишь активирует его окно. Закрыть его и запустить заново через прокси?</s:String>
+    <s:String x:Key="Main.Launch.RestartDeclined">запуск отменён: запущенная копия работает без прокси</s:String>
+    <s:String x:Key="Main.Launch.RestartedFmt">Claude перезапущен через прокси ({0} с)</s:String>
 
     <!-- Browser launch (isolated profile) -->
     <s:String x:Key="Main.Browser.DoneFmt">Браузер запущен (цепочка готова за {0} с)</s:String>
@@ -101,6 +107,7 @@
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
     <s:String x:Key="Main.Codex.DoneFmt">Codex запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Codex.Cancelled">Запуск Codex отменён</s:String>
+    <s:String x:Key="Main.Codex.RestartedFmt">Codex перезапущен через прокси ({0} с)</s:String>
 
     <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Доступно обновление Claude: {0} → {1}</s:String>
@@ -161,11 +168,16 @@
     <s:String x:Key="Main.Guard.Wsl.NotInstalled">дистрибутив не установлен</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotRunning">дистрибутив не запущен — запустите для проверки</s:String>
     <s:String x:Key="Main.Guard.Wsl.NoScript">стартовый скрипт WSL не найден</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroOnFmt">{0}: порт {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroOnFmt">{0}: порт {1}, WSL-окружение codex {2}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroPartialFmt">{0}: частично, WSL-окружение codex {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvOnFmt">включено ({0})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvMissing">файл не найден</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">окружение codex записано</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">окружение codex актуально</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">Синхронизация WSL пропущена: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: пропущен — {1}</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: записан прокси {1}</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: уже актуален (прокси {1})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: записан прокси {1} ({2})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: уже актуален (прокси {1}, {2})</s:String>
 
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Показать окно</s:String>
@@ -203,6 +215,7 @@
     <s:String x:Key="Update.Done.StoppedFmt">Остановлено: докачано {0} из {1}; докачка сохранена в кэше.</s:String>
     <s:String x:Key="Update.Done.DeferredFmt">Установка отложена; пакет в кэше: {0}</s:String>
     <s:String x:Key="Update.Launch.Done">Claude запущен.</s:String>
+    <s:String x:Key="Update.Launch.Declined">запущенная копия работает без прокси — запуск отменён</s:String>
     <s:String x:Key="Update.Url.Label">Адрес пакета (.msix)</s:String>
     <s:String x:Key="Update.Button.Stop">Остановить</s:String>
     <s:String x:Key="Update.Button.OpenLog">Открыть лог</s:String>

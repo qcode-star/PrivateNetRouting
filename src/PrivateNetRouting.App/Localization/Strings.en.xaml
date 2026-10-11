@@ -90,10 +90,16 @@
     <s:String x:Key="Main.LanguageSavedFmt">language saved to config: {0}</s:String>
 
     <!-- Claude launch -->
+    <s:String x:Key="App.Name.Claude">Claude</s:String>
+    <s:String x:Key="App.Name.Codex">Codex</s:String>
     <s:String x:Key="Main.Launch.Busy">launching (confirm UAC if prompted)...</s:String>
     <s:String x:Key="Main.Launch.DoneFmt">Claude launched (chain ready in {0} s)</s:String>
     <s:String x:Key="Main.Launch.Cancelled">launch cancelled</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude is already running — the window is shown without launching again</s:String>
+    <s:String x:Key="Main.Launch.RestartOfferTitle">The application is already running</s:String>
+    <s:String x:Key="Main.Launch.RestartOfferFmt">{0} is already running ({1} processes) without the application proxy, and a new start would only activate its window. Close it and start again through the proxy?</s:String>
+    <s:String x:Key="Main.Launch.RestartDeclined">launch cancelled: the running copy works without the proxy</s:String>
+    <s:String x:Key="Main.Launch.RestartedFmt">Claude restarted through the proxy ({0} s)</s:String>
 
     <!-- Browser launch (isolated profile) -->
     <s:String x:Key="Main.Browser.DoneFmt">Browser launched (chain ready in {0} s)</s:String>
@@ -101,6 +107,7 @@
     <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
     <s:String x:Key="Main.Codex.DoneFmt">Codex launched (chain ready in {0} s)</s:String>
     <s:String x:Key="Main.Codex.Cancelled">Codex launch cancelled</s:String>
+    <s:String x:Key="Main.Codex.RestartedFmt">Codex restarted through the proxy ({0} s)</s:String>
 
     <!-- Claude update: startup check notice -->
     <s:String x:Key="Main.Update.AvailableFmt">Claude update available: {0} → {1}</s:String>
@@ -161,11 +168,16 @@
     <s:String x:Key="Main.Guard.Wsl.NotInstalled">distro is not installed</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotRunning">distro is not running — start it to check</s:String>
     <s:String x:Key="Main.Guard.Wsl.NoScript">WSL startup script not found</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroOnFmt">{0}: port {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroOnFmt">{0}: port {1}, codex WSL env {2}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroPartialFmt">{0}: partial, codex WSL env {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvOnFmt">on ({0})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvMissing">file not found</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">codex env written</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">codex env up to date</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: skipped — {1}</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written</s:String>
-    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: already up to date (proxy {1})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written ({2})</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: already up to date (proxy {1}, {2})</s:String>
 
     <!-- Tray -->
     <s:String x:Key="Tray.Open">Show window</s:String>
@@ -203,6 +215,7 @@
     <s:String x:Key="Update.Done.StoppedFmt">Stopped: downloaded {0} of {1}; the partial download is kept in the cache.</s:String>
     <s:String x:Key="Update.Done.DeferredFmt">Installation deferred; the package is in the cache: {0}</s:String>
     <s:String x:Key="Update.Launch.Done">Claude launched.</s:String>
+    <s:String x:Key="Update.Launch.Declined">the running copy works without the proxy — the launch was cancelled</s:String>
     <s:String x:Key="Update.Url.Label">Package address (.msix)</s:String>
     <s:String x:Key="Update.Button.Stop">Stop</s:String>
     <s:String x:Key="Update.Button.OpenLog">Open log</s:String>

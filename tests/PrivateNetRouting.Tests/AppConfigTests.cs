@@ -22,6 +22,7 @@ public class AppConfigTests : IDisposable
         Assert.True(config.ForwardProxy.DohDiscovery.Enabled); // the netmap fills the pool for a new user
         Assert.Empty(config.ForwardProxy.DohSeed); // optional; discovery is the source
         Assert.True(config.Ui.CheckUpdatesOnStart);
+        Assert.True(config.Browser.DisableWebRtc); // WebRTC would go around the proxy
     }
 
     [Fact]

@@ -14,7 +14,9 @@ public sealed record WslDistroStatus(
     GuardState State,
     int? ScriptPort,
     string? CurrentProxy,
-    string Reason);
+    string Reason,
+    bool ProxyEnvPresent = false,
+    int? ProxyEnvPort = null);
 
 /// <summary>Status of the WSL layer: off (Reason explains) or an aggregate over distros.</summary>
 public sealed record WslConfigStatus(
@@ -35,7 +37,9 @@ public sealed record WslDistroSyncResult(
     bool SettingsWritten,
     string? SettingsBackup,
     bool ScriptWritten,
-    string? ScriptBackup);
+    string? ScriptBackup,
+    bool ProxyEnvWritten = false,
+    string? ProxyEnvBackup = null);
 
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
@@ -50,6 +54,14 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// at most three such copies are kept (the legacy `.bak-<timestamp>` naming is cleaned up on
 /// every sync). Status is read-only and only in running distros (they are not started just for a
 /// check); sync does not start a distro — it skips it with a reason.
+///
+/// The same sync writes the Codex proxy env layer (guard.wsl.proxyEnvPath, per distro
+/// guard.wsl.distros[].proxyEnv): the Codex desktop app runs codex *inside* the distro
+/// (wsl.exe -d … --exec /usr/bin/bash -lc …), where 127.0.0.1 is the distro itself and none of
+/// the Windows proxies exist. The snippet is a profile.d file, so it is read by every login
+/// shell, but it exports the proxy only to the shells Codex itself starts — the desktop app
+/// passes CODEX_HOME into the distro for its processes, and the codex command name is the
+/// fallback; ordinary terminals, apt, pip and git keep the direct route.
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -184,16 +196,17 @@ public sealed class WslConfigGuard(
 
             var portOk = read.ScriptPort == expectedPort;
             var proxyOk = expectedProxy is null || read.SettingsProxy == expectedProxy;
-            var reason = portOk && proxyOk
-                ? ""
-                : DescribeMismatch(read, expectedPort, expectedProxy);
+            var envOk = !distro.ProxyEnv || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort);
+            var ok = portOk && proxyOk && envOk;
             return new WslDistroStatus(
                 distro.Name,
                 distro.Sync,
-                portOk && proxyOk ? GuardState.On : GuardState.Partial,
+                ok ? GuardState.On : GuardState.Partial,
                 read.ScriptPort,
                 read.SettingsProxy,
-                reason);
+                ok ? "" : DescribeMismatch(read, expectedPort, expectedProxy, distro.ProxyEnv),
+                read.ProxyEnvPresent,
+                read.ProxyEnvPort);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException)
         {
@@ -262,6 +275,40 @@ public sealed class WslConfigGuard(
         var scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
         RequireCompleted(scriptOutput, $"startup script sync in '{distro.Name}'");
 
+        // Codex proxy env: a profile.d snippet exporting the proxy to the shells Codex itself
+        // starts inside the distro (see the class comment). distro.ProxyEnv=false leaves the
+        // file alone — the layer is then reported as off for this distro, not as a mismatch.
+        var envPath = config.Guard.Wsl.ProxyEnvPath;
+        var envWritten = false;
+        string? envBackup = null;
+        if (distro.ProxyEnv && !string.IsNullOrWhiteSpace(envPath))
+        {
+            var envContent = BuildCodexProxyEnvScript(
+                ClaudeEnvValues.Port(config.ForwardProxy),
+                ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
+            var envScript = $"""
+                ENVFILE="{envPath}"
+                NEW="/tmp/.pnr-codexenv-{stamp}"
+                echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(envContent))}' | base64 -d > "$NEW"
+                mkdir -p "$(dirname "$ENVFILE")"
+                if [ -f "$ENVFILE" ] && cmp -s "$NEW" "$ENVFILE"; then
+                    echo ENVFILE=unchanged
+                else
+                    if [ -f "$ENVFILE" ]; then cp -p "$ENVFILE" "$ENVFILE.pnr-bak-{stamp}" && echo BACKUP={envPath}.pnr-bak-{stamp}; fi
+                    cat "$NEW" > "$ENVFILE"
+                    chmod 644 "$ENVFILE"
+                    echo ENVFILE=written
+                fi
+                rm -f "$NEW"
+                ls -1t {envPath}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                echo PNR=ok
+                """;
+            var envOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], envScript, Encoding.UTF8, ct);
+            RequireCompleted(envOutput, $"codex proxy env sync in '{distro.Name}'");
+            envWritten = envOutput.Contains("ENVFILE=written", StringComparison.Ordinal);
+            envBackup = envWritten ? FindBackupName(envOutput) : null;
+        }
+
         var settingsWritten = settingsOutput.Contains("SETTINGS=written", StringComparison.Ordinal);
         var scriptWritten = scriptOutput.Contains("SCRIPT=written", StringComparison.Ordinal);
         return new WslDistroSyncResult(
@@ -270,7 +317,9 @@ public sealed class WslConfigGuard(
             SettingsWritten: settingsWritten,
             SettingsBackup: settingsWritten ? FindBackupName(settingsOutput) : null,
             ScriptWritten: scriptWritten,
-            ScriptBackup: scriptWritten ? FindBackupName(scriptOutput) : null);
+            ScriptBackup: scriptWritten ? FindBackupName(scriptOutput) : null,
+            ProxyEnvWritten: envWritten,
+            ProxyEnvBackup: envBackup);
     }
 
     /// <summary>
@@ -316,12 +365,15 @@ public sealed class WslConfigGuard(
         string? ScriptUser,
         bool SettingsPresent,
         string? SettingsProxy,
-        JsonObject? SettingsRoot);
+        JsonObject? SettingsRoot,
+        bool ProxyEnvPresent = false,
+        int? ProxyEnvPort = null);
 
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
     {
         var scriptPath = config.Guard.WslStartupScript;
+        var envPath = config.Guard.Wsl.ProxyEnvPath;
         var settingsPath = $"/home/{distro.User}/.claude/settings.json";
         var probe = $"""
             if [ -f {scriptPath} ]; then
@@ -330,6 +382,12 @@ public sealed class WslConfigGuard(
                 grep -E '^USER_NAME=' {scriptPath} 2>/dev/null || true
             else
                 echo SCRIPT=missing
+            fi
+            if [ -f {envPath} ]; then
+                echo PROXYENV=present
+                grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
+            else
+                echo PROXYENV=missing
             fi
             if [ -f {settingsPath} ]; then
                 echo SETTINGS=present
@@ -348,8 +406,8 @@ public sealed class WslConfigGuard(
 
     internal static WslRead ParseRead(string output)
     {
-        bool scriptPresent = false, settingsFilePresent = false;
-        int? port = null;
+        bool scriptPresent = false, settingsFilePresent = false, proxyEnvPresent = false;
+        int? port = null, proxyEnvPort = null;
         string? user = null, proxy = null;
         JsonObject? root = null;
 
@@ -364,6 +422,12 @@ public sealed class WslConfigGuard(
                     break;
                 case "SCRIPT=missing":
                     scriptPresent = false;
+                    break;
+                case "PROXYENV=present":
+                    proxyEnvPresent = true;
+                    break;
+                case "PROXYENV=missing":
+                    proxyEnvPresent = false;
                     break;
                 case "SETTINGS=present":
                     settingsFilePresent = true;
@@ -390,6 +454,11 @@ public sealed class WslConfigGuard(
                     {
                         port = parsed;
                     }
+                    else if (line.StartsWith("PNR_CODEX_PROXY_PORT=", StringComparison.Ordinal)
+                             && int.TryParse(line["PNR_CODEX_PROXY_PORT=".Length..], out var envPort))
+                    {
+                        proxyEnvPort = envPort;
+                    }
                     else if (line.StartsWith("USER_NAME=", StringComparison.Ordinal))
                     {
                         user = line["USER_NAME=".Length..].Trim().Trim('\'', '"');
@@ -399,8 +468,45 @@ public sealed class WslConfigGuard(
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort);
     }
+
+    /// <summary>
+    /// The Codex proxy env layer: a profile snippet that exports the application proxy to the
+    /// shells Codex itself starts inside the distro and to nothing else. Markers: the desktop app
+    /// always passes CODEX_HOME into the distro for its own processes, and the codex command name
+    /// catches a launch started by hand from such a shell. Ordinary shells, apt, pip and git keep
+    /// the direct route. The host address is recomputed at every shell start: 127.0.0.1 inside the
+    /// distro is the distro itself, and the WSL NAT address changes with every WSL restart, so a
+    /// baked address would rot. The port is baked at sync time (PNR_CODEX_PROXY_PORT — the line
+    /// `pnr guard status` reads back).
+    /// </summary>
+    internal static string BuildCodexProxyEnvScript(int port, string noProxy) => $$"""
+        # Managed by PrivateNetRouting (guard.wsl.proxyEnvPath) — do not edit by hand.
+        # Exports the application's forward proxy to the Codex CLI running inside this distro:
+        # the desktop app passes CODEX_HOME into the distro for its own processes (the marker),
+        # the codex command name is the fallback. Everything else — ordinary shells, apt, pip,
+        # git — keeps the direct route.
+        PNR_CODEX_PROXY_PORT={{port}}
+        _pnr_codex_shell=0
+        if [ -n "${CODEX_HOME:-}" ]; then
+            _pnr_codex_shell=1
+        fi
+        case "${BASH_EXECUTION_STRING:-}" in
+            *codex*|*Codex*) _pnr_codex_shell=1 ;;
+        esac
+        if [ "$_pnr_codex_shell" = "1" ]; then
+            _pnr_host_ip=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+            if [ -n "$_pnr_host_ip" ]; then
+                export HTTP_PROXY="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT"
+                export HTTPS_PROXY="$HTTP_PROXY"
+                export ALL_PROXY="$HTTP_PROXY"
+                export NO_PROXY="{{noProxy}}"
+            fi
+            unset _pnr_host_ip
+        fi
+        unset _pnr_codex_shell
+        """;
 
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
     internal static string BuildStartupScript(string user, int port) => $$"""
@@ -474,7 +580,7 @@ public sealed class WslConfigGuard(
         return distros.All(d => d.State == GuardState.Off) ? GuardState.Off : GuardState.Partial;
     }
 
-    private static string DescribeMismatch(WslRead read, int expectedPort, string? expectedProxy)
+    private static string DescribeMismatch(WslRead read, int expectedPort, string? expectedProxy, bool proxyEnvExpected)
     {
         var parts = new List<string>();
         if (read.ScriptPort != expectedPort)
@@ -490,6 +596,15 @@ public sealed class WslConfigGuard(
         if (read.SettingsProxy is null && expectedProxy is null)
         {
             parts.Add("settings.json has no HTTPS_PROXY");
+        }
+
+        if (proxyEnvExpected && !read.ProxyEnvPresent)
+        {
+            parts.Add("codex proxy env file not found");
+        }
+        else if (proxyEnvExpected && read.ProxyEnvPort != expectedPort)
+        {
+            parts.Add($"codex proxy env PORT={read.ProxyEnvPort?.ToString() ?? "<none>"} (expected {expectedPort})");
         }
 
         return string.Join("; ", parts);

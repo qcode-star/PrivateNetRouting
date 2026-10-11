@@ -113,6 +113,19 @@ public class BrowserLauncherTests : IDisposable
         Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
         Assert.Contains(@"user_pref(""browser.shell.checkDefaultBrowser"", false);", js);
         Assert.Contains(@"user_pref(""datareporting.policy.dataSubmissionEnabled"", false);", js);
+        // WebRTC goes around the proxy and reveals the real address: off unless the owner lifts it
+        Assert.Contains(@"user_pref(""media.peerconnection.enabled"", false);", js);
+        Assert.Contains(@"user_pref(""media.navigator.enabled"", false);", js);
+    }
+
+    [Fact]
+    public void UserJsLeavesWebRtcAloneWhenTheConfigAllowsIt()
+    {
+        var js = FirefoxUserJs.Render("127.0.0.1", 18082, "localhost, *.ru", disableWebRtc: false);
+
+        Assert.DoesNotContain("peerconnection", js);
+        Assert.DoesNotContain("media.navigator", js);
+        Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
     }
 
     [Fact]
@@ -136,6 +149,22 @@ public class BrowserLauncherTests : IDisposable
         Assert.Contains(@"user_pref(""network.proxy.http_port"", 18082);", userJs);
         Assert.Contains("team.example.net", userJs);
         Assert.Contains("*.ru", userJs);
+        Assert.Contains(@"user_pref(""media.peerconnection.enabled"", false);", userJs);
+        Assert.Contains("WebRTC off", ReadLog());
+    }
+
+    [Fact]
+    public async Task ConfiguredWebRtcIsNotSwitchedOffInUserJs()
+    {
+        var config = NewConfig();
+        config.Browser.DisableWebRtc = false;
+        var launcher = Create(config);
+
+        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+        var userJs = await File.ReadAllTextAsync(Path.Combine(config.Browser.Firefox.ProfileDir, "user.js"));
+        Assert.DoesNotContain("peerconnection", userJs);
+        Assert.Contains("WebRTC on", ReadLog());
     }
 
     [Fact]
@@ -186,16 +215,34 @@ public class BrowserLauncherTests : IDisposable
         Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
         var psi = Assert.Single(_started);
         Assert.Equal(@"C:\fake\msedge.exe", psi.FileName);
-        Assert.Equal("--proxy-server=http://127.0.0.1:18082", psi.ArgumentList[0]);
         Assert.Equal(
-            "--proxy-bypass-list=<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local;corp.example.com;*.corp.example.com;team.example.net;*.team.example.net;*.ru;*.by",
-            psi.ArgumentList[1]);
-        Assert.Equal($"--user-data-dir={config.Browser.Chromium.ProfileDir}", psi.ArgumentList[2]);
-        Assert.Equal("--no-first-run", psi.ArgumentList[3]);
-        Assert.Equal("--no-default-browser-check", psi.ArgumentList[4]);
-        Assert.Equal("https://claude.ai", psi.ArgumentList[5]);
+            [
+                "--proxy-server=http://127.0.0.1:18082",
+                "--proxy-bypass-list=<local>;localhost;127.0.0.1;[::1];10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;100.64.0.0/10;*.local;corp.example.com;*.corp.example.com;team.example.net;*.team.example.net;*.ru;*.by",
+                // No full WebRTC switch exists in the family: the policy is the most it can be pinned down
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                $"--user-data-dir={config.Browser.Chromium.ProfileDir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "https://claude.ai",
+            ],
+            psi.ArgumentList);
         // Chromium has no user.js; the browser itself creates the profile on first launch
         Assert.False(File.Exists(Path.Combine(config.Browser.Chromium.ProfileDir, "user.js")));
+    }
+
+    [Fact]
+    public async Task ConfiguredWebRtcLeavesTheChromiumPolicyOut()
+    {
+        var config = NewConfig(BrowserKind.Chromium);
+        config.Browser.DisableWebRtc = false;
+        var launcher = Create(config);
+
+        await launcher.LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.DoesNotContain(
+            Assert.Single(_started).ArgumentList,
+            arg => arg.Contains("webrtc", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -206,10 +253,9 @@ public class BrowserLauncherTests : IDisposable
 
         await launcher.LaunchAsync(new BrowserLauncherOptions(Private: true), null, CancellationToken.None);
 
-        var psi = Assert.Single(_started);
-        Assert.Equal("--no-default-browser-check", psi.ArgumentList[4]);
-        Assert.Equal("--incognito", psi.ArgumentList[5]);
-        Assert.Equal("https://claude.ai", psi.ArgumentList[6]);
+        var args = Assert.Single(_started).ArgumentList;
+        Assert.Equal("--incognito", args[^2]);
+        Assert.Equal("https://claude.ai", args[^1]);
     }
 
     [Fact]

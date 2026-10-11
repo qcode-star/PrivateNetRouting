@@ -636,11 +636,16 @@ public partial class MainWindow : Window
     /// <summary>Line of a single distro: name + localized state (details are in the tooltip).</summary>
     private static string LocalizeDistroStatus(WslDistroStatus distro) => distro.State switch
     {
-        GuardState.On => Loc.F("Main.Guard.Wsl.DistroOnFmt", distro.Distro, distro.ScriptPort),
+        GuardState.On => Loc.F("Main.Guard.Wsl.DistroOnFmt", distro.Distro, distro.ScriptPort, LocalizeCodexEnv(distro)),
         GuardState.Off => $"{distro.Distro}: {Loc.S("Main.Guard.State.Off")}",
-        GuardState.Partial => $"{distro.Distro}: {Loc.S("Main.Guard.State.Partial")}",
+        GuardState.Partial => Loc.F("Main.Guard.Wsl.DistroPartialFmt", distro.Distro, LocalizeCodexEnv(distro)),
         _ => $"{distro.Distro}: {LocalizeWslReason(distro.Reason)}",
     };
+
+    /// <summary>The Codex proxy env layer of a distro in one word (the file carries the proxy port).</summary>
+    private static string LocalizeCodexEnv(WslDistroStatus distro) => distro.ProxyEnvPresent
+        ? Loc.F("Main.Guard.Wsl.CodexEnvOnFmt", distro.ProxyEnvPort ?? 0)
+        : Loc.S("Main.Guard.Wsl.CodexEnvMissing");
 
     private static string LocalizeWslReason(string reason)
     {
@@ -760,11 +765,16 @@ public partial class MainWindow : Window
 
         var lines = result.Distros.Select(d => d.Skipped
             ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
-            : d.SettingsWritten || d.ScriptWritten
-                ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "")
-                : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? ""));
+            : d.SettingsWritten || d.ScriptWritten || d.ProxyEnvWritten
+                ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten))
+                : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten)));
         _viewModel.SetCheckText(string.Join("; ", lines));
     });
+
+    /// <summary>The Codex proxy env part of a sync result line ("codex env written" / "up to date").</summary>
+    private static string LocalizeCodexWritten(bool written) => written
+        ? Loc.S("Main.Guard.Wsl.CodexEnvWritten")
+        : Loc.S("Main.Guard.Wsl.CodexEnvUnchanged");
 
     private async void OnRefreshGuards(object sender, RoutedEventArgs e) => await RefreshGuardsAsync();
 
@@ -1098,6 +1108,15 @@ public partial class MainWindow : Window
         await RunLaunchAsync();
     }
 
+    /// <summary>
+    /// The offer before a launch: a copy started outside the application is single-instance, so a
+    /// new start only activates its window and the proxy flags never reach the processes that are
+    /// already running. Yes closes that copy and starts it again through the proxy, No cancels
+    /// the launch (nothing is closed, nothing is raised) — the log keeps the reason.
+    /// </summary>
+    private bool ConfirmRestartOfRunningApp(RunningAppInfo running, string appNameKey) =>
+        LaunchPrompts.ConfirmRestart(this, running, appNameKey);
+
     private async Task RunLaunchAsync()
     {
         if (_launchBusy)
@@ -1113,6 +1132,14 @@ public partial class MainWindow : Window
         _operationCts = cts;
         try
         {
+            var running = _runtime.Launcher.InspectRunning();
+            if (running.State == RunningAppState.WithoutProxy && !ConfirmRestartOfRunningApp(running, "App.Name.Claude"))
+            {
+                _runtime.Launcher.NoteRestartDeclined();
+                _viewModel.SetCheckResult("Main.Launch.RestartDeclined");
+                return;
+            }
+
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
             chainWasDown = !healthy;
             if (!healthy)
@@ -1121,8 +1148,10 @@ public partial class MainWindow : Window
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.Launcher.LaunchAsync(LauncherOptions.Default, progress, cts.Token);
-            _viewModel.SetCheckResult("Main.Launch.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+            var result = await _runtime.Launcher.LaunchAsync(LaunchPrompts.OptionsFor(running), progress, cts.Token);
+            _viewModel.SetCheckResult(
+                result.RestartedExisting ? "Main.Launch.RestartedFmt" : "Main.Launch.DoneFmt",
+                Math.Round(result.Elapsed.TotalSeconds, 1));
             success = true;
         }
         catch (OperationCanceledException)
@@ -1258,7 +1287,8 @@ public partial class MainWindow : Window
     /// <summary>
     /// Codex launch: the same contract as the Claude launch — a live CONNECT, an idempotent
     /// chain bring-up drawn in the chain card, then the app with the proxy flags and env
-    /// (the package-context launch). A running copy is only warned about in the log.
+    /// (the package-context launch). A copy started outside the launcher keeps its own flags
+    /// until it is closed, so the owner is offered a restart first.
     /// </summary>
     private async void OnLaunchCodex(object sender, RoutedEventArgs e) => await RunCodexLaunchAsync();
 
@@ -1277,6 +1307,14 @@ public partial class MainWindow : Window
         _operationCts = cts;
         try
         {
+            var running = _runtime.CodexLauncher.InspectRunning();
+            if (running.State == RunningAppState.WithoutProxy && !ConfirmRestartOfRunningApp(running, "App.Name.Codex"))
+            {
+                _runtime.CodexLauncher.NoteRestartDeclined();
+                _viewModel.SetCheckResult("Main.Launch.RestartDeclined");
+                return;
+            }
+
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
             chainWasDown = !healthy;
             if (!healthy)
@@ -1285,8 +1323,10 @@ public partial class MainWindow : Window
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.CodexLauncher.LaunchAsync(LauncherOptions.Default, progress, cts.Token);
-            _viewModel.SetCheckResult("Main.Codex.DoneFmt", Math.Round(result.Elapsed.TotalSeconds, 1));
+            var result = await _runtime.CodexLauncher.LaunchAsync(LaunchPrompts.OptionsFor(running), progress, cts.Token);
+            _viewModel.SetCheckResult(
+                result.RestartedExisting ? "Main.Codex.RestartedFmt" : "Main.Codex.DoneFmt",
+                Math.Round(result.Elapsed.TotalSeconds, 1));
             success = true;
         }
         catch (OperationCanceledException)

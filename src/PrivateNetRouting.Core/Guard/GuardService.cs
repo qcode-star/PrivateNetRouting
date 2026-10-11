@@ -162,7 +162,7 @@ public sealed class GuardService(
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
                 : string.Join("; ", wsl.Distros.Select(d =>
-                    $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")}{(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))),
+                    $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")} (claude script {(d.ScriptPort?.ToString() ?? "-")}, codex proxy env {(d.ProxyEnvPresent ? d.ProxyEnvPort?.ToString() ?? "present" : "missing")}){(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))),
             new(GuardKind.SystemProxy, sysProxy.Enabled ? GuardState.On : GuardState.Off,
                 sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled"),
         ];

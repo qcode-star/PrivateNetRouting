@@ -25,7 +25,8 @@ public class LauncherTests : IDisposable
         AppConfig? config = null,
         bool healthy = true,
         string? policy = "http://127.0.0.1:18082",
-        ChainException? chainFailure = null)
+        ChainException? chainFailure = null,
+        IRunningAppCloser? closer = null)
     {
         config ??= new AppConfig
         {
@@ -48,7 +49,8 @@ public class LauncherTests : IDisposable
             {
                 _started.Add(psi);
                 return null;
-            });
+            },
+            closer);
     }
 
     [Fact]
@@ -148,6 +150,38 @@ public class LauncherTests : IDisposable
 
         Assert.Single(_started);
         Assert.Contains("without --proxy-server", ReadLog());
+    }
+
+    [Fact]
+    public async Task RestartClosesTheRunningClaudeBeforeStarting()
+    {
+        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe")];
+        var closer = new FakeAppCloser { Alive = { 42 } };
+        var launcher = Create(closer: closer);
+
+        var result = await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.True(result.RestartedExisting);
+        Assert.Single(_started); // the launch itself always happens
+        Assert.Equal(new[] { 42 }, closer.GracefulCalls);
+        Assert.Empty(closer.Alive);
+        Assert.Contains("closed to restart through the proxy", ReadLog());
+    }
+
+    [Fact]
+    public async Task RunningClaudeWithOurProxyIsOnlyReported()
+    {
+        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe --proxy-server=http://127.0.0.1:18082")];
+        var closer = new FakeAppCloser { Alive = { 42 } };
+        var launcher = Create(closer: closer);
+
+        var running = launcher.InspectRunning();
+        await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.Equal(RunningAppState.Proxied, running.State);
+        Assert.Empty(closer.GracefulCalls); // nothing to restart: the flags are already ours
+        Assert.Single(_started);
+        Assert.Contains("activates the existing window", ReadLog());
     }
 
     // FileLog keeps the file open for writing, so read with ReadWrite sharing

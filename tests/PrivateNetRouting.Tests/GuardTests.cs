@@ -106,8 +106,8 @@ internal sealed class FakeWslRunner : IWslProcessRunner
     /// <summary>Answer of the root pass (state read) by distro name; the completion marker is appended.</summary>
     public Func<string, string> ProbeOutput { get; set; } = _ => "SCRIPT=missing\nSETTINGS=missing\n";
 
-    /// <summary>Output returned for the writing scripts (settings/startup); without the marker the sync must fail.</summary>
-    public string WriteOutput { get; set; } = "SETTINGS=written\nSCRIPT=written\nPNR=ok\n";
+    /// <summary>Output returned for the writing scripts (settings/startup/codex env); without the marker the sync must fail.</summary>
+    public string WriteOutput { get; set; } = "SETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n";
 
     /// <summary>stdin of scripts passed to the distro: (distro, user, script).</summary>
     public List<(string Distro, string? User, string Script)> Scripts { get; } = [];
@@ -542,6 +542,12 @@ public class GuardTests : IDisposable
         return config;
     }
 
+    /// <summary>Canned probe answer of a distro whose layers match the config (port 18082).</summary>
+    private static string WslProbeInSync(string user, string proxy = "http://192.0.2.1:18082") =>
+        $"SCRIPT=present\nPORT=18082\nUSER_NAME='{user}'\n"
+        + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n"
+        + $"SETTINGS=present\n{{\"env\":{{\"HTTPS_PROXY\":\"{proxy}\"}}}}\nSETTINGS=END\n";
+
     [Fact]
     public async Task WslLayerModes()
     {
@@ -571,9 +577,7 @@ public class GuardTests : IDisposable
         {
             Installed = ["d1", "d2"],
             Running = ["d1"], // d2 is not running; not started just for status
-            ProbeOutput = distro => distro == "d1"
-                ? $"SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nSETTINGS=present\n{{\"env\":{{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}}}\nSETTINGS=END\n"
-                : "",
+            ProbeOutput = distro => distro == "d1" ? WslProbeInSync("u1") : "",
         };
         var guard = new WslConfigGuard(
             WslConfig("on", ("d1", "u1", true), ("d2", "u2", false)),
@@ -586,8 +590,75 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.On, status.Distros[0].State);
         Assert.Equal(18082, status.Distros[0].ScriptPort);
         Assert.Equal("http://192.0.2.1:18082", status.Distros[0].CurrentProxy);
+        Assert.True(status.Distros[0].ProxyEnvPresent);
+        Assert.Equal(18082, status.Distros[0].ProxyEnvPort);
         Assert.Equal(GuardState.Unknown, status.Distros[1].State);
         Assert.Contains("not running", status.Distros[1].Reason);
+    }
+
+    [Fact]
+    public async Task WslStatusReportsCodexProxyEnvState()
+    {
+        // d1 carries the codex env file, d2 has none (the layer is on for both)
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1", "d2"],
+            Running = ["d1", "d2"],
+            ProbeOutput = distro => distro == "d1"
+                ? WslProbeInSync("u1")
+                : "SCRIPT=present\nPORT=18082\nUSER_NAME='u2'\nPROXYENV=missing\n"
+                  + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true), ("d2", "u2", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Partial, status.State);
+        Assert.Equal(GuardState.On, status.Distros[0].State);
+        Assert.Equal("", status.Distros[0].Reason);
+        Assert.Equal(GuardState.Partial, status.Distros[1].State);
+        Assert.Contains("codex proxy env file not found", status.Distros[1].Reason);
+    }
+
+    [Fact]
+    public async Task WslStatusIgnoresCodexProxyEnvWhenTheDistroOptedOut()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\n"
+                + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
+        };
+        var config = WslConfig("on", ("d1", "u1", true));
+        config.Guard.Wsl.Distros[0].ProxyEnv = false;
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.On, status.Distros[0].State);
+    }
+
+    [Fact]
+    public void CodexProxyEnvScriptExportsTheProxyToCodexShellsOnly()
+    {
+        var script = WslConfigGuard.BuildCodexProxyEnvScript(18082, "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com");
+
+        // the marker the desktop app always passes into the distro for its own processes
+        Assert.Contains("if [ -n \"${CODEX_HOME:-}\" ]; then", script);
+        // the fallback: a shell started by hand to run codex
+        Assert.Contains("case \"${BASH_EXECUTION_STRING:-}\" in", script);
+        Assert.Contains("*codex*|*Codex*)", script);
+        // the address is the WSL NAT gateway recomputed at every shell start, not 127.0.0.1
+        Assert.Contains("ip route show default", script);
+        Assert.Contains("export HTTP_PROXY=\"http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT\"", script);
+        Assert.Contains("export NO_PROXY=\"localhost,127.0.0.1,.local,corp.example.com,.corp.example.com\"", script);
+        // the port line is what `pnr guard status` reads back
+        Assert.Contains("PNR_CODEX_PROXY_PORT=18082", script);
+        Assert.DoesNotContain("127.0.0.1:18082", script);
     }
 
     [Fact]
@@ -638,15 +709,16 @@ public class GuardTests : IDisposable
         Assert.True(d2.Skipped);
         Assert.Contains("not running", d2.Reason);
 
-        // d1: two passes, settings as the user and the script as root
+        // d1: one pass as the user (settings) and two as root (startup script + codex proxy env)
         var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1");
         Assert.Contains("SETTINGS=\"$HOME/.claude/settings.json\"", settings.Script);
         Assert.Contains("pnr-bak", settings.Script);
-        var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root");
+        var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("10-claude-proxy.sh"));
         Assert.Contains("/etc/wsl.d/startup/10-claude-proxy.sh", root.Script);
         Assert.DoesNotContain("chmod 755", settings.Script);
         Assert.True(d1.SettingsWritten);
         Assert.True(d1.ScriptWritten);
+        Assert.True(d1.ProxyEnvWritten);
 
         // startup script contents: the app port and the distro user
         var payload = ExtractBase64Payload(root.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"");
@@ -655,6 +727,61 @@ public class GuardTests : IDisposable
         Assert.Contains("PORT=18082", script);
         Assert.Contains("env['HTTPS_PROXY'] = proxy", script);
         Assert.DoesNotContain("env['NO_PROXY']", script); // the startup script does not touch NO_PROXY (mentioned only in a comment)
+
+        // codex proxy env contents: the marker, the port and the bypass zones of the config
+        var envPass = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("ENVFILE="));
+        var envPayload = ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"");
+        var envScript = Encoding.UTF8.GetString(Convert.FromBase64String(envPayload));
+        Assert.Contains("guard.wsl.proxyEnvPath", envScript);
+        Assert.Contains("PNR_CODEX_PROXY_PORT=18082", envScript);
+        Assert.Contains("${CODEX_HOME:-}", envScript);
+        Assert.Contains("export NO_PROXY=", envScript);
+        // distro d3 is configured with sync=false: nothing is written into it at all
+        Assert.DoesNotContain(runner.Scripts, s => s.Distro == "d3");
+    }
+
+    [Fact]
+    public async Task WslSyncLeavesCodexProxyEnvAloneWhenTheDistroOptedOut()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var config = WslConfig("on", ("d1", "u1", true));
+        config.Guard.Wsl.Distros[0].ProxyEnv = false;
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.False(d1.ProxyEnvWritten);
+        Assert.DoesNotContain(runner.Scripts, s => s.Script.Contains("ENVFILE="));
+    }
+
+    [Fact]
+    public async Task WslSyncReadsTheCodexProxyEnvBackupFromDistroOutput()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            WriteOutput = """
+                SETTINGS=unchanged
+                SCRIPT=unchanged
+                BACKUP=/etc/profile.d/20-pnr-codex-proxy.sh.pnr-bak-20261013-120000
+                ENVFILE=written
+                PNR=ok
+                """,
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1", true)),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.False(d1.SettingsWritten);
+        Assert.False(d1.ScriptWritten);
+        Assert.True(d1.ProxyEnvWritten);
+        Assert.Equal("/etc/profile.d/20-pnr-codex-proxy.sh.pnr-bak-20261013-120000", d1.ProxyEnvBackup);
     }
 
     [Fact]

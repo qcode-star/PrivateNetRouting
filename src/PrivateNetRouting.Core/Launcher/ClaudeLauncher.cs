@@ -7,8 +7,14 @@ using Microsoft.Win32;
 
 namespace PrivateNetRouting.Core.Launcher;
 
-/// <summary>Launch mode: normal or "check/bring up the chain only" (Claude does not start).</summary>
-public sealed record LauncherOptions(bool CheckOnly)
+/// <summary>
+/// Launch mode: normal or "check/bring up the chain only" (the application does not start).
+/// RestartRunning closes an already running copy before the start: without it a second start of
+/// a single-instance app only activates the existing window and the proxy flags never apply.
+/// The owner is asked about the restart by the caller (GUI dialog, CLI prompt) — this flag is
+/// the answer to that question, not a decision of the launcher itself.
+/// </summary>
+public sealed record LauncherOptions(bool CheckOnly, bool RestartRunning = false)
 {
     public static LauncherOptions Default { get; } = new(CheckOnly: false);
 }
@@ -22,7 +28,7 @@ public enum LaunchOutcome
     CheckOnly,
 }
 
-public sealed record LaunchResult(LaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed);
+public sealed record LaunchResult(LaunchOutcome Outcome, bool ChainRaised, TimeSpan Elapsed, bool RestartedExisting = false);
 
 /// <summary>
 /// Building --proxy-bypass-list: a fixed base list (localhost and private
@@ -60,8 +66,10 @@ public static class ClaudeBypassList
 /// Claude Desktop launcher: checks the chain with a live
 /// CONNECT roundtrip, on failure brings it up idempotently (the only UAC window is
 /// starting the daemon), then starts Claude with --proxy-server/--proxy-bypass-list.
-/// The managed egressProxyUrl policy and already running Claude copies are only monitored,
-/// with a warning in the log (they cannot stop the launch).
+/// The managed egressProxyUrl policy is only monitored, with a warning in the log (it cannot
+/// stop the launch). An already running copy is reported the same way, and with
+/// LauncherOptions.RestartRunning it is closed first — the flags of a second start otherwise
+/// never reach the processes of the first one.
 /// </summary>
 public sealed class ClaudeLauncher(
     AppConfig config,
@@ -70,13 +78,25 @@ public sealed class ClaudeLauncher(
     IProcessFinder processFinder,
     FileLog log,
     Func<string?>? readEgressPolicy = null,
-    Func<ProcessStartInfo, Process?>? startProcess = null)
+    Func<ProcessStartInfo, Process?>? startProcess = null,
+    IRunningAppCloser? appCloser = null)
 {
     private const string PolicyKey = @"SOFTWARE\Policies\Claude";
     private const string PolicyValue = "egressProxyUrl";
 
+    /// <summary>The launcher has no install path of its own to check against (unlike the Codex package name).</summary>
+    private const string ProcessNamePart = "claude";
+
     private readonly Func<string?> _readEgressPolicy = readEgressPolicy ?? ReadEgressPolicyFromRegistry;
     private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
+    private readonly RunningApp _running = new(
+        processFinder,
+        ProcessNamePart,
+        commandLineMarker: null,
+        "http://" + config.ForwardProxy.Listen,
+        appCloser ?? new WindowsRunningAppCloser(),
+        log,
+        "launcher");
 
     /// <summary>Launcher log (the splash screen offers to open it on failure).</summary>
     public FileLog Log => log;
@@ -108,7 +128,22 @@ public sealed class ClaudeLauncher(
         }
 
         WarnIfPolicyMissing();
-        WarnIfClaudeRunningWithoutProxy();
+
+        var running = _running.Inspect();
+        var restarted = false;
+        if (options.RestartRunning && running.State == RunningAppState.WithoutProxy)
+        {
+            // The owner has already agreed to the restart (GUI dialog, CLI question): a copy
+            // that carries our proxy is left alone — a new start only activates its window.
+            restarted = (await _running
+                    .CloseAsync("Claude", TimeSpan.FromSeconds(config.Launcher.RestartGraceSeconds), ct)
+                    .ConfigureAwait(false))
+                .AnythingClosed;
+        }
+        else
+        {
+            _running.Report(running, "Claude");
+        }
 
         var info = new ProcessStartInfo(config.Launcher.AliasPath)
         {
@@ -126,8 +161,18 @@ public sealed class ClaudeLauncher(
         }
 
         log.Info("launcher: Claude started with --proxy-server/--proxy-bypass-list");
-        return new LaunchResult(LaunchOutcome.Launched, chainRaised, watch.Elapsed);
+        return new LaunchResult(LaunchOutcome.Launched, chainRaised, watch.Elapsed, restarted);
     }
+
+    /// <summary>
+    /// The already-running state of Claude: a copy started outside the launcher keeps its own
+    /// flags until it is closed, so the GUI and the CLI ask the owner about a restart before
+    /// the launch (LauncherOptions.RestartRunning).
+    /// </summary>
+    public RunningAppInfo InspectRunning() => _running.Inspect();
+
+    /// <summary>The owner has refused the restart offer: the log keeps the reason nothing started.</summary>
+    public void NoteRestartDeclined() => _running.NoteDeclined("Claude");
 
     /// <summary>
     /// Safeguard against a launch not via the launcher: the managed policy takes effect for any launch
@@ -154,36 +199,6 @@ public sealed class ClaudeLauncher(
         else
         {
             log.Warn($"launcher: managed policy {PolicyValue} is missing or different [{policy ?? ""}] — a start outside the launcher goes direct");
-        }
-    }
-
-    /// <summary>An already running Claude without --proxy-server would work around the proxy: warn.</summary>
-    private void WarnIfClaudeRunningWithoutProxy()
-    {
-        IReadOnlyList<FoundProcess> processes;
-        try
-        {
-            processes = processFinder.FindByNameContains("claude");
-        }
-        catch (Exception ex)
-        {
-            log.Warn($"launcher: process scan failed: {ex.Message}");
-            return;
-        }
-
-        if (processes.Count == 0)
-        {
-            return;
-        }
-
-        var withProxy = processes.Count(p => p.CommandLine.Contains("--proxy-server=", StringComparison.Ordinal));
-        if (withProxy == 0)
-        {
-            log.Warn($"launcher: Claude is already running ({processes.Count} processes) without --proxy-server — close it and use the launcher again");
-        }
-        else
-        {
-            log.Info($"launcher: Claude is already running ({processes.Count} processes) — starting one more instance activates the existing window");
         }
     }
 

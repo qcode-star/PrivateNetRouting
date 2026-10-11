@@ -1,5 +1,6 @@
 using System.Net;
 using PrivateNetRouting.Core.AppUpdate;
+using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Dns;
 using PrivateNetRouting.Core.SystemOps;
 
@@ -56,5 +57,49 @@ internal sealed class FakeAppReleaseFeed((string Tag, string Url)? release, Exce
         return error is not null
             ? Task.FromException<(string Tag, string Url)?>(error)
             : Task.FromResult(release);
+    }
+}
+
+/// <summary>
+/// Closer of a foreign application: alive PIDs are scripted, both close paths are recorded.
+/// A graceful close succeeds only for PIDs that are not in <see cref="NoWindow"/> and removes the
+/// process (the window close takes the Electron tree down); KillTree removes it unless it is
+/// listed in <see cref="SurvivesKill"/> (a zombie the caller must report).
+/// </summary>
+internal sealed class FakeAppCloser : IRunningAppCloser
+{
+    public HashSet<int> Alive { get; } = [];
+
+    /// <summary>PIDs whose window close reports "no window" (they go straight to the forced kill).</summary>
+    public HashSet<int> NoWindow { get; } = [];
+
+    /// <summary>PIDs that outlive the forced kill.</summary>
+    public HashSet<int> SurvivesKill { get; } = [];
+
+    public List<int> GracefulCalls { get; } = [];
+
+    public List<int> KillCalls { get; } = [];
+
+    public bool CloseGracefully(int processId)
+    {
+        GracefulCalls.Add(processId);
+        if (NoWindow.Contains(processId))
+        {
+            return false;
+        }
+
+        Alive.Remove(processId);
+        return true;
+    }
+
+    public bool Exists(int processId) => Alive.Contains(processId);
+
+    public void KillTree(int processId)
+    {
+        KillCalls.Add(processId);
+        if (!SurvivesKill.Contains(processId))
+        {
+            Alive.Remove(processId);
+        }
     }
 }
