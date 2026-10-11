@@ -100,8 +100,8 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// that executes every script of the startup directory in name order. A foreign command
 /// occupying the slot is preserved as 00-user-boot-command.sh (runs first); a foreign file
 /// already sitting at the runner path is replaced — wrapping it into the directory it serves
-/// would recurse. The state is recognized by the runner marker: an already-done distro is
-/// not rewritten (PlanBootLayer).
+/// would recurse. The state is recognized by the runner marker: an already-done distro gets
+/// no new wiring (PlanBootLayer), but the runner file itself is still kept current.
 /// </summary>
 public sealed class WslConfigGuard(
     AppConfig config,
@@ -272,22 +272,21 @@ public sealed class WslConfigGuard(
         var userCommandWritten = false;
         var wslConfWritten = false;
         List<string> bootBackups = [];
-        if (bootPlan != WslBootPlan.AlreadyOurs)
-        {
-            var bootScript = BuildBootSyncScript(
-                bootPlan, runnerPath, UserCommandPath(scriptPath), StartupDir(scriptPath),
-                bootCommand, SetBootCommand(read.WslConfText, runnerPath), stamp);
-            var bootOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], bootScript, Encoding.UTF8, ct);
-            RequireCompleted(bootOutput, $"boot layer sync in '{distro.Name}'");
-            bootRunnerWritten = bootOutput.Contains("RUNNER=written", StringComparison.Ordinal);
-            userCommandWritten = bootOutput.Contains("USERCMD=written", StringComparison.Ordinal);
-            wslConfWritten = bootOutput.Contains("WSLCONF=written", StringComparison.Ordinal);
-            bootBackups = bootOutput.Split('\n')
-                .Select(l => l.Trim())
-                .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
-                .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
-                .ToList();
-        }
+        // the pass always ensures the runner file itself (cmp makes it a no-op when current);
+        // the plan decides only about the preserved user command and the wsl.conf edit
+        var bootScript = BuildBootSyncScript(
+            bootPlan, runnerPath, UserCommandPath(scriptPath), StartupDir(scriptPath),
+            bootCommand, SetBootCommand(read.WslConfText, runnerPath), stamp);
+        var bootOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], bootScript, Encoding.UTF8, ct);
+        RequireCompleted(bootOutput, $"boot layer sync in '{distro.Name}'");
+        bootRunnerWritten = bootOutput.Contains("RUNNER=written", StringComparison.Ordinal);
+        userCommandWritten = bootOutput.Contains("USERCMD=written", StringComparison.Ordinal);
+        wslConfWritten = bootOutput.Contains("WSLCONF=written", StringComparison.Ordinal);
+        bootBackups = bootOutput.Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
+            .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
+            .ToList();
 
         // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
         // the backup is made only when the content actually changes

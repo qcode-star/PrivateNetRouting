@@ -1125,7 +1125,11 @@ public class GuardTests : IDisposable
         Assert.False(d1.UserCommandWritten);
         Assert.False(d1.WslConfWritten);
         Assert.Empty(d1.BootBackups ?? []);
-        Assert.DoesNotContain(runner.Scripts, s => s.Script.Contains("RUNNER=")); // no boot pass at all
+        // the wiring is not redone, but the runner file itself is still ensured (cmp → no-op here):
+        // a boot pass runs, with the runner block only
+        var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("RUNNER="));
+        Assert.DoesNotContain("USERCMD=", boot.Script);
+        Assert.DoesNotContain("WSLCONF=", boot.Script);
     }
 
     [Fact]
