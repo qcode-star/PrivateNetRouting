@@ -60,14 +60,14 @@
 
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Idle stop</s:String>
-    <s:String x:Key="Main.IdleStop.Note">Stops Claude in WSL and the chain when Claude is not in use. Lives as a separate background process: it keeps working after the application is closed and switches itself off after firing.</s:String>
+    <s:String x:Key="Main.IdleStop.Note">Stops Claude in WSL and the chain when neither Claude nor Codex is in use. Lives as a separate background process: it keeps working after the application is closed and switches itself off after firing.</s:String>
     <s:String x:Key="Main.IdleStop.AutoStart">auto-start</s:String>
     <s:String x:Key="Main.IdleStop.AutoStart.Note">Arm the idle stopper automatically after every chain bring-up.</s:String>
     <s:String x:Key="Main.IdleStop.Running">running</s:String>
     <s:String x:Key="Main.IdleStop.Off">not running</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Start</s:String>
     <s:String x:Key="Main.IdleStop.Button.Stop">Stop</s:String>
-    <s:String x:Key="Main.IdleStop.Gate">The idle stopper arms only over a live chain: it stops the chain when Claude goes idle, and a stopped chain takes it down itself.</s:String>
+    <s:String x:Key="Main.IdleStop.Gate">The idle stopper arms only over a live chain: it stops the chain when Claude and Codex go idle, and a stopped chain takes it down itself.</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">idle stop is on: checking every {0}s, runs in the background</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">idle stop is off</s:String>
 
@@ -247,7 +247,7 @@
     <!-- About window (the "?" help menu) -->
     <s:String x:Key="Main.About.Title">About PrivateNetRouting</s:String>
     <s:String x:Key="Main.About.Header">PrivateNetRouting</s:String>
-    <s:String x:Key="Main.About.Tagline">Local proxy with DoH resolution, a proxy chain supervisor, a Claude launcher, idle auto-stop and direct-access guards.</s:String>
+    <s:String x:Key="Main.About.Tagline">Local proxy with DoH resolution, a proxy chain supervisor, launchers for Claude and Codex, idle auto-stop and direct-access guards.</s:String>
     <s:String x:Key="Main.About.VersionFmt">version {0}</s:String>
     <s:String x:Key="Main.About.Close">Close</s:String>
 
@@ -263,7 +263,7 @@
     <s:String x:Key="Diag.Button.Refresh">Refresh</s:String>
     <s:String x:Key="Diag.Button.OpenLogs">Open logs</s:String>
     <s:String x:Key="Diag.Busy">collecting (a live CONNECT roundtrip is included)...</s:String>
-    <s:String x:Key="Diag.ChainStopped">The chain is stopped — this is normal while Claude is not needed. Raise it with the Claude shortcut or the Launch button.</s:String>
+    <s:String x:Key="Diag.ChainStopped">The chain is stopped — this is normal while Claude and Codex are not needed. Raise it with the Claude shortcut or a launch button.</s:String>
     <s:String x:Key="Diag.Section.chain">Chain</s:String>
     <s:String x:Key="Diag.Section.proxy">Forward proxy</s:String>
     <s:String x:Key="Diag.Section.health">Health</s:String>

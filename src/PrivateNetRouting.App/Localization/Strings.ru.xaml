@@ -60,14 +60,14 @@
 
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Автостоп</s:String>
-    <s:String x:Key="Main.IdleStop.Note">Останавливает Claude в WSL и цепочку, когда Claude не используется. Живёт отдельным фоновым процессом: работает и после закрытия приложения, а после срабатывания выключается сам.</s:String>
+    <s:String x:Key="Main.IdleStop.Note">Останавливает Claude в WSL и цепочку, когда ни Claude, ни Codex не используются. Живёт отдельным фоновым процессом: работает и после закрытия приложения, а после срабатывания выключается сам.</s:String>
     <s:String x:Key="Main.IdleStop.AutoStart">автозапуск</s:String>
     <s:String x:Key="Main.IdleStop.AutoStart.Note">Запускать автостоп автоматически после каждого поднятия цепочки.</s:String>
     <s:String x:Key="Main.IdleStop.Running">запущен</s:String>
     <s:String x:Key="Main.IdleStop.Off">не запущен</s:String>
     <s:String x:Key="Main.IdleStop.Button.Start">Запустить</s:String>
     <s:String x:Key="Main.IdleStop.Button.Stop">Остановить</s:String>
-    <s:String x:Key="Main.IdleStop.Gate">Автостоп включается только при поднятой цепочке: он останавливает её, когда Claude простаивает, а остановленная цепочка выключает его сама.</s:String>
+    <s:String x:Key="Main.IdleStop.Gate">Автостоп включается только при поднятой цепочке: он останавливает её, когда Claude и Codex простаивают, а остановленная цепочка выключает его сама.</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">автостоп запущен: проверка каждые {0} с, работает в фоне</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">автостоп остановлен</s:String>
 
@@ -247,7 +247,7 @@
     <!-- About window (the "?" help menu) -->
     <s:String x:Key="Main.About.Title">О PrivateNetRouting</s:String>
     <s:String x:Key="Main.About.Header">PrivateNetRouting</s:String>
-    <s:String x:Key="Main.About.Tagline">Локальный прокси с DoH-разрешением имён, супервизор прокси-цепочки, запуск Claude, автостоп по простою и контроль прямого доступа.</s:String>
+    <s:String x:Key="Main.About.Tagline">Локальный прокси с DoH-разрешением имён, супервизор прокси-цепочки, запуск Claude и Codex, автостоп по простою и контроль прямого доступа.</s:String>
     <s:String x:Key="Main.About.VersionFmt">версия {0}</s:String>
     <s:String x:Key="Main.About.Close">Закрыть</s:String>
 
@@ -263,7 +263,7 @@
     <s:String x:Key="Diag.Button.Refresh">Обновить</s:String>
     <s:String x:Key="Diag.Button.OpenLogs">Открыть логи</s:String>
     <s:String x:Key="Diag.Busy">собираю (входит живой CONNECT-roundtrip)...</s:String>
-    <s:String x:Key="Diag.ChainStopped">Цепочка остановлена — это норма, пока Claude не нужен. Подъём — ярлыком Claude или кнопкой запуска.</s:String>
+    <s:String x:Key="Diag.ChainStopped">Цепочка остановлена — это норма, пока Claude и Codex не нужны. Подъём — ярлыком Claude или кнопкой запуска.</s:String>
     <s:String x:Key="Diag.Section.chain">Цепочка</s:String>
     <s:String x:Key="Diag.Section.proxy">Forward-прокси</s:String>
     <s:String x:Key="Diag.Section.health">Здоровье</s:String>

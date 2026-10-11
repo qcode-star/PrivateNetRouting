@@ -199,7 +199,7 @@ internal static class Program
     /// State summary, read-only: chain processes and listener
     /// owners (PID), WSL bind, proxy counters, activity marker age, detailed
     /// CONNECT roundtrip, policy and ban, watchdog liveness. A fully stopped chain —
-    /// a short message: this is normal while Claude is not needed.
+    /// a short message: this is normal while Claude and Codex are not needed.
     /// </summary>
     private static async Task<int> RunStatusAsync()
     {
@@ -208,7 +208,7 @@ internal static class Program
         var summary = await runtime.Diagnostics.GetSummaryAsync(CancellationToken.None);
         if (summary.ChainStopped)
         {
-            Console.WriteLine($"chain ({config.ForwardProxy.Listen}) is stopped — normal while Claude is not needed.");
+            Console.WriteLine($"chain ({config.ForwardProxy.Listen}) is stopped — normal while Claude and Codex are not needed.");
             Console.WriteLine("Raise it: the Claude shortcut, pnr launch, or pnr chain up.");
             return 0;
         }
@@ -552,7 +552,7 @@ internal static class Program
             return 1;
         }
 
-        Console.WriteLine($"watchdog: checking Claude usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
+        Console.WriteLine($"watchdog: checking Claude and Codex usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
         if (string.IsNullOrWhiteSpace(config.Watchdog.WslDistro))
         {
             Console.WriteLine("watchdog: watchdog.wslDistro is not set, the WSL host will not be stopped on idle");
@@ -940,9 +940,9 @@ internal static class Program
                                  versions are checked first (no UAC when up to date),
                                  then chain if needed, fragment download, publisher
                                  check and Add-AppxPackage
-            pnr watchdog         idle auto-stop supervisor: check Claude usage every
-                                 watchdog.checkSeconds, on idle stop the WSL host and
-                                 the chain (Ctrl+C to stop; starts nothing by itself)
+            pnr watchdog         idle auto-stop supervisor: check Claude and Codex usage
+                                 every watchdog.checkSeconds, on idle stop the WSL host
+                                 and the chain (Ctrl+C to stop; starts nothing by itself)
             pnr guard status [--live]
                                  guard states, read-only: local ban (hosts/NRPT/firewall),
                                  egress policy, Claude settings.json env, Codex config.toml,
