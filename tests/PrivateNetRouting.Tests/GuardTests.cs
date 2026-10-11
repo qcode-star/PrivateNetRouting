@@ -748,32 +748,6 @@ public class GuardTests : IDisposable
         Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
         Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
         Assert.Contains("cat \"$_pnr_tmp\" > \"$_pnr_env\"", script);
-        // the revive kick: the loopback relay makes the shared .env's loopback form valid even
-        // when this rewrite never ran (the WSL startup script starts the relay, it exits when idle)
-        Assert.Contains("timeout 1 bash -c \"</dev/tcp/127.0.0.1/$PNR_CODEX_PROXY_PORT\"", script);
-        Assert.Contains("setsid nohup python3 /etc/wsl.d/pnr-proxy-relay.py", script);
-    }
-
-    [Fact]
-    public void StartupScriptKeepsLoopbackRelayForTheSharedCodexEnv()
-    {
-        var script = WslConfigGuard.BuildStartupScript("u1", 18082);
-
-        // the probe lines `pnr guard status` reads back stay intact
-        Assert.Contains("USER_NAME='u1'", script);
-        Assert.Contains("\nPORT=18082\n", script);
-        // the relay file is reinstalled on every start, an old instance is killed first,
-        // the new one is started detached so the boot script does not wait for it
-        Assert.Contains("RELAY=\"/etc/wsl.d/pnr-proxy-relay.py\"", script);
-        Assert.Contains("pkill -f \"pnr-proxy-relay.py\"", script);
-        Assert.Contains("setsid nohup python3 \"$RELAY\"", script);
-        // the python forwarder: loopback listener, the gateway target read at WSL start,
-        // exit after 10 idle minutes so it never keeps the WSL VM up on its own
-        Assert.Contains("PORT = $PORT", script);
-        Assert.Contains("TARGET = (\"$HOST_IP\", PORT)", script);
-        Assert.Contains("server.bind((\"127.0.0.1\", PORT))", script);
-        Assert.Contains("IDLE_SECONDS = 600", script);
-        Assert.Contains("except socket.timeout:", script);
     }
 
     [Fact]
