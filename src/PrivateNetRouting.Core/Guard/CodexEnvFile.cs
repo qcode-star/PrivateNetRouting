@@ -122,7 +122,8 @@ public static class CodexEnvFile
 
     /// <summary>
     /// Writes the file (the loopback form) unless it already holds exactly these values; the
-    /// previous version goes to a `.pnr-bak-&lt;timestamp&gt;` copy, at most three are kept.
+    /// previous version goes to a `.pnr-bak-&lt;n&gt;` copy unless an identical state is already
+    /// preserved (three numbered slots are kept).
     /// </summary>
     public static (bool Written, string? BackupPath) Write(AppConfig config)
     {

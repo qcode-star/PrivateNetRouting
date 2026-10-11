@@ -14,7 +14,8 @@ namespace PrivateNetRouting.Core.Guard;
 /// The desktop app owns config.toml and rewrites it, so the edit is surgical: every other line is
 /// preserved byte for byte, only the flag line is inserted or rewritten, the newline style is
 /// kept. The .env merge is the same: our keys' lines are rewritten, foreign lines survive. Before
-/// a rewrite the previous version is copied to a `.pnr-bak-&lt;timestamp&gt;` name (at most three
+/// a rewrite the previous version is preserved unless an identical copy is already among the
+/// `.pnr-bak-*` backups (the matching copy is touched; three numbered slots, at most three
 /// such copies are kept per file). Requires no special rights.
 /// </summary>
 public sealed class CodexSettingsGuard(AppConfig config)

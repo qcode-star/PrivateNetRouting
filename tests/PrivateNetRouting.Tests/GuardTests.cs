@@ -325,7 +325,12 @@ public class GuardTests : IDisposable
         var name = Path.GetFileName(config.Guard.ClaudeSettingsPath);
         for (var i = 1; i <= 5; i++)
         {
-            File.WriteAllText(Path.Combine(dir, $"{name}.pnr-bak-2026010{i}-000000"), "old");
+            var stale = Path.Combine(dir, $"{name}.pnr-bak-2026010{i}-000000");
+            File.WriteAllText(stale, "old");
+            if (i <= 3)
+            {
+                File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-2)); // preserved longest ago
+            }
         }
 
         var legacy = Path.Combine(dir, $"{name}.bak-20260101-000000");
@@ -335,10 +340,40 @@ public class GuardTests : IDisposable
         var result = guard.Sync();
 
         Assert.True(result.Written);
-        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*").OrderDescending().ToList();
-        Assert.Equal(3, backups.Count); // the fresh one plus the two newest — no more
+        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*").ToList();
+        Assert.Equal(3, backups.Count); // the fresh one plus the two most recently preserved — no more
         Assert.Contains(result.BackupPath, backups);
+        Assert.True(File.Exists(Path.Combine(dir, $"{name}.pnr-bak-20260104-000000"))); // kept by mtime, not by name
+        Assert.True(File.Exists(Path.Combine(dir, $"{name}.pnr-bak-20260105-000000")));
         Assert.False(File.Exists(legacy));
+    }
+
+    [Fact]
+    public void SettingsBackupDeduplicatesAndReusesSlots()
+    {
+        var path = Path.Combine(_tempDir, "settings.json");
+        const string v1 = """{ "env": { "HTTPS_PROXY": "http://old:1" } }""";
+        File.WriteAllText(path, v1);
+
+        var first = ClaudeSettingsGuard.Backup(path);
+        Assert.Equal($"{path}.pnr-bak-1", first); // numbered slots instead of timestamped names
+        File.WriteAllText(path, "v2");
+        Assert.Equal($"{path}.pnr-bak-2", ClaudeSettingsGuard.Backup(path));
+
+        // a state already preserved is not copied again — the matching copy is touched
+        File.WriteAllText(path, v1);
+        File.SetLastWriteTimeUtc(first!, DateTime.UtcNow.AddDays(-2));
+        Assert.Null(ClaudeSettingsGuard.Backup(path));
+        Assert.Equal(2, Directory.GetFiles(_tempDir, "*.pnr-bak-*").Length); // nothing new created
+        Assert.True(File.GetLastWriteTimeUtc(first!) > DateTime.UtcNow.AddMinutes(-1)); // touched
+
+        // all three slots taken: the one preserved longest ago is reused
+        File.WriteAllText(path, "v3");
+        Assert.Equal($"{path}.pnr-bak-3", ClaudeSettingsGuard.Backup(path));
+        File.SetLastWriteTimeUtc(first!, DateTime.UtcNow.AddDays(-2));
+        File.WriteAllText(path, "v4");
+        Assert.Equal(first, ClaudeSettingsGuard.Backup(path));
+        Assert.Equal("v4", File.ReadAllText(first!));
     }
 
     [Fact]
@@ -825,8 +860,11 @@ public class GuardTests : IDisposable
         var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1");
         Assert.Contains("SETTINGS=\"$HOME/.claude/settings.json\"", settings.Script);
         Assert.Contains("pnr-bak", settings.Script);
+        Assert.Contains("pnr_bak \"$SETTINGS\" BACKUP", settings.Script); // the deduplicating backup helper
+        Assert.DoesNotContain("cp -p \"$SETTINGS\"", settings.Script);
         var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("10-claude-proxy.sh"));
         Assert.Contains("/etc/wsl.d/startup/10-claude-proxy.sh", root.Script);
+        Assert.Contains("pnr_bak \"$SCRIPT\" BACKUP", root.Script);
         Assert.DoesNotContain("chmod 755", settings.Script);
         Assert.True(d1.SettingsWritten);
         Assert.True(d1.ScriptWritten);
@@ -842,6 +880,7 @@ public class GuardTests : IDisposable
 
         // codex proxy env contents: the marker, the port and the bypass zones of the config
         var envPass = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("ENVFILE="));
+        Assert.Contains("pnr_bak \"$ENVFILE\" BACKUP", envPass.Script);
         var envPayload = ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"");
         var envScript = Encoding.UTF8.GetString(Convert.FromBase64String(envPayload));
         Assert.Contains("guard.wsl.proxyEnvPath", envScript);
@@ -1048,6 +1087,8 @@ public class GuardTests : IDisposable
 
         var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("RUNNER="));
         Assert.DoesNotContain("USERCMD=", boot.Script);
+        Assert.Contains("pnr_bak \"$RUNNER\" BACKUP_RUNNER", boot.Script); // the deduplicating backup helper
+        Assert.Contains("pnr_bak \"$WSLCONF\" BACKUP_WSLCONF", boot.Script);
         var runnerPayload = ExtractBase64Payload(boot.Script, "RUNNER=\"/etc/wsl.d/startup.sh\"");
         var runnerFile = Encoding.UTF8.GetString(Convert.FromBase64String(runnerPayload));
         Assert.StartsWith("#!/bin/bash", runnerFile);

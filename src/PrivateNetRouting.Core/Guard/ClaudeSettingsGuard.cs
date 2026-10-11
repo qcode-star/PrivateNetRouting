@@ -44,9 +44,12 @@ public static class ClaudeEnvValues
 /// env in settings.json of Claude Code, Windows: the Claude Code
 /// engine (CLI and the one built into Desktop) applies env both to sessions and to commands inside
 /// them. Existing keys (env and root) are preserved; the file is rewritten only when the env
-/// actually differs, and before a rewrite the previous version is copied to a `.pnr-bak-<timestamp>`
-/// name (at most three such copies are kept; the legacy `.bak-<timestamp>` naming is cleaned up on
-/// every sync). Requires no special rights.
+/// actually differs, and before a rewrite the previous version is preserved unless an identical
+/// copy is already among the `.pnr-bak-*` backups — the matching copy is touched instead, so
+/// mtime order mirrors the states most recently preserved (every copy gets its mtime at
+/// preservation time). The backups live in three numbered slots, the one preserved longest ago
+/// is reused; the legacy `.bak-&lt;timestamp&gt;` naming is cleaned up on every sync. Requires no
+/// special rights.
 /// </summary>
 public sealed class ClaudeSettingsGuard(AppConfig config)
 {
@@ -131,7 +134,14 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         ? ReadEnvOf(ReadRootOrEmpty(config.Guard.ClaudeSettingsPath))
         : null;
 
-    /// <summary>Copies the file to a `.pnr-bak-<timestamp>` name (null — the file did not exist).</summary>
+    /// <summary>
+    /// Preserves the file before a rewrite: the copy goes to a `<name>.pnr-bak-<n>` name
+    /// (three numbered slots; the one preserved longest ago is reused when all are taken). A state
+    /// already present among the `.pnr-bak-*` copies is not copied again — the matching copy is
+    /// touched instead, so mtime order mirrors the states most recently preserved; fresh copies
+    /// are touched too (File.Copy keeps the source mtime). Null — the file did not exist or its
+    /// content is already preserved.
+    /// </summary>
     internal static string? Backup(string path)
     {
         if (!File.Exists(path))
@@ -139,17 +149,54 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
             return null;
         }
 
-        var backupPath = $"{path}.pnr-bak-{DateTime.Now:yyyyMMdd-HHmmss}";
-        File.Copy(path, backupPath, overwrite: true);
-        return backupPath;
+        var dir = Path.GetDirectoryName(path) ?? ".";
+        var prefix = $"{Path.GetFileName(path)}.pnr-bak-";
+        var current = File.ReadAllBytes(path);
+        string? reuse = null;
+        var oldest = DateTime.MaxValue;
+        var taken = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var existing in Directory.GetFiles(dir, $"{prefix}*"))
+        {
+            if (current.SequenceEqual(File.ReadAllBytes(existing)))
+            {
+                // the state is already preserved — refresh its recency instead of copying again
+                File.SetLastWriteTimeUtc(existing, DateTime.UtcNow);
+                return null;
+            }
+
+            var suffix = Path.GetFileName(existing)[prefix.Length..];
+            if (suffix is "1" or "2" or "3")
+            {
+                taken.Add(suffix);
+                var preserved = File.GetLastWriteTimeUtc(existing);
+                if (preserved < oldest)
+                {
+                    oldest = preserved;
+                    reuse = existing;
+                }
+            }
+        }
+
+        // a free slot first; only when all three are taken — the one preserved longest ago
+        var slot = taken.Count == 3
+            ? reuse!
+            : $"{path}.pnr-bak-" + new[] { "1", "2", "3" }.First(n => !taken.Contains(n));
+        File.Copy(path, slot, overwrite: true);
+        File.SetLastWriteTimeUtc(slot, DateTime.UtcNow);
+        return slot;
     }
 
-    /// <summary>Keeps the three newest `.pnr-bak-` copies; removes the legacy `.bak-<timestamp>` naming.</summary>
+    /// <summary>
+    /// Keeps the three most recently preserved `.pnr-bak-` copies (mtime order — the copies may
+    /// carry legacy timestamp names); removes the legacy `.bak-<timestamp>` naming.
+    /// </summary>
     internal static void PruneBackups(string path)
     {
         var dir = Path.GetDirectoryName(path) ?? ".";
         var name = Path.GetFileName(path);
-        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*").OrderDescending().ToList();
+        var backups = Directory.GetFiles(dir, $"{name}.pnr-bak-*")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ToList();
         foreach (var stale in backups.Skip(3))
         {
             File.Delete(stale);

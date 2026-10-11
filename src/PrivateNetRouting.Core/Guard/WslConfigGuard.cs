@@ -82,9 +82,11 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// sync=true — startup script (proxy address = IP of the Windows side of WSL NAT + application port;
 /// NO_PROXY is not touched — it is managed by the sync) and the full env in ~/.claude/settings.json
 /// (proxy + NO_PROXY); sync=false — status only. A file is rewritten only when its content actually
-/// changes; before a rewrite the previous version is copied to a `.pnr-bak-<timestamp>` name, and
-/// at most three such copies are kept (the legacy `.bak-<timestamp>` naming is cleaned up on
-/// every sync). Status is read-only and only in running distros (they are not started just for a
+/// changes; before a rewrite the previous version is preserved unless an identical copy is already
+/// among the `.pnr-bak-*` backups (the matching copy is touched instead, so mtime order mirrors the
+/// states most recently preserved); the copies live in three numbered slots, the one preserved
+/// longest ago is reused (the legacy `.bak-<timestamp>` naming is cleaned up on every sync).
+/// Status is read-only and only in running distros (they are not started just for a
 /// check); sync does not start a distro — it skips it with a reason.
 ///
 /// The same sync writes the Codex proxy env layer (guard.wsl.proxyEnvPath, per distro
@@ -254,6 +256,40 @@ public sealed class WslConfigGuard(
         }
     }
 
+    /// <summary>
+    /// The bash helper embedded in every sync script (each script is a separate bash pass):
+    /// preserves a file in `<file>.pnr-bak-<n>` unless an identical copy already exists — then
+    /// just touches it (mtime order mirrors the states most recently preserved; fresh copies are
+    /// touched too, cp -p keeps the source mtime). Three numbered slots; the one preserved longest
+    /// ago is reused when all are taken. Emits `<prefix>=<path>` only for a fresh copy, so a
+    /// deduplicated backup simply produces no BACKUP line.
+    /// </summary>
+    internal const string PnrBakFn = """
+        pnr_bak() {
+            # pnr_bak <file> <prefix>: copy <file> to <file>.pnr-bak-<n> unless an identical
+            # .pnr-bak- copy already exists — a state is preserved only once (then just touched,
+            # so mtime order mirrors the recently preserved states).
+            local f="$1" prefix="$2" b n slot
+            for b in "$f".pnr-bak-*; do
+                [ -f "$b" ] || continue
+                if cmp -s "$f" "$b"; then
+                    touch "$b"
+                    return 0
+                fi
+            done
+            for n in 1 2 3; do
+                if [ ! -e "$f.pnr-bak-$n" ]; then
+                    slot="$f.pnr-bak-$n"
+                    break
+                fi
+            done
+            if [ -z "$slot" ]; then
+                slot=$(ls -1t "$f".pnr-bak-[123] 2>/dev/null | tail -n 1)
+            fi
+            cp -p "$f" "$slot" && touch "$slot" && echo "$prefix=$slot"
+        }
+        """;
+
     private async Task<WslDistroSyncResult> SyncDistroAsync(WslDistroConfig distro, System.Net.IPAddress? gateway, CancellationToken ct)
     {
         var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config.ForwardProxy)
@@ -298,14 +334,15 @@ public sealed class WslConfigGuard(
         root["env"] = env;
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
-        var settingsScript = $"""
+        var settingsScript = $$"""
+            {{PnrBakFn}}
             SETTINGS="$HOME/.claude/settings.json"
-            NEW="/tmp/.pnr-settings-{stamp}"
-            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}' | base64 -d > "$NEW"
+            NEW="/tmp/.pnr-settings-{{stamp}}"
+            echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}}' | base64 -d > "$NEW"
             if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
                 echo SETTINGS=unchanged
             else
-                if [ -f "$SETTINGS" ]; then cp -p "$SETTINGS" "$SETTINGS.pnr-bak-{stamp}" && echo BACKUP=settings.json.pnr-bak-{stamp}; fi
+                if [ -f "$SETTINGS" ]; then pnr_bak "$SETTINGS" BACKUP; fi
                 cat "$NEW" > "$SETTINGS"
                 echo SETTINGS=written
             fi
@@ -319,22 +356,23 @@ public sealed class WslConfigGuard(
 
         // startup script: refreshes the proxy address on every distro start
         var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config.ForwardProxy));
-        var rootScript = $"""
-            SCRIPT="{scriptPath}"
-            NEW="/tmp/.pnr-startup-{stamp}"
-            echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}' | base64 -d > "$NEW"
+        var rootScript = $$"""
+            {{PnrBakFn}}
+            SCRIPT="{{scriptPath}}"
+            NEW="/tmp/.pnr-startup-{{stamp}}"
+            echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}}' | base64 -d > "$NEW"
             mkdir -p "$(dirname "$SCRIPT")"
             if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
                 echo SCRIPT=unchanged
             else
-                if [ -f "$SCRIPT" ]; then cp -p "$SCRIPT" "$SCRIPT.pnr-bak-{stamp}" && echo BACKUP={scriptPath}.pnr-bak-{stamp}; fi
+                if [ -f "$SCRIPT" ]; then pnr_bak "$SCRIPT" BACKUP; fi
                 cat "$NEW" > "$SCRIPT"
                 chmod 755 "$SCRIPT"
                 echo SCRIPT=written
             fi
             rm -f "$NEW"
-            ls -1t {scriptPath}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
-            find "$(dirname "{scriptPath}")" -maxdepth 1 -name '{Path.GetFileName(scriptPath)}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+            ls -1t {{scriptPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+            find "$(dirname "{{scriptPath}}")" -maxdepth 1 -name '{{Path.GetFileName(scriptPath)}}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
             echo PNR=ok
             """;
         var scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
@@ -351,21 +389,22 @@ public sealed class WslConfigGuard(
             var envContent = BuildCodexProxyEnvScript(
                 ClaudeEnvValues.Port(config.ForwardProxy),
                 ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
-            var envScript = $"""
-                ENVFILE="{envPath}"
-                NEW="/tmp/.pnr-codexenv-{stamp}"
-                echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(envContent))}' | base64 -d > "$NEW"
+            var envScript = $$"""
+                {{PnrBakFn}}
+                ENVFILE="{{envPath}}"
+                NEW="/tmp/.pnr-codexenv-{{stamp}}"
+                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(envContent))}}' | base64 -d > "$NEW"
                 mkdir -p "$(dirname "$ENVFILE")"
                 if [ -f "$ENVFILE" ] && cmp -s "$NEW" "$ENVFILE"; then
                     echo ENVFILE=unchanged
                 else
-                    if [ -f "$ENVFILE" ]; then cp -p "$ENVFILE" "$ENVFILE.pnr-bak-{stamp}" && echo BACKUP={envPath}.pnr-bak-{stamp}; fi
+                    if [ -f "$ENVFILE" ]; then pnr_bak "$ENVFILE" BACKUP; fi
                     cat "$NEW" > "$ENVFILE"
                     chmod 644 "$ENVFILE"
                     echo ENVFILE=written
                 fi
                 rm -f "$NEW"
-                ls -1t {envPath}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                ls -1t {{envPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
                 echo PNR=ok
                 """;
             var envOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], envScript, Encoding.UTF8, ct);
@@ -864,6 +903,7 @@ public sealed class WslConfigGuard(
 
         var sb = new StringBuilder();
         sb.Append($$"""
+            {{PnrBakFn}}
             RUNNER="{{runnerPath}}"
             NEW="/tmp/.pnr-runner-{{stamp}}"
             echo '{{Payload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW"
@@ -871,7 +911,7 @@ public sealed class WslConfigGuard(
             if [ -f "$RUNNER" ] && cmp -s "$NEW" "$RUNNER"; then
                 echo RUNNER=unchanged
             else
-                if [ -f "$RUNNER" ]; then cp -p "$RUNNER" "$RUNNER.pnr-bak-{{stamp}}" && echo BACKUP_RUNNER={{runnerPath}}.pnr-bak-{{stamp}}; fi
+                if [ -f "$RUNNER" ]; then pnr_bak "$RUNNER" BACKUP_RUNNER; fi
                 cat "$NEW" > "$RUNNER"
                 chmod 755 "$RUNNER"
                 echo RUNNER=written
@@ -891,7 +931,7 @@ public sealed class WslConfigGuard(
                 if [ -f "$USERCMD" ] && cmp -s "$NEW" "$USERCMD"; then
                     echo USERCMD=unchanged
                 else
-                    if [ -f "$USERCMD" ]; then cp -p "$USERCMD" "$USERCMD.pnr-bak-{{stamp}}" && echo BACKUP_USERCMD={{userCommandPath}}.pnr-bak-{{stamp}}; fi
+                    if [ -f "$USERCMD" ]; then pnr_bak "$USERCMD" BACKUP_USERCMD; fi
                     cat "$NEW" > "$USERCMD"
                     chmod 755 "$USERCMD"
                     echo USERCMD=written
@@ -911,7 +951,7 @@ public sealed class WslConfigGuard(
                 if [ -f "$WSLCONF" ] && cmp -s "$NEW" "$WSLCONF"; then
                     echo WSLCONF=unchanged
                 else
-                    if [ -f "$WSLCONF" ]; then cp -p "$WSLCONF" "$WSLCONF.pnr-bak-{{stamp}}" && echo BACKUP_WSLCONF=/etc/wsl.conf.pnr-bak-{{stamp}}; fi
+                    if [ -f "$WSLCONF" ]; then pnr_bak "$WSLCONF" BACKUP_WSLCONF; fi
                     cat "$NEW" > "$WSLCONF"
                     chmod 644 "$WSLCONF"
                     echo WSLCONF=written
