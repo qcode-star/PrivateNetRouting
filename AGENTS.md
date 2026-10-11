@@ -225,10 +225,12 @@ src/
                              # --launch-browser shortcut mode (isolated profile, "already running"
                              # note), the launch actions in one row — the Claude pair pinned
                              # left, the shared "Browser" button centred, the Codex pair pinned
-                             # right (Launch Codex in the OpenAI green, CodexButton), each
+                             # right (Launch Codex in the OpenAI green, CodexButton; an app off
+                             # in the config — apps.claude/apps.codex — takes its pair out, its
+                             # tray launch item and its startup update check with it), each
                              # update button carries its app's update dot,
                              # the startup Claude and Codex update checks, the update windows
-                             # (UpdateWindow for Claude, CodexUpdateWindow for the Store update),
+                             # (UpdateWindow for Claude, CodexUpdateWindow for the Store update;
                              # the "Guards" card (status and control of
                              # ban/policy/settings.json/WSL; collapsible to one row — aggregate
                              # status dot + word and a single combined action: "enable all"
@@ -254,7 +256,9 @@ src/
     Theme.cs                 # App.xaml tokens for the code paths: state → brush, state → word
     WindowTheme.cs           # dark DWM title bar; unsupported builds keep the system one
   PrivateNetRouting.Core/    # logic without UI
-    Configuration/           # AppConfig (including ui.language, ui.checkUpdatesOnStart,
+    Configuration/           # AppConfig (including apps.claude/apps.codex — an app off hides its
+                             # UI pair, its tray item and its startup update check, and its pnr
+                             # commands refuse with a note; ui.language, ui.checkUpdatesOnStart,
                              # ui.chainCardExpanded, ui.guardsCardExpanded),
                              # AppLanguage (auto → system → en),
                              # loading from %APPDATA% (the template is config/*.example.json)

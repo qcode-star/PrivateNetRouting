@@ -6,6 +6,8 @@ namespace PrivateNetRouting.Core.Configuration;
 /// <summary>Root user config of the application (see config/appsettings.example.json).</summary>
 public sealed class AppConfig
 {
+    public AppsConfig Apps { get; set; } = new();
+
     public UiConfig Ui { get; set; } = new();
 
     public LoggingConfig Logging { get; set; } = new();
@@ -25,6 +27,21 @@ public sealed class AppConfig
     public UpdaterConfig Updater { get; set; } = new();
 
     public GuardConfig Guard { get; set; } = new();
+}
+
+/// <summary>
+/// Which applications this installation uses. An app turned off: its launch/update buttons and
+/// its startup update check disappear from the interface, the corresponding `pnr` commands refuse
+/// with a note; the guards, the chain and the idle stopper keep working as before. For an owner
+/// who uses only one of the two apps.
+/// </summary>
+public sealed class AppsConfig
+{
+    /// <summary>Claude Desktop: the launch/update buttons, `pnr launch`/`pnr update`, the startup update check.</summary>
+    public bool Claude { get; set; } = true;
+
+    /// <summary>Codex desktop app: the launch/update buttons, `pnr codex launch|update`, the startup update check.</summary>
+    public bool Codex { get; set; } = true;
 }
 
 /// <summary>WPF application UI settings. The CLI is always English and never reads them.</summary>

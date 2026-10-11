@@ -84,7 +84,10 @@ pnr config path|init           # user config path / create from defaults
 
 Everything environment-specific (endpoint addresses, ports, bypass domain lists, paths, timeouts)
 lives in the application's user config and never reaches git. The repository holds only templates
-with placeholders in `config/*.example.json`. The repository is public and anonymous: no real
+with placeholders in `config/*.example.json`. An installation that uses only one of the two apps
+turns the other off in the config (`apps.claude` / `apps.codex`): its launch/update buttons, its
+tray item and its startup update check disappear, and its `pnr` commands refuse with a note — the
+guards, the chain and the idle stopper keep working. The repository is public and anonymous: no real
 addresses, domains, names, or secrets (rule #2 in AGENTS.md).
 
 ## License

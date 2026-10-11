@@ -93,6 +93,7 @@ public partial class MainWindow : Window
         _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
         _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
         ApplyCardLayout();
+        ApplyAppAvailability();
         FillLanguages(languagePreference);
 
         _busyClock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
@@ -241,6 +242,21 @@ public partial class MainWindow : Window
     }
 
     private void OnToggleChainCard(object sender, RoutedEventArgs e) => SetChainCardExpanded(!_chainCardExpanded, persist: true);
+
+    /// <summary>
+    /// The launch/update buttons of an application turned off in the config (apps.claude /
+    /// apps.codex) leave the row: the owner sees only what they use. The browser button is
+    /// shared and stays. Follows a config reload.
+    /// </summary>
+    private void ApplyAppAvailability()
+    {
+        var claude = _runtime.Config.Apps.Claude ? Visibility.Visible : Visibility.Collapsed;
+        var codex = _runtime.Config.Apps.Codex ? Visibility.Visible : Visibility.Collapsed;
+        BtnLaunchClaude.Visibility = claude;
+        BtnUpdateClaude.Visibility = claude;
+        BtnUpdateCodex.Visibility = codex;
+        BtnLaunchCodex.Visibility = codex;
+    }
 
     private void OnToggleGuardsCard(object sender, RoutedEventArgs e)
     {
@@ -1050,6 +1066,8 @@ public partial class MainWindow : Window
             _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
             _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
             ApplyCardLayout();
+            ApplyAppAvailability();
+            _tray?.ShowLaunchClaude(_runtime.Config.Apps.Claude);
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);
@@ -1074,10 +1092,17 @@ public partial class MainWindow : Window
     /// <summary>
     /// Shortcut mode (App --launch instead of the Claude shortcut): Claude is already running — just
     /// show the window, without a second instance; not running — a normal launch whose bring-up is
-    /// drawn in the chain card (tunnel start, checks, then Claude with proxy flags).
+    /// drawn in the chain card (tunnel start, checks, then Claude with proxy flags). Claude turned
+    /// off in the config (apps.claude=false) — the window only, like an already running Claude.
     /// </summary>
     public async void LaunchFromShortcut()
     {
+        if (!_runtime.Config.Apps.Claude)
+        {
+            _viewModel.SetCheckResult("Main.Launch.ClaudeDisabled");
+            return;
+        }
+
         if (_launchBusy)
         {
             return;
@@ -1106,6 +1131,12 @@ public partial class MainWindow : Window
     /// <summary>Launching Claude from the tray: the same path as the window's launch button.</summary>
     public async Task LaunchClaudeAsync()
     {
+        if (!_runtime.Config.Apps.Claude)
+        {
+            _viewModel.SetCheckResult("Main.Launch.ClaudeDisabled");
+            return;
+        }
+
         if (_chainBusy || _launchBusy)
         {
             return;

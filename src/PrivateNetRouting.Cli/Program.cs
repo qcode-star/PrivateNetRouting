@@ -390,6 +390,12 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
+        if (!config.Apps.Claude)
+        {
+            Console.WriteLine("Claude is disabled in config (apps.claude=false)");
+            return 0;
+        }
+
         await using var runtime = ProxyRuntime.FromConfig(config);
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
@@ -528,6 +534,12 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
+        if (!config.Apps.Codex)
+        {
+            Console.WriteLine("Codex is disabled in config (apps.codex=false)");
+            return 0;
+        }
+
         await using var runtime = ProxyRuntime.FromConfig(config);
         var progress = new Progress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
@@ -577,6 +589,12 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
+        if (!config.Apps.Codex)
+        {
+            Console.WriteLine("Codex is disabled in config (apps.codex=false)");
+            return 0;
+        }
+
         await using var runtime = ProxyRuntime.FromConfig(config);
         var check = await runtime.CodexUpdater.CheckAsync(CancellationToken.None);
         Console.WriteLine($"installed: {check.Installed.Version} (package {check.Installed.Name})");
@@ -703,6 +721,12 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
+        if (!config.Apps.Claude)
+        {
+            Console.WriteLine("Claude is disabled in config (apps.claude=false)");
+            return 0;
+        }
+
         await using var runtime = ProxyRuntime.FromConfig(config);
         var progress = new SyncProgress<UpdateProgress>(p =>
             Console.WriteLine(p.TotalBytes > 0 && p.Phase == UpdatePhase.Download

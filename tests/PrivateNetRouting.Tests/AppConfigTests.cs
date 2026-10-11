@@ -155,6 +155,24 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void AppsSectionDefaultsOnAndTurnsOneAppOff()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.True(config.Apps.Claude); // both apps on for a new user
+        Assert.True(config.Apps.Codex);
+
+        File.WriteAllText(_path, """
+            {
+              "apps": { "claude": false }
+            }
+            """);
+
+        var loaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.False(loaded.Apps.Claude); // only Claude hides; Codex stays
+        Assert.True(loaded.Apps.Codex);
+    }
+
+    [Fact]
     public void UpdateChangesUiLanguageWithoutExpandingVariables()
     {
         File.WriteAllText(_path, """
