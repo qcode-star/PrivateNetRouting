@@ -103,23 +103,23 @@
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude is turned off in the config (apps.claude = false) — nothing to launch</s:String>
 
     <!-- Browser profile: created once through the dialog, then started as it is -->
-    <s:String x:Key="Main.Browser.Done">Browser started with its own profile (the chain egress answers)</s:String>
-    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Browser started, but the chain egress is not responding — the pages will not open</s:String>
+    <s:String x:Key="Main.Browser.Done">Browser started with its own profile (the egress answers)</s:String>
+    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Browser started, but the egress is not responding — the pages will not open</s:String>
     <s:String x:Key="Main.Browser.Cancelled">browser launch cancelled</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Browser is already running with our profile — bring it up from the taskbar</s:String>
     <s:String x:Key="Main.Browser.NotConfigured">the browser profile is not set up — create it from the "?" menu</s:String>
     <s:String x:Key="Main.Browser.CreateOfferTitle">The browser profile is not set up</s:String>
-    <s:String x:Key="Main.Browser.CreateOfferFmt">The browser has no profile yet: it goes straight to the chain's own egress, past the application proxy. Create the profile now?</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferFmt">The browser has no profile yet: it goes through the egress chosen in the config (browser.egress — the application's forward proxy by default). Create the profile now?</s:String>
     <s:String x:Key="Main.Browser.ProfileCreatedFmt">browser profile created: {0}</s:String>
     <s:String x:Key="Main.Browser.EgressDownTitle">The browser's proxy is not responding</s:String>
-    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">The chain's egress {0} is not answering. Raise the chain and start the browser?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">The browser egress {0} is not answering. Raise the chain and start the browser?</s:String>
     <s:String x:Key="Main.Browser.EgressDownProceedFmt">The upstream {0} is not answering. Start the browser anyway?</s:String>
     <s:String x:Key="Main.Browser.EgressDownDeclined">browser not started: the egress is not responding</s:String>
 
     <!-- Browser profile dialog -->
     <s:String x:Key="BrowserProfile.Title">Create browser profile</s:String>
     <s:String x:Key="BrowserProfile.Header">Create a browser profile</s:String>
-    <s:String x:Key="BrowserProfile.Intro">A separate browser profile: its traffic goes straight to the chain's own egress, past the application proxy, so the browser works on its own — from the application button or from the desktop shortcut. WebRTC is off in it, the tabs of the last session come back on start, and the startup offers are off.</s:String>
+    <s:String x:Key="BrowserProfile.Intro">A separate browser profile: its traffic goes through the egress chosen by browser.egress — the application's forward proxy by default (names are resolved on its side over DoH), or the chain's own SOCKS5, which lets the browser work without the application. WebRTC is off in it, the tabs of the last session come back on start, and the startup offers are off.</s:String>
     <s:String x:Key="BrowserProfile.ExistingFmt">Already set up: {0} — {1}. Creating a new profile replaces the setting; the folder of the old one stays on disk untouched.</s:String>
     <s:String x:Key="BrowserProfile.Kind">Browser</s:String>
     <s:String x:Key="BrowserProfile.Kind.Firefox">Firefox</s:String>

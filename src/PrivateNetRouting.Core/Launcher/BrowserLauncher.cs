@@ -93,10 +93,11 @@ public sealed record BrowserLaunchResult(BrowserLaunchOutcome Outcome, bool Egre
 
 /// <summary>
 /// Browser launcher for the profile created once (BrowserProfileService). There is no chain of its
-/// own in the browser's path: the profile goes straight to the chain's egress (BrowserEgress), so
-/// the application process is not needed for the browser to work — the chain is. Before a launch
-/// the egress is checked with a TCP probe; the only case the launcher touches the chain is a
-/// confirmed answer about a dead egress in the tailscale mode.
+/// own in the browser's path: the profile goes through the browser egress chosen by browser.egress
+/// (BrowserEgress) — the application's forward proxy by default, the chain's final SOCKS5 as the
+/// self-sufficient alternative. Before a launch the egress is checked with a TCP probe; the only
+/// case the launcher touches the chain is a confirmed answer about a dead egress when the egress
+/// is ours to raise (the forward proxy in both modes, the sidecar's listener in the tailscale one).
 /// Firefox gets its user.js rewritten on every launch through the application — the egress address
 /// and the bypass list stay fresh, and the desktop shortcut reads the same file;
 /// Chromium takes everything from the command line and keeps no proxy in the profile.
@@ -121,8 +122,18 @@ public sealed class BrowserLauncher(
     /// <summary>The egress the profile goes through (host:port).</summary>
     public string EgressEndpoint => BrowserEgress.Resolve(config);
 
-    /// <summary>True — the egress is our chain's own listener: raising the chain is what fixes a dead one.</summary>
-    public bool ChainOwnsEgress => config.Chain.EffectiveMode != ChainMode.Socks5;
+    /// <summary>The egress as a proxy URL ("scheme://host:port") for command lines and logs.</summary>
+    public string EgressUrl => BrowserEgress.ProxyUrl(config);
+
+    /// <summary>
+    /// True — a dead egress is fixed by raising the chain: the forward proxy is part of the chain
+    /// bring-up in both modes, and the chain egress is ours everywhere but the external upstream
+    /// of the socks5 mode.
+    /// </summary>
+    public bool ChainOwnsEgress =>
+        config.Browser.EgressMode == BrowserEgressMode.Chain
+            ? config.Chain.EffectiveMode != ChainMode.Socks5
+            : true;
 
     public string BuildChromiumBypassList() =>
         BrowserBypassList.BuildChromium(config.Launcher.BypassDomains, config.Browser.DirectTlds);
@@ -179,10 +190,11 @@ public sealed class BrowserLauncher(
         }
 
         var watch = Stopwatch.StartNew();
+        WarnAboutChainEgressResolution();
         var reachable = await IsEgressReachableAsync(ct).ConfigureAwait(false);
         if (reachable)
         {
-            log.Info($"browser: egress {EgressEndpoint} responds");
+            log.Info($"browser: egress {EgressUrl} responds");
         }
 
         if (options.CheckOnly)
@@ -246,6 +258,21 @@ public sealed class BrowserLauncher(
         }
     }
 
+    /// <summary>
+    /// The chain's own SOCKS5 in the tailscale mode is the sidecar's listener: it resolves names
+    /// with the system resolver (tsdial never consults the netstack DNS), and the direct-access ban
+    /// blackholes exactly the AI names there — through this egress they do not open.
+    /// </summary>
+    private void WarnAboutChainEgressResolution()
+    {
+        if (config.Browser.EgressMode == BrowserEgressMode.Chain && config.Chain.EffectiveMode != ChainMode.Socks5)
+        {
+            log.Warn(
+                "browser: the egress is the chain's own SOCKS5 — it resolves names via the system resolver, " +
+                "so names blocked from direct access will not open through it (browser.egress=forward-proxy avoids that)");
+        }
+    }
+
     private void LaunchBrowser(BrowserLauncherOptions options)
     {
         var kind = config.Browser.Kind ?? throw new InvalidOperationException("the browser profile is not created yet");
@@ -259,16 +286,17 @@ public sealed class BrowserLauncher(
             BrowserProfileFiles.Create(
                 kind,
                 profileDir,
+                BrowserEgress.Scheme(config),
                 endpoint.Address.ToString(),
                 endpoint.Port,
                 BuildFirefoxNoProxies());
-            log.Info($"browser: user.js refreshed (egress {EgressEndpoint}, bypass list rewritten)");
+            log.Info($"browser: user.js refreshed (egress {EgressUrl}, bypass list rewritten)");
         }
 
         var args = BrowserProfileCommandLine.Build(
             kind,
             profileDir,
-            EgressEndpoint,
+            EgressUrl,
             BuildChromiumBypassList(),
             options.Private,
             options.Url);
@@ -284,7 +312,7 @@ public sealed class BrowserLauncher(
         Start(info, executable);
         log.Info(kind == BrowserKind.Firefox
             ? $"browser: firefox started with the profile {profileDir}"
-            : $"browser: chrome started (--proxy-server=socks5://{EgressEndpoint})");
+            : $"browser: chrome started (--proxy-server={EgressUrl})");
     }
 
     private string ResolveExecutable(BrowserKind kind)

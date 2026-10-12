@@ -480,8 +480,8 @@ internal static class Program
             // read-only: the chain is not touched, use `pnr chain up` for that
             var reachable = await runtime.Browser.IsEgressReachableAsync(CancellationToken.None);
             Console.WriteLine(reachable
-                ? $"OK: the egress {runtime.Browser.EgressEndpoint} responds"
-                : $"the egress {runtime.Browser.EgressEndpoint} is not responding");
+                ? $"OK: the egress {runtime.Browser.EgressUrl} responds"
+                : $"the egress {runtime.Browser.EgressUrl} is not responding");
             return reachable ? 0 : 1;
         }
 
@@ -491,19 +491,20 @@ internal static class Program
             return 0;
         }
 
-        // A dead egress: in the tailscale mode the egress is the chain's own listener and a
-        // confirmed answer raises the chain (the launcher does that); over an external upstream
-        // there is nothing to raise — the question is only whether to start anyway.
+        // A dead egress: when the egress is ours to raise (ChainOwnsEgress — the forward proxy in
+        // both modes, the sidecar's listener in the tailscale one) a confirmed answer raises the
+        // chain (the launcher does that); over the external upstream of the socks5 mode there is
+        // nothing to raise — the question is only whether to start anyway.
         Task<bool> ConfirmDeadEgress(CancellationToken ct)
         {
-            var egress = runtime.Browser.EgressEndpoint;
+            var egress = runtime.Browser.EgressUrl;
             if (assumeYes)
             {
                 return Task.FromResult(true);
             }
 
             Console.Write(runtime.Browser.ChainOwnsEgress
-                ? $"the chain's egress {egress} is not responding. Raise the chain and start the browser? [y/N]: "
+                ? $"the browser egress {egress} is not responding. Raise the chain and start the browser? [y/N]: "
                 : $"the upstream {egress} is not responding. Start the browser anyway? [y/N]: ");
             return Task.FromResult(Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes");
         }
@@ -522,8 +523,8 @@ internal static class Program
         }
 
         Console.WriteLine(result.EgressResponded
-            ? $"browser launched over the ready egress {runtime.Browser.EgressEndpoint}"
-            : $"browser launched over the egress {runtime.Browser.EgressEndpoint} that had not answered");
+            ? $"browser launched over the ready egress {runtime.Browser.EgressUrl}"
+            : $"browser launched over the egress {runtime.Browser.EgressUrl} that had not answered");
         return 0;
     }
 

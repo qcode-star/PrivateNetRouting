@@ -102,8 +102,11 @@ public class AppConfigTests : IDisposable
         Assert.False(config.Browser.IsConfigured);
         Assert.Equal(5, config.Browser.ProbeTimeoutSeconds);
         Assert.Equal(["ru", "su", "by", "kz"], config.Browser.DirectTlds);
+        Assert.Equal("forward-proxy", config.Browser.Egress); // the application proxy by default
+        Assert.Equal(BrowserEgressMode.ForwardProxy, config.Browser.EgressMode);
 
         config.Browser.Type = "chromium";
+        config.Browser.Egress = "chain";
         config.Browser.ExecutablePath = @"%ProgramFiles%\Google\Chrome\Application\chrome.exe";
         config.Browser.ProfileDir = @"%TEMP%\chrome-profile";
         config.Browser.ShortcutPath = @"%TEMP%\PrivateNetRouting Chrome.lnk";
@@ -111,6 +114,8 @@ public class AppConfigTests : IDisposable
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.Equal(BrowserKind.Chrome, loaded.Browser.Kind);
+        Assert.Equal("chain", loaded.Browser.Egress);
+        Assert.Equal(BrowserEgressMode.Chain, loaded.Browser.EgressMode);
         Assert.True(loaded.Browser.IsConfigured);
         Assert.Equal(
             Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
@@ -132,6 +137,19 @@ public class AppConfigTests : IDisposable
         Assert.Null(BrowserKindParser.ParseOrNull("netscape"));
         Assert.Null(BrowserKindParser.ParseOrNull(""));
         Assert.Null(BrowserKindParser.ParseOrNull(null));
+    }
+
+    [Fact]
+    public void BrowserEgressParserTakesChainAndDefaultsToForwardProxy()
+    {
+        Assert.Equal(BrowserEgressMode.ForwardProxy, BrowserEgressModeParser.Parse("forward-proxy"));
+        Assert.Equal(BrowserEgressMode.ForwardProxy, BrowserEgressModeParser.Parse(""));
+        Assert.Equal(BrowserEgressMode.ForwardProxy, BrowserEgressModeParser.Parse(null));
+        Assert.Equal(BrowserEgressMode.ForwardProxy, BrowserEgressModeParser.Parse("sing-box")); // unknown -> default
+        Assert.Equal(BrowserEgressMode.Chain, BrowserEgressModeParser.Parse("chain"));
+        Assert.Equal(BrowserEgressMode.Chain, BrowserEgressModeParser.Parse(" Chain "));
+        Assert.Equal("forward-proxy", BrowserEgressModeParser.ToConfigValue(BrowserEgressMode.ForwardProxy));
+        Assert.Equal("chain", BrowserEgressModeParser.ToConfigValue(BrowserEgressMode.Chain));
     }
 
     [Fact]

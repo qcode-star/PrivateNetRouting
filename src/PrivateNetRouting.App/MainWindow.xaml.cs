@@ -1292,14 +1292,15 @@ public partial class MainWindow : Window
         try
         {
             // The question about an egress that did not answer, asked by the launcher before the
-            // launch. The egress of the tailscale mode is the chain's own listener: yes raises the
-            // chain (drawn in the card, exactly like a manual bring-up) and the launch goes on.
-            // Over an external socks5 upstream there is nothing to raise — the question is only
-            // whether to start with an upstream that is down. The launcher's callback runs off the
-            // UI thread, so the question and the bring-up are marshalled back here.
+            // launch. When the egress is ours to raise (the forward proxy in both modes, the
+            // sidecar's listener in the tailscale one), yes raises the chain (drawn in the card,
+            // exactly like a manual bring-up) and the launch goes on. Over the external socks5
+            // upstream there is nothing to raise — the question is only whether to start with an
+            // upstream that is down. The launcher's callback runs off the UI thread, so the
+            // question and the bring-up are marshalled back here.
             var confirmDeadEgress = (CancellationToken ct) => Dispatcher.InvokeAsync(async () =>
             {
-                var egress = _runtime.Browser.EgressEndpoint;
+                var egress = _runtime.Browser.EgressUrl;
                 if (!_runtime.Browser.ChainOwnsEgress)
                 {
                     return MessageBox.Show(

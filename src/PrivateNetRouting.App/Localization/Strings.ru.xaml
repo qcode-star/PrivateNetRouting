@@ -103,23 +103,23 @@
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude отключён в конфиге (apps.claude = false) — запускать нечего</s:String>
 
     <!-- Профиль браузера: создаётся один раз диалогом, дальше запускается как есть -->
-    <s:String x:Key="Main.Browser.Done">Браузер запущен со своим профилем (выход цепочки отвечает)</s:String>
-    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Браузер запущен, но выход цепочки не отвечает — страницы не откроются</s:String>
+    <s:String x:Key="Main.Browser.Done">Браузер запущен со своим профилем (выход отвечает)</s:String>
+    <s:String x:Key="Main.Browser.DoneOverDeadEgress">Браузер запущен, но выход не отвечает — страницы не откроются</s:String>
     <s:String x:Key="Main.Browser.Cancelled">запуск браузера отменён</s:String>
     <s:String x:Key="Main.Browser.AlreadyRunning">Браузер уже запущен с нашим профилем — окно можно поднять с панели задач</s:String>
     <s:String x:Key="Main.Browser.NotConfigured">профиль браузера не настроен — создайте его в меню «?»</s:String>
     <s:String x:Key="Main.Browser.CreateOfferTitle">Профиль браузера не создан</s:String>
-    <s:String x:Key="Main.Browser.CreateOfferFmt">У браузера ещё нет профиля: он ходит напрямую в собственный выход цепочки, мимо прокси приложения. Создать профиль сейчас?</s:String>
+    <s:String x:Key="Main.Browser.CreateOfferFmt">У браузера ещё нет профиля: он ходит через выход, выбранный в конфиге (browser.egress — по умолчанию форвард-прокси приложения). Создать профиль сейчас?</s:String>
     <s:String x:Key="Main.Browser.ProfileCreatedFmt">профиль браузера создан: {0}</s:String>
     <s:String x:Key="Main.Browser.EgressDownTitle">Прокси браузера не отвечает</s:String>
-    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">Выход цепочки {0} не отвечает. Поднять цепочку и запустить браузер?</s:String>
+    <s:String x:Key="Main.Browser.EgressDownRaiseFmt">Выход браузера {0} не отвечает. Поднять цепочку и запустить браузер?</s:String>
     <s:String x:Key="Main.Browser.EgressDownProceedFmt">Апстрим {0} не отвечает. Запустить браузер всё равно?</s:String>
     <s:String x:Key="Main.Browser.EgressDownDeclined">браузер не запущен: выход не отвечает</s:String>
 
     <!-- Диалог создания профиля браузера -->
     <s:String x:Key="BrowserProfile.Title">Создание прокси-профиля браузера</s:String>
     <s:String x:Key="BrowserProfile.Header">Создать прокси-профиль браузера</s:String>
-    <s:String x:Key="BrowserProfile.Intro">Отдельный профиль браузера: его трафик идёт напрямую в собственный выход цепочки, мимо прокси приложения, поэтому браузер работает сам по себе — и по кнопке в приложении, и по ярлыку на рабочем столе. В нём выключен WebRTC, вкладки прошлой сессии возвращаются при запуске, стартовые предложения отключены.</s:String>
+    <s:String x:Key="BrowserProfile.Intro">Отдельный профиль браузера: его трафик идёт через выход, выбранный в browser.egress — по умолчанию форвард-прокси приложения (имена резолвятся на его стороне через DoH), либо собственный SOCKS5 цепочки, с которым браузер работает и без приложения. В нём выключен WebRTC, вкладки прошлой сессии возвращаются при запуске, стартовые предложения отключены.</s:String>
     <s:String x:Key="BrowserProfile.ExistingFmt">Уже настроено: {0} — {1}. Создание нового профиля заменит настройку; папка старого останется на диске нетронутой.</s:String>
     <s:String x:Key="BrowserProfile.Kind">Браузер</s:String>
     <s:String x:Key="BrowserProfile.Kind.Firefox">Firefox</s:String>

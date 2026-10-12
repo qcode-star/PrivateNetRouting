@@ -36,6 +36,8 @@ public class BrowserLauncherTests : IDisposable
         Browser = new BrowserConfig
         {
             Type = kind == BrowserKind.Chrome ? "chrome" : "firefox",
+            // the chain egress: the forward-proxy default has its own tests
+            Egress = "chain",
             DirectTlds = ["ru", "by"],
         },
     };
@@ -106,15 +108,31 @@ public class BrowserLauncherTests : IDisposable
     // ----- the egress the profile goes through -----
 
     [Fact]
-    public void TailscaleEgressIsTheSidecarListenerAndSocks5IsTheExternalUpstream()
+    public void ChainEgressFollowsTheModeAndIsOursButForTheExternalUpstream()
     {
         var config = ConfiguredConfig();
         Assert.Equal(config.Chain.DaemonSocksListen, BrowserEgress.Resolve(config));
+        Assert.Equal(BrowserEgress.Socks5Scheme, BrowserEgress.Scheme(config));
         Assert.True(Create(config).ChainOwnsEgress); // a dead one is fixed by a chain bring-up
 
         config.Chain.Mode = "socks5";
         Assert.Equal(config.ForwardProxy.Socks5Upstream, BrowserEgress.Resolve(config));
         Assert.False(Create(config).ChainOwnsEgress); // external: there is nothing of ours to raise
+    }
+
+    [Fact]
+    public void ForwardProxyIsTheDefaultEgressAndIsAlwaysOursToRaise()
+    {
+        var config = ConfiguredConfig();
+        config.Browser.Egress = "forward-proxy"; // the default value itself is covered in AppConfigTests
+        Assert.Equal(config.ForwardProxy.Listen, BrowserEgress.Resolve(config));
+        Assert.Equal(BrowserEgress.HttpScheme, BrowserEgress.Scheme(config));
+        Assert.Equal($"http://{config.ForwardProxy.Listen}", BrowserEgress.ProxyUrl(config));
+        Assert.True(Create(config).ChainOwnsEgress); // the chain bring-up starts the proxy
+
+        config.Chain.Mode = "socks5"; // the proxy is part of that bring-up too
+        Assert.Equal(config.ForwardProxy.Listen, BrowserEgress.Resolve(config));
+        Assert.True(Create(config).ChainOwnsEgress);
     }
 
     [Fact]
@@ -234,6 +252,70 @@ public class BrowserLauncherTests : IDisposable
     }
 
     [Fact]
+    public async Task ForwardProxyEgressLaunchesFirefoxOverHttpConnect()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(egressPort: port);
+        config.Browser.Egress = "forward-proxy";
+        config.ForwardProxy.Listen = $"127.0.0.1:{port}"; // the default egress: the application's own proxy
+        try
+        {
+            var result = await Create(config)
+                .LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+            Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
+            var userJs = await File.ReadAllTextAsync(Path.Combine(_profileDir, "user.js"));
+            Assert.Contains($@"user_pref(""network.proxy.http_port"", {port});", userJs);
+            Assert.Contains($@"user_pref(""network.proxy.ssl_port"", {port});", userJs);
+            Assert.DoesNotContain("socks_remote_dns", userJs);
+            Assert.DoesNotContain("resolves names via the system resolver", ReadLog());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task ForwardProxyEgressGivesChromeAnHttpProxyServer()
+    {
+        var listener = StartListener(out var port);
+        var config = ConfiguredConfig(BrowserKind.Chrome, port);
+        config.Browser.Egress = "forward-proxy";
+        config.ForwardProxy.Listen = $"127.0.0.1:{port}";
+        try
+        {
+            await Create(config).LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None);
+
+            var psi = Assert.Single(_started);
+            Assert.Equal($"--proxy-server=http://127.0.0.1:{port}", psi.ArgumentList[0]);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task ChainEgressInTailscaleWarnsAboutTheSystemResolver()
+    {
+        var listener = StartListener(out var port);
+        try
+        {
+            // the sidecar's SOCKS5 resolves via the system resolver: the launch says so in the log
+            var result = await Create(ConfiguredConfig(egressPort: port))
+                .LaunchAsync(new BrowserLauncherOptions(CheckOnly: true), null, CancellationToken.None);
+
+            Assert.Equal(BrowserLaunchOutcome.CheckOnly, result.Outcome);
+            Assert.Contains("resolves names via the system resolver", ReadLog());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
     public async Task UnconfiguredProfileRefusesToLaunch()
     {
         var config = NewConfig();
@@ -295,6 +377,26 @@ public class BrowserLauncherTests : IDisposable
         Assert.Equal(0, _chain.EnsureCalls); // nothing of ours is in that path
         Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
         Assert.False(result.EgressResponded);
+        Assert.Single(_started);
+    }
+
+    [Fact]
+    public async Task DeadForwardProxyEgressRaisesTheChainEvenInTheSocks5Mode()
+    {
+        var listener = StartListener(out var port);
+        listener.Stop();
+        var config = ConfiguredConfig(egressPort: port);
+        config.Browser.Egress = "forward-proxy";
+        config.ForwardProxy.Listen = $"127.0.0.1:{port}"; // the dead port is the application's proxy
+        config.Chain.Mode = "socks5";
+
+        var result = await Create(config).LaunchAsync(
+            BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(true) },
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(1, _chain.EnsureCalls); // the chain bring-up starts the proxy
+        Assert.Equal(BrowserLaunchOutcome.Launched, result.Outcome);
         Assert.Single(_started);
     }
 

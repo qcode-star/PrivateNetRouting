@@ -203,14 +203,28 @@ public sealed class ChainConfig
 
 /// <summary>
 /// The browser profile, created once through the application's dialog (the "?" help menu →
-/// "Create browser profile…"): a separate profile whose traffic goes straight to the chain's own
-/// egress — the SOCKS5 the chain itself dials through (BrowserEgress) — and not through the
-/// application's forward proxy. The profile is self-sufficient: its desktop shortcut starts the
-/// browser without the application (the chain, however, has to be up — the egress lives in it).
-/// A profile that has not been created yet has an empty Type (and empty paths).
+/// "Create browser profile…"): a separate profile whose traffic goes through the browser egress
+/// chosen by <see cref="Egress"/> — the application's forward proxy by default (names are resolved
+/// on its side over DoH, past the local ban), or the chain's final SOCKS5 (the profile is then
+/// self-sufficient, but in the tailscale mode the sidecar resolves via the system resolver and
+/// names blocked from direct access do not open through it). A profile that has not been created
+/// yet has an empty Type (and empty paths).
 /// </summary>
 public sealed class BrowserConfig
 {
+    /// <summary>
+    /// Which egress the profile points at: "forward-proxy" (the application's proxy,
+    /// forwardProxy.listen — HTTP CONNECT, names resolved on its side over DoH; default) or
+    /// "chain" (the chain's final SOCKS5: tailscale — chain.daemonSocksListen, socks5 —
+    /// forwardProxy.socks5Upstream; the browser then needs no application process). An unknown
+    /// value — forward-proxy.
+    /// </summary>
+    public string Egress { get; set; } = "forward-proxy";
+
+    /// <summary>Parsed egress choice; an unknown config value — ForwardProxy.</summary>
+    [JsonIgnore]
+    public BrowserEgressMode EgressMode => BrowserEgressModeParser.Parse(Egress);
+
     /// <summary>Family of the profile: "firefox" | "chrome" ("chromium" is accepted too); empty — the profile has not been created yet.</summary>
     public string Type { get; set; } = "";
 
@@ -269,6 +283,30 @@ public static class BrowserKindParser
     /// <summary>The display name of the family (log lines and the shortcut description; the UI takes its own from the dictionaries).</summary>
     public static string DisplayName(BrowserKind kind) =>
         kind == BrowserKind.Chrome ? "Chrome" : "Firefox";
+}
+
+/// <summary>Which egress a browser profile's traffic goes through (browser.egress).</summary>
+public enum BrowserEgressMode
+{
+    /// <summary>The application's own forward proxy (forwardProxy.listen): HTTP CONNECT, names resolved on its side over DoH.</summary>
+    ForwardProxy = 0,
+
+    /// <summary>The chain's final SOCKS5: the sidecar's listener in the tailscale mode, the external upstream in the socks5 one.</summary>
+    Chain = 1,
+}
+
+public static class BrowserEgressModeParser
+{
+    /// <summary>Config string ("forward-proxy"/"chain") to the egress mode; unknown — ForwardProxy.</summary>
+    public static BrowserEgressMode Parse(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "chain" => BrowserEgressMode.Chain,
+        _ => BrowserEgressMode.ForwardProxy,
+    };
+
+    /// <summary>The canonical spelling for the config file.</summary>
+    public static string ToConfigValue(BrowserEgressMode mode) =>
+        mode == BrowserEgressMode.Chain ? "chain" : "forward-proxy";
 }
 
 /// <summary>

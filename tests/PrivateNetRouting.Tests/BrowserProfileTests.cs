@@ -31,7 +31,8 @@ public class BrowserProfileTests : IDisposable
         ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081", Socks5Upstream = "127.0.0.1:18099" },
         Chain = new ChainConfig { DaemonSocksListen = "127.0.0.1:18083" },
         Launcher = new LauncherConfig { BypassDomains = ["corp.example.com"] },
-        Browser = new BrowserConfig { DirectTlds = ["ru", "by"] },
+        // the chain egress: the forward-proxy one has its own tests below
+        Browser = new BrowserConfig { Egress = "chain", DirectTlds = ["ru", "by"] },
     };
 
     private BrowserProfileService CreateService(AppConfig config, Func<string, bool>? fileExists = null) =>
@@ -54,7 +55,7 @@ public class BrowserProfileTests : IDisposable
     [Fact]
     public void FirefoxUserJsCarriesTheEgressRemoteDnsAndTheGuards()
     {
-        var js = BrowserProfileFiles.RenderFirefoxUserJs("127.0.0.1", 18083, "localhost, *.ru");
+        var js = BrowserProfileFiles.RenderFirefoxUserJs(BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost, *.ru");
 
         // the egress SOCKS5 for all protocols, names resolved on its side, no silent direct fallback
         Assert.Contains(@"user_pref(""network.proxy.type"", 1);", js);
@@ -83,6 +84,24 @@ public class BrowserProfileTests : IDisposable
         Assert.Contains(@"user_pref(""browser.ipProtection.enabled"", false);", js);
     }
 
+    [Fact]
+    public void FirefoxUserJsOfTheForwardProxyEgressSpeaksHttpConnect()
+    {
+        var js = BrowserProfileFiles.RenderFirefoxUserJs(BrowserEgress.HttpScheme, "127.0.0.1", 18081, "localhost, *.ru");
+
+        // the application's CONNECT proxy for all protocols, names resolved on its side
+        Assert.Contains(@"user_pref(""network.proxy.http"", ""127.0.0.1"");", js);
+        Assert.Contains(@"user_pref(""network.proxy.http_port"", 18081);", js);
+        Assert.Contains(@"user_pref(""network.proxy.ssl"", ""127.0.0.1"");", js);
+        Assert.Contains(@"user_pref(""network.proxy.ssl_port"", 18081);", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks"", """");", js);
+        Assert.Contains(@"user_pref(""network.proxy.socks_port"", 0);", js);
+        Assert.DoesNotContain("socks_remote_dns", js);
+        Assert.Contains(@"user_pref(""network.proxy.failover_direct"", false);", js);
+        Assert.Contains(@"user_pref(""network.proxy.no_proxies_on"", ""localhost, *.ru"");", js);
+        Assert.Contains(@"user_pref(""network.trr.mode"", 5);", js);
+    }
+
     // ----- Chromium: the WebRTC policy in the profile -----
 
     [Fact]
@@ -90,7 +109,7 @@ public class BrowserProfileTests : IDisposable
     {
         var dir = ProfileDir("chrome");
 
-        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
 
         var preferences = File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.ChromiumPreferencesRelativePath));
         Assert.Contains("\"ip_handling_policy\":\"disable_non_proxied_udp\"", preferences);
@@ -105,7 +124,7 @@ public class BrowserProfileTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, """{"profile":{"exit_type":"Crashed"},"spellcheck":{"dictionaries":["en-US"]}}""");
 
-        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
 
         var preferences = File.ReadAllText(path);
         Assert.Contains("\"exit_type\":\"Crashed\"", preferences); // the browser's own keys survive
@@ -121,7 +140,7 @@ public class BrowserProfileTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "{ this is not json");
 
-        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Chrome, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
 
         Assert.Contains("disable_non_proxied_udp", File.ReadAllText(path));
     }
@@ -131,8 +150,8 @@ public class BrowserProfileTests : IDisposable
     {
         var dir = ProfileDir("firefox");
 
-        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
-        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18084, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18084, "localhost");
 
         // the second pass refreshes the file instead of piling up: the egress of the profile follows the config
         var js = File.ReadAllText(Path.Combine(dir, BrowserProfileFiles.FirefoxUserJsName));
@@ -145,7 +164,7 @@ public class BrowserProfileTests : IDisposable
     {
         var dir = ProfileDir("firefox-tou");
 
-        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
 
         // the welcome/terms page of a fresh profile is skipped; the value sits above any shipped
         // version, so the page does not come back after a browser update either
@@ -173,7 +192,7 @@ public class BrowserProfileTests : IDisposable
             user_pref("browser.startup.homepage", "https://example.org");
             """);
 
-        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, "127.0.0.1", 18083, "localhost");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, dir, BrowserEgress.Socks5Scheme, "127.0.0.1", 18083, "localhost");
 
         // the file belongs to the browser once it has started; only our user.js is refreshed
         var prefs = File.ReadAllText(prefsPath);
@@ -187,7 +206,7 @@ public class BrowserProfileTests : IDisposable
     [Fact]
     public void FirefoxCommandLineCarriesTheProfile()
     {
-        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\profiles\ff", "127.0.0.1:18083", "bypass");
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\profiles\ff", "socks5://127.0.0.1:18083", "bypass");
 
         Assert.Equal(["-profile", @"C:\profiles\ff", "--new-instance"], args);
         Assert.Equal(@"-profile C:\profiles\ff --new-instance", BrowserProfileCommandLine.ToCommandLine(args));
@@ -196,7 +215,7 @@ public class BrowserProfileTests : IDisposable
     [Fact]
     public void ChromeCommandLineCarriesTheEgressTheProfileAndTheSession()
     {
-        var args = BrowserProfileCommandLine.Build(BrowserKind.Chrome, @"C:\profiles\ch", "127.0.0.1:18083", "localhost;*.ru");
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Chrome, @"C:\profiles\ch", "socks5://127.0.0.1:18083", "localhost;*.ru");
 
         Assert.Equal(
             [
@@ -211,9 +230,17 @@ public class BrowserProfileTests : IDisposable
     }
 
     [Fact]
+    public void ChromeCommandLineCarriesTheSchemeOfTheEgress()
+    {
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Chrome, @"C:\profiles\ch", "http://127.0.0.1:18081", "localhost;*.ru");
+
+        Assert.Equal("--proxy-server=http://127.0.0.1:18081", args[0]);
+    }
+
+    [Fact]
     public void ShortcutCommandLineQuotesOnlyWhatHasSpaces()
     {
-        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\my profiles\ff", "127.0.0.1:18083", "bypass");
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Firefox, @"C:\my profiles\ff", "socks5://127.0.0.1:18083", "bypass");
 
         Assert.Equal("-profile \"C:\\my profiles\\ff\" --new-instance", BrowserProfileCommandLine.ToCommandLine(args));
     }
@@ -264,6 +291,26 @@ public class BrowserProfileTests : IDisposable
         Assert.Equal(dir, config.Browser.ProfileDir);
         Assert.Equal(shortcut.ShortcutPath, config.Browser.ShortcutPath);
         Assert.Single(_persisted); // the user config file got the same values
+    }
+
+    [Fact]
+    public void CreateFollowsTheForwardProxyEgressByDefault()
+    {
+        var config = NewConfig();
+        config.Browser.Egress = "forward-proxy";
+        var dir = ProfileDir("forward-proxy");
+        var service = CreateService(config, path => path == @"C:\fake\firefox.exe");
+
+        service.Create(new BrowserProfileRequest(
+            BrowserKind.Firefox,
+            dir,
+            @"C:\fake\firefox.exe",
+            CreateDesktopShortcut: false));
+
+        // the default egress is the application's CONNECT proxy: http/ssl prefs, not SOCKS5
+        var js = File.ReadAllText(Path.Combine(dir, "user.js"));
+        Assert.Contains(@"user_pref(""network.proxy.http_port"", 18081);", js);
+        Assert.DoesNotContain(@"user_pref(""network.proxy.socks_port"", 18083);", js);
     }
 
     [Fact]
