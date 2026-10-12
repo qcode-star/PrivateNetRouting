@@ -16,9 +16,9 @@ public class AppConfigTests : IDisposable
         Assert.True(File.Exists(_path));
         Assert.Equal(AppLanguage.Auto, config.Ui.Language);
         Assert.Equal("127.0.0.1:18081", config.ForwardProxy.Listen);
-        Assert.Equal("127.0.0.1:18083", config.ForwardProxy.Socks5Upstream);
-        Assert.Equal("127.0.0.1:18082", config.Chain.DaemonHttpListen);
-        Assert.Equal(@"\\.\pipe\pnr-sidecar", config.Chain.Socket);
+        Assert.Equal("127.0.0.1:18083", config.Chain.Socks5.Upstream);
+        Assert.Equal("127.0.0.1:18082", config.Chain.Tailscale.HttpListen);
+        Assert.Equal(@"\\.\pipe\pnr-sidecar", config.Chain.Tailscale.Socket);
         Assert.True(config.ForwardProxy.BindWslGateway);
         Assert.True(config.ForwardProxy.DohDiscovery.Enabled); // the netmap fills the pool for a new user
         Assert.Empty(config.ForwardProxy.DohSeed); // optional; discovery is the source
@@ -68,14 +68,15 @@ public class AppConfigTests : IDisposable
         File.WriteAllText(_path, """
             {
               // user config
-              "forwardProxy": { "enabled": false, "socks5Upstream": "127.0.0.1:11055", }
+              "forwardProxy": { "enabled": false },
+              "chain": { "socks5": { "upstream": "127.0.0.1:11055", } }
             }
             """);
 
         var config = AppConfigStore.LoadOrCreate(_path);
 
         Assert.False(config.ForwardProxy.Enabled);
-        Assert.Equal("127.0.0.1:11055", config.ForwardProxy.Socks5Upstream);
+        Assert.Equal("127.0.0.1:11055", config.Chain.Socks5.Upstream);
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public class AppConfigTests : IDisposable
         Assert.Null(config.Browser.Kind); // not created yet: no family, no paths
         Assert.False(config.Browser.IsConfigured);
         Assert.Equal(5, config.Browser.ProbeTimeoutSeconds);
-        Assert.Equal(["ru", "su", "by", "kz"], config.Browser.DirectTlds);
+        Assert.Empty(config.DirectTlds); // environment-specific: filled by the user config only
         Assert.Equal("forward-proxy", config.Browser.Egress); // the application proxy by default
         Assert.Equal(BrowserEgressMode.ForwardProxy, config.Browser.EgressMode);
 
@@ -192,42 +193,58 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
-    public void AppsSectionDefaultsOnAndTurnsOneAppOff()
+    public void AppsDefaultOnAndOneCanBeTurnedOff()
     {
         var config = AppConfigStore.LoadOrCreate(_path);
-        Assert.True(config.Apps.Claude); // both apps on for a new user
-        Assert.True(config.Apps.Codex);
+        Assert.True(config.Claude.Enabled); // both apps on for a new user
+        Assert.True(config.Codex.Enabled);
 
         File.WriteAllText(_path, """
             {
-              "apps": { "claude": false }
+              "claude": { "enabled": false }
             }
             """);
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
-        Assert.False(loaded.Apps.Claude); // only Claude hides; Codex stays
-        Assert.True(loaded.Apps.Codex);
+        Assert.False(loaded.Claude.Enabled); // only Claude hides; Codex stays
+        Assert.True(loaded.Codex.Enabled);
     }
 
     [Fact]
-    public void SkipInSocks5ModeDefaultsOffAndRoundTrips()
+    public void ForwardProxyEnabledDefaultsTrueAndExternalEndpointRoundTrips()
     {
         var config = AppConfigStore.LoadOrCreate(_path);
-        Assert.False(config.ForwardProxy.SkipInSocks5Mode); // the local proxy runs by default
+        Assert.True(config.ForwardProxy.Enabled); // the local proxy runs by default
         Assert.Equal("127.0.0.1:2080", config.ForwardProxy.ExternalAppsEndpoint);
 
         File.WriteAllText(_path, """
             {
               "forwardProxy": {
-                "skipInSocks5Mode": true,
+                "enabled": false,
                 "externalAppsEndpoint": "127.0.0.1:7080"
               }
             }
             """);
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
-        Assert.True(loaded.ForwardProxy.SkipInSocks5Mode);
+        Assert.False(loaded.ForwardProxy.Enabled);
         Assert.Equal("127.0.0.1:7080", loaded.ForwardProxy.ExternalAppsEndpoint);
+    }
+
+    [Fact]
+    public void BanListsAreTheUnionOfBothApps()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.Contains("claude.ai", config.BanHosts);
+        Assert.Contains("chatgpt.com", config.BanHosts);
+        Assert.Contains("anthropic.com", config.Claude.BanTrees); // the probe www.anthropic.com lives under the tree...
+        Assert.DoesNotContain("www.anthropic.com", config.Claude.BanHosts); // ...and stays absent from hosts
+        Assert.Contains("openai.com", config.Codex.BanTrees);
+        Assert.DoesNotContain("www.openai.com", config.Codex.BanHosts);
+        Assert.Equal(config.Claude.BanHosts.Count + config.Codex.BanHosts.Count, config.BanHosts.Count);
+        Assert.NotEmpty(config.Claude.FirewallSubnets);
+        Assert.Empty(config.Codex.FirewallSubnets); // OpenAI rides on shared clouds
+        Assert.All(config.Guard.BanProbes, probe => Assert.StartsWith("www.", probe));
     }
 
     [Fact]
@@ -241,18 +258,20 @@ public class AppConfigTests : IDisposable
         Assert.Equal(18081, AppProxyEndpoint.Port(tailscale));
         Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
 
-        // the skip flag alone (tailscale mode) is inert: the proxy is load-bearing there
-        tailscale.ForwardProxy.SkipInSocks5Mode = true;
+        // the proxy off in the tailscale mode is a config error (the bring-up refuses), but the
+        // endpoint math stays honest: IsSkipped reflects only the socks5 shape
+        tailscale.ForwardProxy.Enabled = false;
         Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
         Assert.Equal(tailscale.ForwardProxy.Listen, AppProxyEndpoint.Address(tailscale));
 
-        // socks5 without the flag — the local proxy still runs
+        // socks5 with the proxy on — the local proxy still runs
         var socks5 = new AppConfig { Chain = { Mode = "socks5" } };
         Assert.False(AppProxyEndpoint.IsSkipped(socks5));
         Assert.Equal(socks5.ForwardProxy.Listen, AppProxyEndpoint.Address(socks5));
 
-        // the skipped shape: everything points at the external mixed inbound
-        socks5.ForwardProxy.SkipInSocks5Mode = true;
+        // the skipped shape (socks5 + forwardProxy.enabled=false): everything points at the
+        // external mixed inbound
+        socks5.ForwardProxy.Enabled = false;
         socks5.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
         Assert.True(AppProxyEndpoint.IsSkipped(socks5));
         Assert.Equal("192.0.2.10:7080", AppProxyEndpoint.Address(socks5));
@@ -281,6 +300,29 @@ public class AppConfigTests : IDisposable
         Assert.Equal(
             Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "marker-file"),
             loaded.ForwardProxy.ActivityMarkerPath);
+    }
+
+    [Fact]
+    public void RepositoryTemplateParsesIntoTheExpectedDefaults()
+    {
+        // walk up from the test output to the repository root: the template is the contract
+        // between the config schema and the users
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "config", "appsettings.example.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        var config = AppConfigStore.LoadOrCreate(Path.Combine(directory!.FullName, "config", "appsettings.example.json"));
+        Assert.Equal(ChainMode.Tailscale, config.Chain.EffectiveMode);
+        Assert.True(config.Claude.Enabled);
+        Assert.True(config.Codex.Enabled);
+        Assert.True(config.ForwardProxy.Enabled);
+        Assert.Empty(config.BypassDomains);
+        Assert.Empty(config.DirectTlds);
+        Assert.Equal(["www.anthropic.com", "www.openai.com"], config.Guard.BanProbes);
+        Assert.Equal("api.anthropic.com", config.ForwardProxy.HealthCheckHost);
     }
 
     public void Dispose()

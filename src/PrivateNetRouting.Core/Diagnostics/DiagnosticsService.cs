@@ -56,8 +56,8 @@ public sealed class DiagnosticsService(
         var chainConfig = config.Chain;
         var socks5 = chainConfig.EffectiveMode == ChainMode.Socks5;
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
-        var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.DaemonHttpListen).Port;
-        var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.DaemonSocksListen).Port;
+        var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.HttpListen).Port;
+        var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.SocksListen).Port;
         var proxyPort = AppProxyEndpoint.Port(config);
 
         var state = await chain.GetStateAsync(ct);
@@ -96,10 +96,10 @@ public sealed class DiagnosticsService(
     /// <summary>socks5 egress: the configured external upstream (with its user, never the password) and whether it answers.</summary>
     private DiagSection EgressSection(ChainState state)
     {
-        var fp = config.ForwardProxy;
-        var display = string.IsNullOrEmpty(fp.Socks5UpstreamUser)
-            ? fp.Socks5Upstream
-            : $"{fp.Socks5UpstreamUser}@{fp.Socks5Upstream}";
+        var socks5 = config.Chain.Socks5;
+        var display = string.IsNullOrEmpty(socks5.User)
+            ? socks5.Upstream
+            : $"{socks5.User}@{socks5.Upstream}";
         var line = state.UpstreamReachable switch
         {
             true => new DiagLine($"egress ({display})", "reachable", DiagMark.Good),
@@ -117,7 +117,7 @@ public sealed class DiagnosticsService(
         var lines = new List<DiagLine>
         {
             new(
-                $"daemon ({Socks5Client.ParseEndPoint(config.Chain.DaemonHttpListen).Port} http, {Socks5Client.ParseEndPoint(config.Chain.DaemonSocksListen).Port} socks)",
+                $"daemon ({Socks5Client.ParseEndPoint(config.Chain.Tailscale.HttpListen).Port} http, {Socks5Client.ParseEndPoint(config.Chain.Tailscale.SocksListen).Port} socks)",
                 DescribeOwners(daemonHttp.Concat(daemonSocks)),
                 daemonHttp.Count > 0 ? DiagMark.Good : DiagMark.Bad),
             KeeperLine(),
@@ -133,7 +133,7 @@ public sealed class DiagnosticsService(
     private DiagLine KeeperLine()
     {
         var keepers = processes
-            .Find("tailscale.exe", config.Chain.Socket)
+            .Find("tailscale.exe", config.Chain.Tailscale.Socket)
             .Where(p => p.CommandLine.Contains("watch-ipn", StringComparison.OrdinalIgnoreCase))
             .ToList();
         return keepers.Count > 0

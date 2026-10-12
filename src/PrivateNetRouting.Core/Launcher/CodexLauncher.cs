@@ -64,7 +64,7 @@ public sealed class CodexLauncher(
     /// <summary>Proxy URL for --proxy-server and for the proxy env variables.</summary>
     public string ProxyUrl => AppProxyEndpoint.Url(config);
 
-    public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
+    public string BuildBypassList() => ClaudeBypassList.Build(config.BypassDomains);
 
     public async Task<CodexLaunchResult> LaunchAsync(LauncherOptions options, IProgress<ChainStep>? progress, CancellationToken ct)
     {
@@ -95,7 +95,7 @@ public sealed class CodexLauncher(
             // start of a single-instance app would only activate the existing window, so the
             // running copy is closed first. A copy that carries our proxy is left alone.
             restarted = (await _running
-                    .CloseAsync("Codex", TimeSpan.FromSeconds(config.Launcher.RestartGraceSeconds), ct)
+                    .CloseAsync("Codex", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
                     .ConfigureAwait(false))
                 .AnythingClosed;
         }
@@ -148,7 +148,7 @@ public sealed class CodexLauncher(
         script.AppendLine($"$env:HTTP_PROXY = '{Quote(ProxyUrl)}'");
         script.AppendLine($"$env:HTTPS_PROXY = '{Quote(ProxyUrl)}'");
         script.AppendLine($"$env:ALL_PROXY = '{Quote(ProxyUrl)}'");
-        script.AppendLine($"$env:NO_PROXY = '{Quote(ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains))}'");
+        script.AppendLine($"$env:NO_PROXY = '{Quote(ClaudeEnvValues.BuildNoProxy(config.BypassDomains))}'");
         script.AppendLine($"$pkg = Get-AppxPackage -Name '{Quote(codex.PackageName)}'");
         script.AppendLine("if (-not $pkg) { throw 'Codex desktop app is not installed for the current user (Get-AppxPackage found no " + Quote(codex.PackageName) + ")' }");
         script.AppendLine($"$exe = Join-Path $pkg.InstallLocation '{Quote(codex.AppExecutable)}'");

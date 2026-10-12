@@ -159,9 +159,9 @@ internal static class Program
                 var skipProxy = AppProxyEndpoint.IsSkipped(config);
                 if (config.Chain.EffectiveMode == ChainMode.Socks5)
                 {
-                    var upstream = string.IsNullOrEmpty(config.ForwardProxy.Socks5UpstreamUser)
-                        ? config.ForwardProxy.Socks5Upstream
-                        : $"{config.ForwardProxy.Socks5UpstreamUser}@{config.ForwardProxy.Socks5Upstream}";
+                    var upstream = string.IsNullOrEmpty(config.Chain.Socks5.User)
+                        ? config.Chain.Socks5.Upstream
+                        : $"{config.Chain.Socks5.User}@{config.Chain.Socks5.Upstream}";
                     Console.WriteLine($"upstream:  {upstream}, {(state.UpstreamReachable is true ? "reachable" : state.UpstreamReachable is false ? "no route" : "not checked")}");
                 }
                 else
@@ -401,7 +401,7 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
-        if (!config.Apps.Claude)
+        if (!config.Claude.Enabled)
         {
             Console.WriteLine("Claude is disabled in config (apps.claude=false)");
             return 0;
@@ -586,7 +586,7 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
-        if (!config.Apps.Codex)
+        if (!config.Codex.Enabled)
         {
             Console.WriteLine("Codex is disabled in config (apps.codex=false)");
             return 0;
@@ -641,7 +641,7 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
-        if (!config.Apps.Codex)
+        if (!config.Codex.Enabled)
         {
             Console.WriteLine("Codex is disabled in config (apps.codex=false)");
             return 0;
@@ -698,9 +698,9 @@ internal static class Program
         }
 
         Console.WriteLine($"watchdog: checking Claude and Codex usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
-        if (string.IsNullOrWhiteSpace(config.Watchdog.WslDistro))
+        if (config.Wsl.Distros.Count == 0)
         {
-            Console.WriteLine("watchdog: watchdog.wslDistro is not set, the WSL host will not be stopped on idle");
+            Console.WriteLine("watchdog: no distros configured (wsl.distros), the WSL step will be skipped on idle");
         }
 
         var progress = new Progress<ChainStep>(step =>
@@ -773,7 +773,7 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
-        if (!config.Apps.Claude)
+        if (!config.Claude.Enabled)
         {
             Console.WriteLine("Claude is disabled in config (apps.claude=false)");
             return 0;

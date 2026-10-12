@@ -42,7 +42,7 @@ public sealed class CodexUpdater(
                 $"Codex desktop app is not installed as an MSIX package ({config.Codex.PackageName})");
         try
         {
-            var available = await store.HasUpdateAsync(config.Codex.StoreProductId, ct).ConfigureAwait(false);
+            var available = await store.HasUpdateAsync(config.Codex.Update.StoreProductId, ct).ConfigureAwait(false);
             if (available)
             {
                 var offered = await versionManifest.FindOfferedVersionAsync(ct).ConfigureAwait(false);
@@ -89,7 +89,7 @@ public sealed class CodexUpdater(
         var handle = await store.StartUpdateAsync(installed.PackageFamilyName, ct).ConfigureAwait(false);
         onHandle?.Invoke(handle);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.Codex.UpdateTimeoutSeconds)));
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.Codex.Update.UpdateTimeoutSeconds)));
         try
         {
             while (true)
@@ -128,7 +128,7 @@ public sealed class CodexUpdater(
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new IOException(
-                $"the Store update did not finish within {config.Codex.UpdateTimeoutSeconds} s — check the Store app");
+                $"the Store update did not finish within {config.Codex.Update.UpdateTimeoutSeconds} s — check the Store app");
         }
     }
 
@@ -161,7 +161,7 @@ public sealed class CodexUpdater(
             process.CloseMainWindow();
         }
 
-        var waits = Math.Max(1, config.Updater.CloseWaitSeconds);
+        var waits = Math.Max(1, config.CloseWaitSeconds);
         for (var i = 0; i < waits; i++)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
@@ -177,6 +177,6 @@ public sealed class CodexUpdater(
             process.Kill();
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.Updater.KillSettleSeconds)), ct).ConfigureAwait(false);
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.KillSettleSeconds)), ct).ConfigureAwait(false);
     }
 }

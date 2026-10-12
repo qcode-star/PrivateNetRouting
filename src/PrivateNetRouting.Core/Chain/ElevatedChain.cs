@@ -28,7 +28,7 @@ public static class ElevatedChainCommands
             var log = new FileLog(
                 Path.Combine(config.Logging.Directory, "chain-elevated.log"),
                 config.Logging.EffectiveLevel);
-            var stateDir = config.Chain.StateDir;
+            var stateDir = config.Chain.Tailscale.StateDir;
             Directory.CreateDirectory(stateDir);
 
             var detail = command switch
@@ -58,20 +58,20 @@ public static class ElevatedChainCommands
     {
         var chain = config.Chain;
         var daemon = new SidecarDaemon(
-            chain,
+            chain.Tailscale,
             new TcpPortProbe(),
             new WmiProcessFinder(),
             log,
-            new ElevatedRunner(chain, log, elevatedBypass: true),
-            new TailscaleVersionProbe(chain.TailscaledPath));
+            new ElevatedRunner(chain.Tailscale, log, elevatedBypass: true),
+            new TailscaleVersionProbe(chain.Tailscale.TailscaledPath));
         if (daemon.IsHttpListening && daemon.IsProcessAlive)
         {
             return "daemon is already listening";
         }
 
         daemon.StartProcess(devMode: false);
-        var httpPort = Socks5Client.ParseEndPoint(chain.DaemonHttpListen).Port;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(chain.DaemonWaitSeconds);
+        var httpPort = Socks5Client.ParseEndPoint(chain.Tailscale.HttpListen).Port;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(chain.Tailscale.DaemonWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
             if (new TcpPortProbe().IsListening(httpPort))
@@ -83,15 +83,15 @@ public static class ElevatedChainCommands
             Thread.Sleep(500);
         }
 
-        var errTail = ReadTail(Path.Combine(chain.StateDir, "daemon.err.log"), lines: 15);
+        var errTail = ReadTail(Path.Combine(chain.Tailscale.StateDir, "daemon.err.log"), lines: 15);
         log.Error("elevated: daemon did not bring up the listener");
-        throw new IOException($"daemon listener did not come up within {chain.DaemonWaitSeconds}s; daemon.err.log: {errTail}");
+        throw new IOException($"daemon listener did not come up within {chain.Tailscale.DaemonWaitSeconds}s; daemon.err.log: {errTail}");
     }
 
     private static string StopChainCore(AppConfig config, FileLog log)
     {
         var chain = config.Chain;
-        var cli = new SidecarCli(chain);
+        var cli = new SidecarCli(chain.Tailscale);
         try
         {
             var down = cli.DownAsync(CancellationToken.None).GetAwaiter().GetResult();
@@ -105,8 +105,8 @@ public static class ElevatedChainCommands
         var killed = 0;
         foreach (var (name, pattern) in new[]
                  {
-                     ("tailscaled.exe", chain.StateDir),
-                     ("tailscale.exe", config.Chain.Socket),
+                     ("tailscaled.exe", chain.Tailscale.StateDir),
+                     ("tailscale.exe", chain.Tailscale.Socket),
                  })
         {
             foreach (var found in new WmiProcessFinder().Find(name, pattern))
@@ -163,7 +163,7 @@ public interface IElevatedCommandRunner
 /// executor — what exactly to execute in the bypass process (chain or guard commands).
 /// </summary>
 public sealed class ElevatedRunner(
-    ChainConfig config,
+    ChainTailscaleConfig config,
     FileLog log,
     bool elevatedBypass = false,
     Func<string, string, int>? executor = null) : IElevatedCommandRunner

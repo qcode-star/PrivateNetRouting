@@ -201,9 +201,10 @@
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code and Codex already up to date (proxy {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">no backup (file was created)</s:String>
     <s:String x:Key="Main.Guard.Wsl">WSL config</s:String>
-    <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (guard.wsl.mode=off)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (wsl.mode=off)</s:String>
     <s:String x:Key="Main.Guard.Wsl.AutoNone">auto: none of the configured distros is installed</s:String>
-    <s:String x:Key="Main.Guard.Wsl.NotConfigured">not configured (guard.wsl.distros)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NotConfigured">not configured (wsl.distros)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NoSync">nothing to sync (wsl.syncClaude and wsl.syncCodex are off)</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotInstalled">distro is not installed</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotRunning">distro is not running — start it to check</s:String>
     <s:String x:Key="Main.Guard.Wsl.NoScript">WSL startup script not found</s:String>

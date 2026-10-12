@@ -258,7 +258,7 @@ public class GuardTests : IDisposable
 
         // the skipped socks5 shape: the guard files carry the external endpoint instead
         config.Chain.Mode = "socks5";
-        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.Enabled = false;
         config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
         Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WindowsProxyUrl(config));
         Assert.Equal(7080, ClaudeEnvValues.Port(config));
@@ -273,7 +273,7 @@ public class GuardTests : IDisposable
         Assert.Null(WslConfigGuard.ReachabilityWarning(config));
 
         // the skip flag alone (tailscale mode) changes nothing
-        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.Enabled = false;
         Assert.Null(WslConfigGuard.ReachabilityWarning(config));
 
         // a skipped shape with a public/LAN endpoint is reachable in principle — no warning
@@ -309,8 +309,8 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.ForwardProxy.Listen = "127.0.0.1:18082"; // the assertions expect the documented port, not the moving default
-        config.Launcher.BypassDomains = ["corp.example.com"];
-        config.Guard.ClaudeSettingsPath = Path.Combine(_tempDir, "settings.json");
+        config.BypassDomains = ["corp.example.com"];
+        config.Claude.SettingsPath = Path.Combine(_tempDir, "settings.json");
         return config;
     }
 
@@ -318,7 +318,7 @@ public class GuardTests : IDisposable
     public void SettingsSyncPreservesKeysAndBackups()
     {
         var config = SettingsConfig();
-        File.WriteAllText(config.Guard.ClaudeSettingsPath, """
+        File.WriteAllText(config.Claude.SettingsPath, """
             {
               "other": 1,
               "env": { "HTTPS_PROXY": "http://old:1", "FOO": "bar" }
@@ -335,7 +335,7 @@ public class GuardTests : IDisposable
         var status = guard.Read();
         Assert.Equal(GuardState.On, status.State);
 
-        var json = JsonNode.Parse(File.ReadAllText(config.Guard.ClaudeSettingsPath))!;
+        var json = JsonNode.Parse(File.ReadAllText(config.Claude.SettingsPath))!;
         Assert.Equal(1, (int)json["other"]!);
         Assert.Equal("bar", (string?)json["env"]!["FOO"]);
         Assert.Equal("http://127.0.0.1:18082", (string?)json["env"]!["HTTPS_PROXY"]);
@@ -354,9 +354,9 @@ public class GuardTests : IDisposable
     {
         var config = SettingsConfig();
         config.Chain.Mode = "socks5";
-        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.Enabled = false;
         config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
-        config.Guard.CodexEnvPath = Path.Combine(_tempDir, "codex.env");
+        config.Codex.EnvPath = Path.Combine(_tempDir, "codex.env");
 
         var guard = new ClaudeSettingsGuard(config);
         guard.Sync();
@@ -364,11 +364,11 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.On, status.State);
         Assert.Equal("http://192.0.2.10:7080", status.ExpectedProxy);
 
-        var json = JsonNode.Parse(File.ReadAllText(config.Guard.ClaudeSettingsPath))!;
+        var json = JsonNode.Parse(File.ReadAllText(config.Claude.SettingsPath))!;
         Assert.Equal("http://192.0.2.10:7080", (string?)json["env"]!["HTTPS_PROXY"]);
 
         CodexEnvFile.Write(config);
-        var env = File.ReadAllText(config.Guard.CodexEnvPath);
+        var env = File.ReadAllText(config.Codex.EnvPath);
         Assert.Contains("HTTP_PROXY=http://192.0.2.10:7080", env);
         Assert.Contains("ALL_PROXY=http://192.0.2.10:7080", env);
     }
@@ -377,9 +377,9 @@ public class GuardTests : IDisposable
     public void SettingsSyncPrunesBackupsAndLegacyNaming()
     {
         var config = SettingsConfig();
-        File.WriteAllText(config.Guard.ClaudeSettingsPath, """{ "env": { "HTTPS_PROXY": "http://old:1" } }""");
-        var dir = Path.GetDirectoryName(config.Guard.ClaudeSettingsPath)!;
-        var name = Path.GetFileName(config.Guard.ClaudeSettingsPath);
+        File.WriteAllText(config.Claude.SettingsPath, """{ "env": { "HTTPS_PROXY": "http://old:1" } }""");
+        var dir = Path.GetDirectoryName(config.Claude.SettingsPath)!;
+        var name = Path.GetFileName(config.Claude.SettingsPath);
         for (var i = 1; i <= 5; i++)
         {
             var stale = Path.Combine(dir, $"{name}.pnr-bak-2026010{i}-000000");
@@ -443,7 +443,7 @@ public class GuardTests : IDisposable
         guard.Sync();
         Assert.Equal(GuardState.On, guard.Read().State);
 
-        File.WriteAllText(config.Guard.ClaudeSettingsPath, """{ "env": { "HTTPS_PROXY": "http://other:2" } }""");
+        File.WriteAllText(config.Claude.SettingsPath, """{ "env": { "HTTPS_PROXY": "http://other:2" } }""");
         var mismatch = guard.Read();
         Assert.Equal(GuardState.Partial, mismatch.State);
         Assert.Equal("http://other:2", mismatch.CurrentProxy);
@@ -454,8 +454,8 @@ public class GuardTests : IDisposable
     private AppConfig CodexConfig()
     {
         var config = new AppConfig();
-        config.Guard.CodexSettingsPath = Path.Combine(_tempDir, "codex-config.toml");
-        config.Guard.CodexEnvPath = Path.Combine(_tempDir, "codex-env");
+        config.Codex.SettingsPath = Path.Combine(_tempDir, "codex-config.toml");
+        config.Codex.EnvPath = Path.Combine(_tempDir, "codex-env");
         return config;
     }
 
@@ -463,7 +463,7 @@ public class GuardTests : IDisposable
     public void CodexSettingsSyncAddsSectionAndKeepsEveryOtherLine()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Guard.CodexSettingsPath, """
+        File.WriteAllText(config.Codex.SettingsPath, """
             notify = [ "C:\\tools\\codex-computer-use.exe", "turn-ended" ]
 
             [desktop]
@@ -483,7 +483,7 @@ public class GuardTests : IDisposable
         Assert.True(File.Exists(result.BackupPath));
         Assert.Equal(GuardState.On, guard.Read().State);
 
-        var lines = File.ReadAllLines(config.Guard.CodexSettingsPath);
+        var lines = File.ReadAllLines(config.Codex.SettingsPath);
         Assert.Contains("[features]", lines);
         Assert.Contains("respect_system_proxy = true", lines);
         var before = File.ReadAllLines(result.BackupPath!);
@@ -500,21 +500,21 @@ public class GuardTests : IDisposable
     public void CodexSettingsSyncInsertsIntoTheExistingSection()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Guard.CodexSettingsPath, "[features]\nfoo = \"bar\"\n\n[other]\nkey = 1\n");
+        File.WriteAllText(config.Codex.SettingsPath, "[features]\nfoo = \"bar\"\n\n[other]\nkey = 1\n");
 
         var result = new CodexSettingsGuard(config).Sync();
 
         Assert.True(result.Written);
         Assert.Equal(
             "[features]\nrespect_system_proxy = true\nfoo = \"bar\"\n\n[other]\nkey = 1\n",
-            File.ReadAllText(config.Guard.CodexSettingsPath));
+            File.ReadAllText(config.Codex.SettingsPath));
     }
 
     [Fact]
     public void CodexSettingsSyncUpdatesTheFlagInPlaceKeepingStyle()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Guard.CodexSettingsPath, "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n");
+        File.WriteAllText(config.Codex.SettingsPath, "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n");
         var guard = new CodexSettingsGuard(config);
         Assert.Equal(GuardState.Partial, guard.Read().State);
 
@@ -523,7 +523,7 @@ public class GuardTests : IDisposable
         Assert.True(result.Written);
         Assert.Equal(
             "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n",
-            File.ReadAllText(config.Guard.CodexSettingsPath)); // the inline comment and the CRLF style survive
+            File.ReadAllText(config.Codex.SettingsPath)); // the inline comment and the CRLF style survive
         Assert.Equal(GuardState.On, guard.Read().State);
     }
 
@@ -532,7 +532,7 @@ public class GuardTests : IDisposable
     {
         var config = CodexConfig();
         var toml = "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n";
-        File.WriteAllText(config.Guard.CodexSettingsPath, toml);
+        File.WriteAllText(config.Codex.SettingsPath, toml);
         var guard = new CodexSettingsGuard(config);
 
         // the lines inside the multi-line string are not structure: the effective value is the dotted key's false
@@ -543,7 +543,7 @@ public class GuardTests : IDisposable
         Assert.True(result.Written);
         Assert.Equal(
             "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n",
-            File.ReadAllText(config.Guard.CodexSettingsPath)); // the dotted key is rewritten, the string is untouched
+            File.ReadAllText(config.Codex.SettingsPath)); // the dotted key is rewritten, the string is untouched
         Assert.Equal(GuardState.On, guard.Read().State);
     }
 
@@ -561,10 +561,10 @@ public class GuardTests : IDisposable
         Assert.True(created.Written);
         Assert.Equal(
             new[] { "[features]", "respect_system_proxy = true" },
-            File.ReadAllLines(config.Guard.CodexSettingsPath));
+            File.ReadAllLines(config.Codex.SettingsPath));
         Assert.Equal(GuardState.On, guard.Read().State);
 
-        File.WriteAllText(config.Guard.CodexSettingsPath, "[desktop]\nfollowUpQueueMode = \"steer\"\n");
+        File.WriteAllText(config.Codex.SettingsPath, "[desktop]\nfollowUpQueueMode = \"steer\"\n");
         var unset = guard.Read();
         Assert.Equal(GuardState.Partial, unset.State); // the file exists, the flag does not
         Assert.Null(unset.Enabled);
@@ -632,7 +632,7 @@ public class GuardTests : IDisposable
     public void CodexSettingsSyncWritesTheEnvFileWithBackupAndIdempotence()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://elsewhere:3\nMY_VAR=keep\n");
+        File.WriteAllText(config.Codex.EnvPath, "HTTP_PROXY=http://elsewhere:3\nMY_VAR=keep\n");
         var guard = new CodexSettingsGuard(config);
         var before = guard.Read();
         Assert.Equal(GuardState.Partial, before.State);
@@ -644,7 +644,7 @@ public class GuardTests : IDisposable
         Assert.True(result.EnvWritten);
         Assert.NotNull(result.EnvBackupPath);
         Assert.True(File.Exists(result.EnvBackupPath));
-        var text = File.ReadAllText(config.Guard.CodexEnvPath);
+        var text = File.ReadAllText(config.Codex.EnvPath);
         Assert.Contains("HTTP_PROXY=http://127.0.0.1:18081\n", text);
         Assert.Contains("MY_VAR=keep\n", text); // the foreign line survives
         var after = guard.Read();
@@ -661,7 +661,7 @@ public class GuardTests : IDisposable
     {
         var config = CodexConfig();
         // what a WSL codex shell leaves behind: the NAT gateway address
-        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://192.0.2.1:18081\nHTTPS_PROXY=http://192.0.2.1:18081\nALL_PROXY=http://192.0.2.1:18081\nNO_PROXY=localhost\n");
+        File.WriteAllText(config.Codex.EnvPath, "HTTP_PROXY=http://192.0.2.1:18081\nHTTPS_PROXY=http://192.0.2.1:18081\nALL_PROXY=http://192.0.2.1:18081\nNO_PROXY=localhost\n");
 
         var (written, backup) = CodexEnvFile.Write(config);
 
@@ -669,7 +669,7 @@ public class GuardTests : IDisposable
         Assert.NotNull(backup);
         Assert.Equal(
             "HTTP_PROXY=http://127.0.0.1:18081\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1,.local\n",
-            File.ReadAllText(config.Guard.CodexEnvPath));
+            File.ReadAllText(config.Codex.EnvPath));
         var (again, noBackup) = CodexEnvFile.Write(config);
         Assert.False(again);
         Assert.Null(noBackup);
@@ -682,8 +682,9 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.Guard.NrptRuleName = "ai'direct";
-        config.Guard.BanTrees = ["claude.ai", "openai.com"];
-        var ops = new PowerShellBanSystemOps(config.Guard, new StubPowerShell());
+        config.Claude.BanTrees = ["claude.ai"];
+        config.Codex.BanTrees = ["openai.com"];
+        var ops = new PowerShellBanSystemOps(config, new StubPowerShell());
 
         var script = ops.BuildNrptScript(apply: true);
         Assert.Contains("Remove-DnsClientNrptRule", script); // idempotence: remove first
@@ -697,8 +698,8 @@ public class GuardTests : IDisposable
     public void FirewallScriptSplitsFamiliesAndUsesGroup()
     {
         var config = new AppConfig();
-        config.Guard.FirewallSubnets = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
-        var ops = new PowerShellBanSystemOps(config.Guard, new StubPowerShell());
+        config.Claude.FirewallSubnets = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
+        var ops = new PowerShellBanSystemOps(config, new StubPowerShell());
 
         var script = ops.BuildFirewallScript(apply: true);
         Assert.Contains("Remove-NetFirewallRule", script);
@@ -728,13 +729,18 @@ public class GuardTests : IDisposable
 
     // ----- WSL layer -----
 
-    private AppConfig WslConfig(string mode, params (string Name, string User, bool Sync)[] distros)
+    private AppConfig WslConfig(string mode, params (string Name, string User)[] distros)
+        => WslConfig(mode, syncClaude: true, syncCodex: true, distros);
+
+    private AppConfig WslConfig(string mode, bool syncClaude, bool syncCodex, params (string Name, string User)[] distros)
     {
         var config = new AppConfig();
         config.ForwardProxy.Listen = "127.0.0.1:18082"; // the assertions expect the documented port, not the moving default
-        config.Guard.Wsl.Mode = mode;
-        config.Guard.Wsl.Distros = distros
-            .Select(d => new WslDistroConfig { Name = d.Name, User = d.User, Sync = d.Sync })
+        config.Wsl.Mode = mode;
+        config.Wsl.SyncClaude = syncClaude;
+        config.Wsl.SyncCodex = syncCodex;
+        config.Wsl.Distros = distros
+            .Select(d => new WslDistroConfig { Name = d.Name, User = d.User })
             .ToList();
         return config;
     }
@@ -748,7 +754,7 @@ public class GuardTests : IDisposable
     [Fact]
     public async Task WslLayerModes()
     {
-        var off = new WslConfigGuard(WslConfig("off", ("d1", "u1", true)), new FakeWslRunner());
+        var off = new WslConfigGuard(WslConfig("off", ("d1", "u1")), new FakeWslRunner());
         var (enabled, reason) = await off.EvaluateLayerAsync(CancellationToken.None);
         Assert.False(enabled);
         Assert.Contains("mode=off", reason);
@@ -757,14 +763,21 @@ public class GuardTests : IDisposable
         Assert.False((await empty.EvaluateLayerAsync(CancellationToken.None)).Enabled);
 
         var runner = new FakeWslRunner { Installed = ["d1", "d2"], Running = ["d1"] };
-        var on = new WslConfigGuard(WslConfig("on", ("d9", "u9", true)), runner);
+        var on = new WslConfigGuard(WslConfig("on", ("d9", "u9")), runner);
         Assert.True((await on.EvaluateLayerAsync(CancellationToken.None)).Enabled); // on does not look at installation
 
-        var auto = new WslConfigGuard(WslConfig("auto", ("d9", "u9", true)), runner);
+        var auto = new WslConfigGuard(WslConfig("auto", ("d9", "u9")), runner);
         Assert.False((await auto.EvaluateLayerAsync(CancellationToken.None)).Enabled); // d9 is not installed
 
-        var autoMatch = new WslConfigGuard(WslConfig("auto", ("d1", "u1", true)), runner);
+        var autoMatch = new WslConfigGuard(WslConfig("auto", ("d1", "u1")), runner);
         Assert.True((await autoMatch.EvaluateLayerAsync(CancellationToken.None)).Enabled);
+
+        // both syncs off — there is nothing to maintain, the layer reports off
+        var bothOff = new WslConfigGuard(
+            WslConfig("on", syncClaude: false, syncCodex: false, ("d1", "u1")), runner);
+        var (enabledBoth, reasonBoth) = await bothOff.EvaluateLayerAsync(CancellationToken.None);
+        Assert.False(enabledBoth);
+        Assert.Contains("nothing to sync", reasonBoth);
     }
 
     [Fact]
@@ -777,7 +790,7 @@ public class GuardTests : IDisposable
             ProbeOutput = distro => distro == "d1" ? WslProbeInSync("u1") : "",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true), ("d2", "u2", false)),
+            WslConfig("on", ("d1", "u1"), ("d2", "u2")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -807,7 +820,7 @@ public class GuardTests : IDisposable
                   + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true), ("d2", "u2", true)),
+            WslConfig("on", ("d1", "u1"), ("d2", "u2")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -821,7 +834,7 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
-    public async Task WslStatusIgnoresCodexProxyEnvWhenTheDistroOptedOut()
+    public async Task WslStatusIgnoresCodexProxyEnvWhenSyncCodexIsOff()
     {
         var runner = new FakeWslRunner
         {
@@ -830,8 +843,7 @@ public class GuardTests : IDisposable
             ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\n"
                 + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
         };
-        var config = WslConfig("on", ("d1", "u1", true));
-        config.Guard.Wsl.Distros[0].ProxyEnv = false;
+        var config = WslConfig("on", syncClaude: true, syncCodex: false, ("d1", "u1"));
         var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
         var status = await guard.ReadAsync(CancellationToken.None);
@@ -877,7 +889,7 @@ public class GuardTests : IDisposable
                 : "SCRIPT=missing\nSETTINGS=missing\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true), ("d3", "u3", true)),
+            WslConfig("on", ("d1", "u1"), ("d3", "u3")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -889,7 +901,7 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
-    public async Task WslSyncWritesScriptAndSettingsOnlyForSyncedRunningDistros()
+    public async Task WslSyncVisitsEveryConfiguredDistroAndSkipsTheNotRunning()
     {
         var runner = new FakeWslRunner
         {
@@ -898,14 +910,14 @@ public class GuardTests : IDisposable
             ProbeOutput = _ => "SCRIPT=present\nPORT=8082\nSETTINGS=present\n{}\nSETTINGS=END\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true), ("d2", "u2", true), ("d3", "u3", false)),
+            WslConfig("on", ("d1", "u1"), ("d2", "u2"), ("d3", "u3")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
         var result = await guard.SyncAsync(CancellationToken.None);
 
         Assert.False(result.LayerDisabled);
-        Assert.Equal(2, result.Distros.Count); // sync=false (d3) is not synced
+        Assert.Equal(3, result.Distros.Count); // every configured distro is visited; not-running ones are skipped without being started
         var d1 = Assert.Single(result.Distros, d => d.Distro == "d1");
         var d2 = Assert.Single(result.Distros, d => d.Distro == "d2");
         Assert.False(d1.Skipped);
@@ -940,20 +952,21 @@ public class GuardTests : IDisposable
         Assert.Contains("pnr_bak \"$ENVFILE\" BACKUP", envPass.Script);
         var envPayload = ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"");
         var envScript = Encoding.UTF8.GetString(Convert.FromBase64String(envPayload));
-        Assert.Contains("guard.wsl.proxyEnvPath", envScript);
+        Assert.Contains("wsl.proxyEnvPath", envScript);
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", envScript);
         Assert.Contains("${CODEX_HOME:-}", envScript);
         Assert.Contains("export NO_PROXY=", envScript);
-        // distro d3 is configured with sync=false: nothing is written into it at all
-        Assert.DoesNotContain(runner.Scripts, s => s.Distro == "d3");
+        // d3 is running: it is visited and written like d1
+        var d3 = Assert.Single(result.Distros, d => d.Distro == "d3");
+        Assert.False(d3.Skipped);
+        Assert.True(d3.SettingsWritten);
     }
 
     [Fact]
-    public async Task WslSyncLeavesCodexProxyEnvAloneWhenTheDistroOptedOut()
+    public async Task WslSyncLeavesCodexProxyEnvAloneWhenSyncCodexIsOff()
     {
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
-        var config = WslConfig("on", ("d1", "u1", true));
-        config.Guard.Wsl.Distros[0].ProxyEnv = false;
+        var config = WslConfig("on", syncClaude: true, syncCodex: false, ("d1", "u1"));
         var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
         var result = await guard.SyncAsync(CancellationToken.None);
@@ -979,7 +992,7 @@ public class GuardTests : IDisposable
                 """,
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -996,7 +1009,7 @@ public class GuardTests : IDisposable
     public async Task WslSyncSkipsWholeLayerWhenDisabled()
     {
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
-        var guard = new WslConfigGuard(WslConfig("off", ("d1", "u1", true)), runner);
+        var guard = new WslConfigGuard(WslConfig("off", ("d1", "u1")), runner);
 
         var result = await guard.SyncAsync(CancellationToken.None);
         Assert.True(result.LayerDisabled);
@@ -1018,7 +1031,7 @@ public class GuardTests : IDisposable
                 """,
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1042,7 +1055,7 @@ public class GuardTests : IDisposable
             WriteOutput = "SETTINGS=unchanged\nSCRIPT=unchanged\nPNR=ok\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1066,7 +1079,7 @@ public class GuardTests : IDisposable
             WriteOutput = "bash: line 3: syntax error near unexpected token\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1131,7 +1144,7 @@ public class GuardTests : IDisposable
             WriteOutput = "RUNNER=written\nWSLCONF=written\nSETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1174,7 +1187,7 @@ public class GuardTests : IDisposable
                 + "WSLCONF=written\nPNR=ok\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1212,7 +1225,7 @@ public class GuardTests : IDisposable
             WriteOutput = "SETTINGS=written\nSCRIPT=written\nPNR=ok\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1245,7 +1258,7 @@ public class GuardTests : IDisposable
             WriteOutput = "RUNNER=written\nPNR=ok\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1", true)),
+            WslConfig("on", ("d1", "u1")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
@@ -1310,13 +1323,13 @@ public class GuardTests : IDisposable
         var config = new AppConfig();
         config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the assertions expect the documented port
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts");
-        config.Guard.BanProbeName = "probe.invalid";
+        config.Guard.BanProbes = ["probe.invalid"];
         File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
         var banOps = new FakeBanSystemOps
         {
             Layers = new BanLayersState(1, [".claude.ai"], 2, ["160.79.104.0/21", "2607:6bc0::/48"]),
         };
-        HostsFileBlock.Apply(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.Guard.BanHosts);
+        HostsFileBlock.Apply(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.BanHosts);
         var service = MakeService(
             config,
             new FakeEgressPolicyStore { Values = new EgressPolicyValues(true, "http://127.0.0.1:18082", 0) },
@@ -1327,7 +1340,7 @@ public class GuardTests : IDisposable
 
         var snapshot = await service.GetStatusAsync(CancellationToken.None);
         Assert.Equal(GuardState.On, snapshot.Ban.State);
-        Assert.Equal(config.Guard.BanHosts.Count, snapshot.Ban.HostsEntries);
+        Assert.Equal(config.BanHosts.Count, snapshot.Ban.HostsEntries);
         Assert.True(snapshot.Ban.HostsCurrent);
         Assert.Equal(GuardState.On, snapshot.Policy.State);
         Assert.Equal(GuardState.On, snapshot[GuardKind.SystemProxy].State);
@@ -1341,7 +1354,7 @@ public class GuardTests : IDisposable
         var config = new AppConfig();
         config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the assertions expect the documented port
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-empty");
-        config.Guard.BanProbeName = "probe.invalid";
+        config.Guard.BanProbes = ["probe.invalid"];
         var service = MakeService(
             config,
             new FakeEgressPolicyStore { Values = new EgressPolicyValues(true, "http://10.0.0.9:1", 0) },
@@ -1362,7 +1375,7 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-x");
-        config.Guard.BanProbeName = "probe.invalid"; // does not resolve, so the checks are deterministic
+        config.Guard.BanProbes = ["probe.invalid"]; // does not resolve, so the checks are deterministic
         var elevated = new FakeElevatedRunner();
         var healthCalls = 0;
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), elevated,
@@ -1380,7 +1393,15 @@ public class GuardTests : IDisposable
     [Fact]
     public async Task BanAndPolicyFailuresSurface()
     {
-        var config = new AppConfig { Guard = new GuardConfig { HostsFile = Path.Combine(_tempDir, "h"), BanProbeName = "probe.invalid" } };
+        var config = new AppConfig
+        {
+            Guard = new GuardConfig
+            {
+                HostsFile = Path.Combine(_tempDir, "h"),
+                // a name that does not resolve, so the checks are deterministic
+                BanProbes = ["probe.invalid"],
+            },
+        };
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(),
             new FakeElevatedRunner(ok: false, detail: "UAC declined"), out _);
 
@@ -1393,7 +1414,7 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-all");
-        config.Guard.BanProbeName = "probe.invalid";
+        config.Guard.BanProbes = ["probe.invalid"];
         var elevated = new FakeElevatedRunner();
         var healthCalls = 0;
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), elevated,
@@ -1416,7 +1437,7 @@ public class GuardTests : IDisposable
         var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), sysProxy, new FakeElevatedRunner(), out _);
 
         await service.SetSystemProxyAsync(true, CancellationToken.None);
-        Assert.Equal(("127.0.0.1:18082", SystemProxyBypass.Build([], config.Guard.SystemProxyExtraBypass)), sysProxy.EnabledWith);
+        Assert.Equal(("127.0.0.1:18082", SystemProxyBypass.Build([], config.DirectTlds)), sysProxy.EnabledWith);
 
         await service.SetSystemProxyAsync(false, CancellationToken.None);
         Assert.True(sysProxy.Disabled);
@@ -1430,16 +1451,16 @@ public class GuardTests : IDisposable
         var config = new AppConfig();
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-elev");
         File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
-        config.Guard.BanProbeName = "probe.invalid";
+        config.Guard.BanProbes = ["probe.invalid"];
         var ops = new FakeBanSystemOps();
         using var log = new FileLog(Path.Combine(_tempDir, "elev.log"));
 
         var detail = GuardElevatedCommands.ApplyBanLayers(config, log, ops, enable: true);
 
         Assert.Equal(["nrpt-on", "fw-on", "flush"], ops.Calls); // hosts is applied directly via the file
-        var hosts = HostsFileBlock.Read(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.Guard.BanHosts);
+        var hosts = HostsFileBlock.Read(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.BanHosts);
         Assert.True(hosts.Present);
-        Assert.Equal(config.Guard.BanHosts.Count, hosts.EntryCount);
+        Assert.Equal(config.BanHosts.Count, hosts.EntryCount);
         Assert.Contains("NRPT rule on", detail);
 
         var removeDetail = GuardElevatedCommands.ApplyBanLayers(config, log, ops, enable: false);
@@ -1455,7 +1476,7 @@ public class GuardTests : IDisposable
         var config = new AppConfig();
         config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-all-elev");
         File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
-        config.Guard.BanProbeName = "probe.invalid";
+        config.Guard.BanProbes = ["probe.invalid"];
         config.ForwardProxy.Listen = "127.0.0.1:18082";
         var ops = new FakeBanSystemOps();
         var policy = new FakeEgressPolicyStore();

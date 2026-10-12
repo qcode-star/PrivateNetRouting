@@ -31,11 +31,8 @@ public class LauncherTests : IDisposable
         config ??= new AppConfig
         {
             ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
-            Launcher = new LauncherConfig
-            {
-                AliasPath = @"C:\fake\claude.exe",
-                BypassDomains = ["corp.example.com", ".team.example.net"],
-            },
+            Claude = new ClaudeConfig { AliasPath = @"C:\fake\claude.exe" },
+            BypassDomains = ["corp.example.com", ".team.example.net"],
         };
         _chain.Failure = chainFailure;
         return new ClaudeLauncher(
@@ -115,14 +112,14 @@ public class LauncherTests : IDisposable
             ForwardProxy = new ForwardProxyConfig
             {
                 Listen = "127.0.0.1:18082",
-                SkipInSocks5Mode = true,
+                Enabled = false,
                 ExternalAppsEndpoint = "192.0.2.10:7080",
             },
-            Launcher = new LauncherConfig
+            Claude = new ClaudeConfig
             {
                 AliasPath = @"C:\fake\claude.exe",
-                BypassDomains = ["corp.example.com"],
             },
+            BypassDomains = ["corp.example.com"],
         };
         var launcher = Create(config, policy: "http://192.0.2.10:7080");
 

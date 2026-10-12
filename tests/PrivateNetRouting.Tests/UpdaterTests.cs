@@ -33,12 +33,12 @@ public class UpdaterTests : IDisposable
         _log = new FileLog(Path.Combine(_root, "updater.log"));
         _config = new AppConfig
         {
-            Updater = new UpdaterConfig
+            Claude = new ClaudeConfig
             {
-                CacheDir = Path.Combine(_root, "cache"),
-                CloseWaitSeconds = 1,
-                KillSettleSeconds = 0,
+                Update = new ClaudeUpdateConfig { CacheDir = Path.Combine(_root, "cache") },
             },
+            CloseWaitSeconds = 1,
+            KillSettleSeconds = 0,
         };
         _marker = new ActivityMarker(Path.Combine(_root, "activity"), TimeSpan.Zero);
     }
@@ -260,7 +260,7 @@ public class UpdaterTests : IDisposable
         Assert.Equal("2.26455.1.0", result.InstalledAfter?.Version);
         var file = Assert.Single(_appx.AddedFiles);
         Assert.Equal(result.PackageFile, file);
-        Assert.StartsWith(_config.Updater.CacheDir, file);
+        Assert.StartsWith(_config.Claude.Update.CacheDir, file);
         Assert.False(File.Exists(file)); // the package is removed from the cache after install
     }
 
@@ -396,7 +396,7 @@ public class UpdaterTests : IDisposable
             updater.DownloadAsync(JournalUrl.ToString(), null, CancellationToken.None));
 
         Assert.Contains("not enough disk space", error.Message);
-        Assert.Equal(_config.Updater.CacheDir, asked);
+        Assert.Equal(_config.Claude.Update.CacheDir, asked);
         Assert.Empty(_downloader.Downloads);
     }
 
@@ -506,9 +506,9 @@ public class UpdaterTests : IDisposable
     [Fact]
     public async Task FeedDisabledByEmptyUrlYieldsNothingWithoutRequests()
     {
-        _config.Updater.UpdateFeedUrl = "";
+        _config.Claude.Update.UpdateFeedUrl = "";
         using var http = new System.Net.Http.HttpClient();
-        var finder = new UpdateFeedUrlFinder(http, _config.Updater, _log);
+        var finder = new UpdateFeedUrlFinder(http, _config.Claude.Update, _log);
 
         Assert.Null(await finder.FindLatestPackageUrlAsync("2.26454.2.0", CancellationToken.None));
     }

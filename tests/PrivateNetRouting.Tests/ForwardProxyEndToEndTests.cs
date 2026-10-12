@@ -138,7 +138,6 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         {
             Listen = "127.0.0.1:0",
             BindWslGateway = false,
-            Socks5Upstream = socksUpstream,
             HeaderTimeoutSeconds = 5,
             SocksTimeoutSeconds = 5,
         };
@@ -223,7 +222,6 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             {
                 Listen = "127.0.0.1:0",
                 BindWslGateway = false,
-                Socks5Upstream = "127.0.0.1:1",
                 HeaderTimeoutSeconds = 5,
                 SocksTimeoutSeconds = 5,
             };
@@ -280,7 +278,6 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         {
             Listen = "127.0.0.1:0",
             BindWslGateway = false,
-            Socks5Upstream = socksUpstream,
             HeaderTimeoutSeconds = 5,
             SocksTimeoutSeconds = 5,
         };

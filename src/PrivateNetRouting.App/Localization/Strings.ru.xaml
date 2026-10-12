@@ -201,9 +201,10 @@
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code и Codex уже актуальны (прокси {0})</s:String>
     <s:String x:Key="Main.Guard.Backup.None">без бэкапа (файл создан с нуля)</s:String>
     <s:String x:Key="Main.Guard.Wsl">Конфиг WSL</s:String>
-    <s:String x:Key="Main.Guard.Wsl.Off.Mode">слой выключен (guard.wsl.mode=off)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.Off.Mode">слой выключен (wsl.mode=off)</s:String>
     <s:String x:Key="Main.Guard.Wsl.AutoNone">auto: ни один настроенный дистрибутив не установлен</s:String>
-    <s:String x:Key="Main.Guard.Wsl.NotConfigured">не настроено (guard.wsl.distros)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NotConfigured">не настроено (wsl.distros)</s:String>
+    <s:String x:Key="Main.Guard.Wsl.NoSync">синхронизировать нечего (wsl.syncClaude и wsl.syncCodex выключены)</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotInstalled">дистрибутив не установлен</s:String>
     <s:String x:Key="Main.Guard.Wsl.NotRunning">дистрибутив не запущен — запустите для проверки</s:String>
     <s:String x:Key="Main.Guard.Wsl.NoScript">стартовый скрипт WSL не найден</s:String>

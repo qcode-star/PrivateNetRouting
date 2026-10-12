@@ -23,7 +23,7 @@ public static class CodexEnvFile
         ["HTTP_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["ALL_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
-        ["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
+        ["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.BypassDomains),
     };
 
     /// <summary>
@@ -128,7 +128,7 @@ public static class CodexEnvFile
     public static (bool Written, string? BackupPath) Write(AppConfig config)
     {
         var values = Values(config);
-        var path = config.Guard.CodexEnvPath;
+        var path = config.Codex.EnvPath;
         var existing = File.Exists(path) ? File.ReadAllText(path) : null;
         var updated = Apply(existing, values);
         if (existing == updated)

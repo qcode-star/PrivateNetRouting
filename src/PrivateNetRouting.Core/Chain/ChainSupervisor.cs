@@ -20,7 +20,7 @@ public sealed record ChainStep(string Component, ChainStepStatus Status, string 
 /// Snapshot of all chain links (read-only). In the socks5 mode the daemon/keeper/node fields stay
 /// neutral and UpstreamReachable carries the egress state; null — the tailscale mode, where the
 /// link trio speaks through those fields. ProxyRunning is null when there is no local proxy in
-/// this shape at all (socks5 + forwardProxy.skipInSocks5Mode): the applications point at the
+/// this shape at all (socks5 + forwardProxy.enabled=false): the applications point at the
 /// external endpoint and "is our proxy running" is not a meaningful question.
 /// </summary>
 public sealed record ChainState(
@@ -79,8 +79,10 @@ public interface IChainSupervisor
 /// tailscale — daemon → keeper → node (liveness: daemon HTTP listener, watch-ipn process,
 /// BackendState=Running), socks5 — a single check of the provided external upstream. Both
 /// continue proxy → health (proxy listener, live CONNECT-roundtrip) — except the socks5 shape
-/// with the local proxy skipped (forwardProxy.skipInSocks5Mode), where there is no proxy link
-/// and health probes the external endpoint straight away. A successful bring-up ends with the
+/// with the local proxy skipped (forwardProxy.enabled=false), where there is no proxy link
+/// and health probes the external endpoint straight away. The tailscale mode with the proxy
+/// disabled is a config error: the proxy is load-bearing there (DoH resolution, dialing by
+/// IP), the bring-up refuses with an explicit message. A successful bring-up ends with the
 /// chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart); a
 /// completed stop ends with the chainStopped hook — the idle stopper is taken down through it
 /// (a stopped chain has nothing left to stop).
@@ -96,12 +98,15 @@ public sealed class ChainSupervisor(
     Action? chainRaised = null,
     Func<CancellationToken, Task>? chainStopped = null,
     Func<CancellationToken, Task<bool>>? upstreamCheck = null,
-    bool proxySkipped = false) : IChainSupervisor
+    bool proxyDisabled = false) : IChainSupervisor
 {
     private readonly bool _socks5 = config.EffectiveMode == ChainMode.Socks5;
 
     /// <summary>No local proxy in this shape: bring-up stops after the egress check, health probes the external endpoint.</summary>
-    private readonly bool _skipProxy = proxySkipped && config.EffectiveMode == ChainMode.Socks5;
+    private readonly bool _skipProxy = proxyDisabled && config.EffectiveMode == ChainMode.Socks5;
+
+    /// <summary>The tailscale mode cannot work without the local proxy — the bring-up refuses.</summary>
+    private readonly bool _proxyDisabledInTailscale = proxyDisabled && config.EffectiveMode != ChainMode.Socks5;
 
     // the socks5 mode needs the check; without it everything honestly reports "not reachable"
     private readonly Func<CancellationToken, Task<bool>> _upstreamCheck =
@@ -151,6 +156,14 @@ public sealed class ChainSupervisor(
 
     public async Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
+        if (_proxyDisabledInTailscale)
+        {
+            Report(progress, "Proxy", ChainStepStatus.Failed,
+                "the local proxy is disabled (forwardProxy.enabled=false) but required in the tailscale mode");
+            throw new ChainException("proxy", new IOException(
+                "the local proxy is disabled (forwardProxy.enabled=false) but required in the tailscale mode: it does the DoH resolution and the dialing by IP"));
+        }
+
         if (_socks5)
         {
             await EnsureEgressAsync(progress, ct);

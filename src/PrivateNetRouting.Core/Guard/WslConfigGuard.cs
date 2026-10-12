@@ -35,7 +35,7 @@ internal enum WslBootPlan
     AdoptForeignCommand,
 }
 
-/// <summary>Status of one distro from guard.wsl.distros.</summary>
+/// <summary>Status of one distro from wsl.distros.</summary>
 public sealed record WslDistroStatus(
     string Distro,
     bool Sync,
@@ -77,12 +77,12 @@ public sealed record WslDistroSyncResult(
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
 /// <summary>
-/// WSL layer of the guard. The layer is entirely optional: guard.wsl.mode = on | off | auto
-/// (auto — on only if WSL is present and at least one configured distro is installed).
-/// Per distro from guard.wsl.distros there is a separate choice of whether to sync into it:
-/// sync=true — startup script (proxy address = IP of the Windows side of WSL NAT + application port;
-/// NO_PROXY is not touched — it is managed by the sync) and the full env in ~/.claude/settings.json
-/// (proxy + NO_PROXY); sync=false — status only. A file is rewritten only when its content actually
+/// WSL layer of the guard. The layer is entirely optional: wsl.mode = on | off | auto
+/// (auto — on only if WSL is present and at least one configured distro is installed); with
+/// both wsl.syncClaude and wsl.syncCodex off there is nothing to maintain — the layer reports off.
+/// The Claude layer (wsl.syncClaude, every configured distro): the startup script
+/// (proxy address = IP of the Windows side of WSL NAT + application port) and the full env in
+/// ~/.claude/settings.json (proxy + NO_PROXY). A file is rewritten only when its content actually
 /// changes; before a rewrite the previous version is preserved unless an identical copy is already
 /// among the `.pnr-bak-*` backups (the matching copy is touched instead, so mtime order mirrors the
 /// states most recently preserved); the copies live in three numbered slots, the one preserved
@@ -90,8 +90,8 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// Status is read-only and only in running distros (they are not started just for a
 /// check); sync does not start a distro — it skips it with a reason.
 ///
-/// The same sync writes the Codex proxy env layer (guard.wsl.proxyEnvPath, per distro
-/// guard.wsl.distros[].proxyEnv): the Codex desktop app runs codex *inside* the distro
+/// The same sync writes the Codex proxy env layer (wsl.proxyEnvPath, gated by wsl.syncCodex):
+/// the Codex desktop app runs codex *inside* the distro
 /// (wsl.exe -d … --exec /usr/bin/bash -lc …), where 127.0.0.1 is the distro itself and none of
 /// the Windows proxies exist. The snippet is a profile.d file, so it is read by every login
 /// shell, but it exports the proxy only to the shells Codex itself starts — the desktop app
@@ -168,7 +168,7 @@ public sealed class WslConfigGuard(
         var installed = await ListDistrosAsync("--quiet", ct);
         var gateway = _gateway();
         var results = new List<WslDistroSyncResult>();
-        foreach (var distro in ConfiguredDistros().Where(d => d.Sync))
+        foreach (var distro in ConfiguredDistros())
         {
             if (!installed.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
             {
@@ -190,28 +190,33 @@ public sealed class WslConfigGuard(
 
     /// <summary>Distros with the required fields; the config order is preserved.</summary>
     internal IReadOnlyList<WslDistroConfig> ConfiguredDistros() =>
-        config.Guard.Wsl.Distros
+        config.Wsl.Distros
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !string.IsNullOrWhiteSpace(d.User))
             .ToList();
 
     /// <summary>
-    /// Layer on/off: off — always off; an empty list of configured distros — off;
-    /// on — on; auto — on only if WSL responds and at least one configured distro
-    /// is installed (running wsl with no distros prints a message instead of names — no name
-    /// will match, output localization does not matter).
+    /// Layer on/off: off — always off; an empty list of configured distros — off; both sync
+    /// flags off — nothing to maintain, off; on — on; auto — on only if WSL responds and at
+    /// least one configured distro is installed (running wsl with no distros prints a message
+    /// instead of names — no name will match, output localization does not matter).
     /// </summary>
     internal async Task<(bool Enabled, string Reason)> EvaluateLayerAsync(CancellationToken ct)
     {
-        var mode = config.Guard.Wsl.Mode.Trim().ToLowerInvariant();
+        var mode = config.Wsl.Mode.Trim().ToLowerInvariant();
         var configured = ConfiguredDistros();
         if (mode == "off")
         {
-            return (false, "wsl guard is disabled (guard.wsl.mode=off)");
+            return (false, "wsl layer is disabled (wsl.mode=off)");
+        }
+
+        if (!config.Wsl.SyncClaude && !config.Wsl.SyncCodex)
+        {
+            return (false, "nothing to sync (wsl.syncClaude and wsl.syncCodex are off)");
         }
 
         if (configured.Count == 0)
         {
-            return (false, "no distros configured (guard.wsl.distros)");
+            return (false, "no distros configured (wsl.distros)");
         }
 
         if (mode == "on")
@@ -242,39 +247,40 @@ public sealed class WslConfigGuard(
     {
         if (!installed.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, distro.Sync, GuardState.Unknown, null, null, "distro is not installed");
+            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not installed");
         }
 
         if (!running.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, distro.Sync, GuardState.Unknown, null, null, "distro is not running");
+            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not running");
         }
 
         try
         {
             var read = await ReadInsideAsync(distro, ct);
-            if (!read.ScriptPresent)
+            if (config.Wsl.SyncClaude && !read.ScriptPresent)
             {
-                return new WslDistroStatus(distro.Name, distro.Sync, GuardState.Off, null, read.SettingsProxy, "startup script not found");
+                return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Off, null, read.SettingsProxy, "startup script not found");
             }
 
-            var portOk = read.ScriptPort == expectedPort;
-            var proxyOk = expectedProxy is null || read.SettingsProxy == expectedProxy;
-            var envOk = !distro.ProxyEnv || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort);
+            // a layer that is not synced cannot be stale: its signals are ignored
+            var portOk = !config.Wsl.SyncClaude || read.ScriptPort == expectedPort;
+            var proxyOk = !config.Wsl.SyncClaude || expectedProxy is null || read.SettingsProxy == expectedProxy;
+            var envOk = !config.Wsl.SyncCodex || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort);
             var ok = portOk && proxyOk && envOk;
             return new WslDistroStatus(
                 distro.Name,
-                distro.Sync,
+                config.Wsl.SyncClaude,
                 ok ? GuardState.On : GuardState.Partial,
                 read.ScriptPort,
                 read.SettingsProxy,
-                ok ? "" : DescribeMismatch(read, expectedPort, expectedProxy, distro.ProxyEnv),
+                ok ? "" : DescribeMismatch(read, expectedPort, expectedProxy, config.Wsl.SyncCodex),
                 read.ProxyEnvPresent,
                 read.ProxyEnvPort);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException)
         {
-            return new WslDistroStatus(distro.Name, distro.Sync, GuardState.Unknown, null, null, $"failed to read: {ex.Message}");
+            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, $"failed to read: {ex.Message}");
         }
     }
 
@@ -320,9 +326,11 @@ public sealed class WslConfigGuard(
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
 
-        // boot layer: the [boot] command of /etc/wsl.conf → the marked runner that executes
-        // the startup directory; the plan decides what (if anything) to write (see PlanBootLayer)
-        var scriptPath = config.Guard.WslStartupScript;
+        // The Claude layer (wsl.syncClaude): the boot layer (the [boot] command of /etc/wsl.conf →
+        // the marked runner that executes the startup directory), the full env in
+        // ~/.claude/settings.json and the startup script refreshing the proxy address on every
+        // distro start. Off — none of the passes run, nothing of the Claude side is touched.
+        var scriptPath = config.Wsl.StartupScriptPath;
         var runnerPath = BootRunnerPath(scriptPath);
         var bootCommand = ExtractBootCommand(read.WslConfText);
         var bootPlan = PlanBootLayer(runnerPath, bootCommand, read.BootRunner);
@@ -330,87 +338,92 @@ public sealed class WslConfigGuard(
         var userCommandWritten = false;
         var wslConfWritten = false;
         List<string> bootBackups = [];
-        // the pass always ensures the runner file itself (cmp makes it a no-op when current);
-        // the plan decides only about the preserved user command and the wsl.conf edit
-        var bootScript = BuildBootSyncScript(
-            bootPlan, runnerPath, UserCommandPath(scriptPath), StartupDir(scriptPath),
-            bootCommand, SetBootCommand(read.WslConfText, runnerPath), stamp);
-        var bootOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], bootScript, Encoding.UTF8, ct);
-        RequireCompleted(bootOutput, $"boot layer sync in '{distro.Name}'");
-        bootRunnerWritten = bootOutput.Contains("RUNNER=written", StringComparison.Ordinal);
-        userCommandWritten = bootOutput.Contains("USERCMD=written", StringComparison.Ordinal);
-        wslConfWritten = bootOutput.Contains("WSLCONF=written", StringComparison.Ordinal);
-        bootBackups = bootOutput.Split('\n')
-            .Select(l => l.Trim())
-            .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
-            .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
-            .ToList();
+        var settingsOutput = "";
+        var scriptOutput = "";
+        if (config.Wsl.SyncClaude)
+        {
+            // the boot pass always ensures the runner file itself (cmp makes it a no-op when
+            // current); the plan decides only about the preserved user command and the wsl.conf edit
+            var bootScript = BuildBootSyncScript(
+                bootPlan, runnerPath, UserCommandPath(scriptPath), StartupDir(scriptPath),
+                bootCommand, SetBootCommand(read.WslConfText, runnerPath), stamp);
+            var bootOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], bootScript, Encoding.UTF8, ct);
+            RequireCompleted(bootOutput, $"boot layer sync in '{distro.Name}'");
+            bootRunnerWritten = bootOutput.Contains("RUNNER=written", StringComparison.Ordinal);
+            userCommandWritten = bootOutput.Contains("USERCMD=written", StringComparison.Ordinal);
+            wslConfWritten = bootOutput.Contains("WSLCONF=written", StringComparison.Ordinal);
+            bootBackups = bootOutput.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
+                .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
+                .ToList();
 
-        // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
-        // the backup is made only when the content actually changes
-        var root = read.SettingsRoot ?? [];
-        var env = root["env"] as JsonObject ?? [];
-        env["HTTPS_PROXY"] = proxy;
-        env["HTTP_PROXY"] = proxy;
-        env["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
-        root["env"] = env;
-        var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
+            // the backup is made only when the content actually changes
+            var root = read.SettingsRoot ?? [];
+            var env = root["env"] as JsonObject ?? [];
+            env["HTTPS_PROXY"] = proxy;
+            env["HTTP_PROXY"] = proxy;
+            env["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
+            root["env"] = env;
+            var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
-        var settingsScript = $$"""
-            {{PnrBakFn}}
-            SETTINGS="$HOME/.claude/settings.json"
-            NEW="/tmp/.pnr-settings-{{stamp}}"
-            echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}}' | base64 -d > "$NEW"
-            if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
-                echo SETTINGS=unchanged
-            else
-                if [ -f "$SETTINGS" ]; then pnr_bak "$SETTINGS" BACKUP; fi
-                cat "$NEW" > "$SETTINGS"
-                echo SETTINGS=written
-            fi
-            rm -f "$NEW"
-            ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
-            find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
-            echo PNR=ok
-            """;
-        var settingsOutput = await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
-        RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
+            var settingsScript = $$"""
+                {{PnrBakFn}}
+                SETTINGS="$HOME/.claude/settings.json"
+                NEW="/tmp/.pnr-settings-{{stamp}}"
+                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}}' | base64 -d > "$NEW"
+                if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
+                    echo SETTINGS=unchanged
+                else
+                    if [ -f "$SETTINGS" ]; then pnr_bak "$SETTINGS" BACKUP; fi
+                    cat "$NEW" > "$SETTINGS"
+                    echo SETTINGS=written
+                fi
+                rm -f "$NEW"
+                ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+                echo PNR=ok
+                """;
+            settingsOutput = await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
+            RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
-        // startup script: refreshes the proxy address on every distro start
-        var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config));
-        var rootScript = $$"""
-            {{PnrBakFn}}
-            SCRIPT="{{scriptPath}}"
-            NEW="/tmp/.pnr-startup-{{stamp}}"
-            echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}}' | base64 -d > "$NEW"
-            mkdir -p "$(dirname "$SCRIPT")"
-            if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
-                echo SCRIPT=unchanged
-            else
-                if [ -f "$SCRIPT" ]; then pnr_bak "$SCRIPT" BACKUP; fi
-                cat "$NEW" > "$SCRIPT"
-                chmod 755 "$SCRIPT"
-                echo SCRIPT=written
-            fi
-            rm -f "$NEW"
-            ls -1t {{scriptPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
-            find "$(dirname "{{scriptPath}}")" -maxdepth 1 -name '{{Path.GetFileName(scriptPath)}}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
-            echo PNR=ok
-            """;
-        var scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
-        RequireCompleted(scriptOutput, $"startup script sync in '{distro.Name}'");
+            // startup script: refreshes the proxy address on every distro start
+            var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config));
+            var rootScript = $$"""
+                {{PnrBakFn}}
+                SCRIPT="{{scriptPath}}"
+                NEW="/tmp/.pnr-startup-{{stamp}}"
+                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}}' | base64 -d > "$NEW"
+                mkdir -p "$(dirname "$SCRIPT")"
+                if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
+                    echo SCRIPT=unchanged
+                else
+                    if [ -f "$SCRIPT" ]; then pnr_bak "$SCRIPT" BACKUP; fi
+                    cat "$NEW" > "$SCRIPT"
+                    chmod 755 "$SCRIPT"
+                    echo SCRIPT=written
+                fi
+                rm -f "$NEW"
+                ls -1t {{scriptPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                find "$(dirname "{{scriptPath}}")" -maxdepth 1 -name '{{Path.GetFileName(scriptPath)}}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+                echo PNR=ok
+                """;
+            scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
+            RequireCompleted(scriptOutput, $"startup script sync in '{distro.Name}'");
+        }
 
         // Codex proxy env: a profile.d snippet exporting the proxy to the shells Codex itself
-        // starts inside the distro (see the class comment). distro.ProxyEnv=false leaves the
+        // starts inside the distro (see the class comment). wsl.syncCodex=false leaves the
         // file alone — the layer is then reported as off for this distro, not as a mismatch.
-        var envPath = config.Guard.Wsl.ProxyEnvPath;
+        var envPath = config.Wsl.ProxyEnvPath;
         var envWritten = false;
         string? envBackup = null;
-        if (distro.ProxyEnv && !string.IsNullOrWhiteSpace(envPath))
+        if (config.Wsl.SyncCodex && !string.IsNullOrWhiteSpace(envPath))
         {
             var envContent = BuildCodexProxyEnvScript(
                 ClaudeEnvValues.Port(config),
-                ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
+                ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
             var envScript = $$"""
                 {{PnrBakFn}}
                 ENVFILE="{{envPath}}"
@@ -504,8 +517,8 @@ public sealed class WslConfigGuard(
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
     {
-        var scriptPath = config.Guard.WslStartupScript;
-        var envPath = config.Guard.Wsl.ProxyEnvPath;
+        var scriptPath = config.Wsl.StartupScriptPath;
+        var envPath = config.Wsl.ProxyEnvPath;
         var settingsPath = $"/home/{distro.User}/.claude/settings.json";
         var runnerPath = BootRunnerPath(scriptPath);
         var probe = $"""

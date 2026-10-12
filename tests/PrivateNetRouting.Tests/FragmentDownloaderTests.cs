@@ -24,7 +24,7 @@ public class FragmentDownloaderTests : IDisposable
         _log = new FileLog(Path.Combine(_root, "dl.log"));
         _handler = new RecordingHandler();
         _http = new HttpClient(_handler);
-        _downloader = new FragmentDownloader(_http, new UpdaterConfig
+        _downloader = new FragmentDownloader(_http, new ClaudeUpdateConfig
         {
             ChunkBytes = 10,
             ParallelChunks = 6,

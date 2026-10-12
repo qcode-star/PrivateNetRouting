@@ -33,7 +33,7 @@ public interface ISidecarDaemon
 /// flag even elevated, and an older daemon refuses to listen without elevation.
 /// </summary>
 public sealed class SidecarDaemon(
-    ChainConfig config,
+    ChainTailscaleConfig config,
     IPortProbe ports,
     IProcessFinder processes,
     FileLog log,
@@ -43,7 +43,7 @@ public sealed class SidecarDaemon(
     /// <summary>The first tailscale whose daemon pipe a non-elevated process can create (the SDDL owner fix).</summary>
     internal static readonly Version MinNonElevatedVersion = new(1, 104, 1);
 
-    private int HttpPort => Socks5Client.ParseEndPoint(config.DaemonHttpListen).Port;
+    private int HttpPort => Socks5Client.ParseEndPoint(config.HttpListen).Port;
 
     public bool IsHttpListening => ports.IsListening(HttpPort);
 
@@ -97,7 +97,7 @@ public sealed class SidecarDaemon(
         {
             // a foreign listener on our port: we must not start
             throw new IOException(
-                $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.daemonHttpListen");
+                $"port {HttpPort} is already held by a foreign process (chain daemon not found) — see chain.tailscale.httpListen");
         }
 
         progress?.Report(viaHelper ? "daemon: starting tailscaled (confirm UAC)" : "daemon: starting tailscaled");
@@ -128,7 +128,7 @@ public sealed class SidecarDaemon(
 
         throw new IOException(
             $"daemon listener did not come up within {config.DaemonWaitSeconds}s; log: {Path.Combine(config.StateDir, "daemon.err.log")}"
-            + " (a non-elevated start needs tailscale 1.104.1+ — see chain.daemonElevation)");
+            + " (a non-elevated start needs tailscale 1.104.1+ — see chain.tailscale.elevation)");
     }
 
     /// <summary>
@@ -148,8 +148,8 @@ public sealed class SidecarDaemon(
         arguments.Add(ProcessOps.Quote($"--statedir={config.StateDir}"));
         arguments.Add(ProcessOps.Quote($"--socket={config.Socket}"));
         arguments.Add("--port=0");
-        arguments.Add($"--socks5-server={config.DaemonSocksListen}");
-        arguments.Add($"--outbound-http-proxy-listen={config.DaemonHttpListen}");
+        arguments.Add($"--socks5-server={config.SocksListen}");
+        arguments.Add($"--outbound-http-proxy-listen={config.HttpListen}");
         var commandLine = $"{ProcessOps.Quote(config.TailscaledPath)} {string.Join(' ', arguments)}";
         var started = ProcessOps.StartViaCmd(
             commandLine,
@@ -192,7 +192,7 @@ public sealed class SidecarDaemon(
     public bool StartNeedsUac() => NeedsElevation();
 
     /// <summary>The effective decision: start/stop through the elevated runas helper?</summary>
-    private bool NeedsElevation() => config.EffectiveDaemonElevation switch
+    private bool NeedsElevation() => config.EffectiveElevation switch
     {
         DaemonElevationMode.Never => false,
         DaemonElevationMode.Always => true,

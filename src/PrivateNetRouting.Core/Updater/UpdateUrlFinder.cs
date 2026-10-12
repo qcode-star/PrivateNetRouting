@@ -19,7 +19,7 @@ public interface IUpdateUrlFinder
 /// (the first events of the journal are the freshest). The whole message is fetched via Get-WinEvent,
 /// the URL is parsed by <see cref="PackageUrl.ExtractFromMessage"/>.
 /// </summary>
-public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, IPowerShellExecutor powershell, FileLog log) : IUpdateUrlFinder
+public sealed class PowerShellJournalUrlFinder(ClaudeUpdateConfig config, IPowerShellExecutor powershell, FileLog log) : IUpdateUrlFinder
 {
     private const string LogName = "Microsoft-Windows-AppXDeploymentServer/Operational";
 
@@ -62,7 +62,7 @@ public sealed class PowerShellJournalUrlFinder(UpdaterConfig config, IPowerShell
 /// warning and null: the journal lookup takes over, the check phase must not fail because of
 /// the feed.
 /// </summary>
-public sealed class UpdateFeedUrlFinder(HttpClient http, UpdaterConfig config, FileLog log) : IUpdateUrlFinder
+public sealed class UpdateFeedUrlFinder(HttpClient http, ClaudeUpdateConfig config, FileLog log) : IUpdateUrlFinder
 {
     /// <summary>Opaque client token the endpoint requires (device_id); carries nothing machine-specific.</summary>
     private const string FeedDeviceId = "pnr-update-check";

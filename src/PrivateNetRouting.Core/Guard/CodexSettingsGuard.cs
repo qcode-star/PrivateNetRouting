@@ -26,8 +26,8 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
     public CodexSettingsStatus Read()
     {
-        var path = config.Guard.CodexSettingsPath;
-        var envPath = config.Guard.CodexEnvPath;
+        var path = config.Codex.SettingsPath;
+        var envPath = config.Codex.EnvPath;
         try
         {
             var flagExists = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
@@ -83,7 +83,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
     /// <summary>Writes the flag and the .env proxy env; each file is touched only on an actual change.</summary>
     public CodexSettingsSyncResult Sync()
     {
-        var path = config.Guard.CodexSettingsPath;
+        var path = config.Codex.SettingsPath;
         var existing = File.Exists(path) ? File.ReadAllText(path) : null;
         var updated = Apply(existing);
         string? backup = null;

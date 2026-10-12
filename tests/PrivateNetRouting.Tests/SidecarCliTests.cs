@@ -19,9 +19,9 @@ public class SidecarCliTests : IDisposable
         Directory.CreateDirectory(_dir);
         var path = Path.Combine(_dir, "fake-tailscale.cmd");
         File.WriteAllText(path, script);
-        return new SidecarCli(new ChainConfig
+        return new SidecarCli(new ChainTailscaleConfig
         {
-            TailscaleCliPath = path,
+            CliPath = path,
             Socket = @"\\.\pipe\pnr-test",
             CliTimeoutSeconds = cliTimeoutSeconds,
         });

@@ -90,7 +90,7 @@ public sealed class GuardService(
         LocalBanStatus ban;
         try
         {
-            var hosts = HostsFileBlock.Read(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, guard.BanHosts);
+            var hosts = HostsFileBlock.Read(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, config.BanHosts);
             var layers = await banOps.GetLayersStateAsync(ct);
             var hostsLayerOn = hosts.Present;
             var state = hostsLayerOn && layers.NrptRules > 0 && layers.FirewallRules > 0 ? GuardState.On
@@ -254,13 +254,13 @@ public sealed class GuardService(
                 sync.Written,
                 sync.BackupPath,
                 ClaudeEnvValues.WindowsProxyUrl(config),
-                ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
+                ClaudeEnvValues.BuildNoProxy(config.BypassDomains),
                 codexSync.Written,
                 codexSync.BackupPath,
-                config.Guard.CodexSettingsPath,
+                config.Codex.SettingsPath,
                 codexSync.EnvWritten,
                 codexSync.EnvBackupPath,
-                config.Guard.CodexEnvPath);
+                config.Codex.EnvPath);
             log.Info(outcome.Written
                 ? $"guard settings sync: Claude env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
                 : $"guard settings sync: Claude env already up to date (proxy {outcome.ProxyUrl})");
@@ -337,9 +337,9 @@ public sealed class GuardService(
             if (enable)
             {
                 var endpoint = AppProxyEndpoint.EndPoint(config);
-                var bypass = SystemProxyBypass.Build(config.Launcher.BypassDomains, config.Guard.SystemProxyExtraBypass);
+                var bypass = SystemProxyBypass.Build(config.BypassDomains, config.DirectTlds);
                 systemProxy.Enable($"{endpoint.Address}:{endpoint.Port}", bypass);
-                log.Info($"guard sysproxy on: {endpoint.Address}:{endpoint.Port} (bypass {config.Launcher.BypassDomains.Count} domains + extras)");
+                log.Info($"guard sysproxy on: {endpoint.Address}:{endpoint.Port} (bypass {config.BypassDomains.Count} domains + {config.DirectTlds.Count} TLDs)");
             }
             else
             {
@@ -349,16 +349,27 @@ public sealed class GuardService(
         }, ct);
 
     /// <summary>
-    /// Live checks: the probe name must not resolve and must not
-    /// answer a direct connection; the proxied path is checked with a CONNECT roundtrip
+    /// Live checks: every probe name (guard.banProbes) must not resolve and must not answer a
+    /// direct connection; the proxied path is checked with a CONNECT roundtrip
     /// (chain not up — the check is skipped).
     /// </summary>
     public async Task<BanLiveChecks> LiveChecksAsync(CancellationToken ct)
     {
-        var probe = config.Guard.BanProbeName;
+        var probes = config.Guard.BanProbes;
+        var dnsDetails = new List<string>();
+        var directDetails = new List<string>();
+        var dnsBlocked = true;
+        var directBlocked = true;
+        foreach (var probe in probes)
+        {
+            var (dns, dnsDetail) = await ProbeDnsAsync(probe, ct);
+            var (direct, directDetail) = await ProbeDirectAsync(probe, ct);
+            dnsBlocked &= dns;
+            directBlocked &= direct;
+            dnsDetails.Add(dnsDetail);
+            directDetails.Add(directDetail);
+        }
 
-        var (dnsBlocked, dnsDetail) = await ProbeDnsAsync(probe, ct);
-        var (directBlocked, directDetail) = await ProbeDirectAsync(probe, ct);
         bool? proxiedAlive = null;
         var proxiedDetail = "chain is not responding — proxied check skipped";
         try
@@ -374,7 +385,7 @@ public sealed class GuardService(
             proxiedDetail = $"proxied check failed: {ex.Message}";
         }
 
-        return new BanLiveChecks(dnsBlocked, dnsDetail, directBlocked, directDetail, proxiedAlive, proxiedDetail);
+        return new BanLiveChecks(dnsBlocked, string.Join(" | ", dnsDetails), directBlocked, string.Join(" | ", directDetails), proxiedAlive, proxiedDetail);
     }
 
     private static async Task<(bool Blocked, string Detail)> ProbeDnsAsync(string probe, CancellationToken ct)

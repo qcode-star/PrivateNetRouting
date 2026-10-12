@@ -18,7 +18,7 @@ public interface ICodexVersionManifest
 /// the live proxy chain (the caller's HttpClient is already proxied); any failure is "no version",
 /// never an error — the Store search remains the sole source of truth about an update existing.
 /// </summary>
-public sealed class CodexVersionManifest(HttpClient http, CodexConfig config, FileLog log) : ICodexVersionManifest
+public sealed class CodexVersionManifest(HttpClient http, CodexUpdateConfig config, FileLog log) : ICodexVersionManifest
 {
     public async Task<string?> FindOfferedVersionAsync(CancellationToken ct)
     {

@@ -27,8 +27,8 @@ public static class BrowserEgress
     public static string Resolve(AppConfig config) =>
         config.Browser.EgressMode == BrowserEgressMode.Chain
             ? config.Chain.EffectiveMode == ChainMode.Socks5
-                ? config.ForwardProxy.Socks5Upstream
-                : config.Chain.DaemonSocksListen
+                ? config.Chain.Socks5.Upstream
+                : config.Chain.Tailscale.SocksListen
             : AppProxyEndpoint.Address(config);
 
     /// <summary>The URL scheme the profile must speak to the egress: the application proxy is HTTP CONNECT, the chain's own is SOCKS5.</summary>
@@ -386,8 +386,8 @@ public sealed class BrowserProfileService
         var endpoint = BrowserEgress.ResolveEndpoint(_config);
         var scheme = BrowserEgress.Scheme(_config);
         var host = endpoint.Address.ToString();
-        var noProxies = BrowserBypassList.BuildFirefoxNoProxies(_config.Launcher.BypassDomains, _config.Browser.DirectTlds);
-        var chromiumBypass = BrowserBypassList.BuildChromium(_config.Launcher.BypassDomains, _config.Browser.DirectTlds);
+        var noProxies = BrowserBypassList.BuildFirefoxNoProxies(_config.BypassDomains, _config.DirectTlds);
+        var chromiumBypass = BrowserBypassList.BuildChromium(_config.BypassDomains, _config.DirectTlds);
         BrowserProfileFiles.Create(request.Kind, profileDir, scheme, host, endpoint.Port, noProxies);
         _log.Info($"browser: profile of {BrowserKindParser.DisplayName(request.Kind)} created in {profileDir} (egress {scheme}://{host}:{endpoint.Port})");
 

@@ -57,8 +57,8 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
     public ClaudeSettingsStatus Read()
     {
         var expectedProxy = ClaudeEnvValues.WindowsProxyUrl(config);
-        var expectedNoProxy = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
-        if (!File.Exists(config.Guard.ClaudeSettingsPath))
+        var expectedNoProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
+        if (!File.Exists(config.Claude.SettingsPath))
         {
             return new ClaudeSettingsStatus(GuardState.Off, null, null, expectedProxy, expectedNoProxy, FileMissing: true);
         }
@@ -88,11 +88,11 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
     /// <summary>Writes env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); the file is touched only on an actual change.</summary>
     public ClaudeSettingsSyncResult Sync()
     {
-        var path = config.Guard.ClaudeSettingsPath;
+        var path = config.Claude.SettingsPath;
         var root = ReadRootOrEmpty(path);
         var env = root["env"] as JsonObject ?? [];
         var proxy = ClaudeEnvValues.WindowsProxyUrl(config);
-        var noProxy = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
+        var noProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
         string? backup = null;
         var written = !(env["HTTPS_PROXY"]?.GetValue<string>() == proxy
             && env["HTTP_PROXY"]?.GetValue<string>() == proxy
@@ -131,8 +131,8 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
 
     internal static JsonObject? ReadEnvOf(JsonObject root) => root["env"] as JsonObject;
 
-    private JsonObject? ReadEnv() => File.Exists(config.Guard.ClaudeSettingsPath)
-        ? ReadEnvOf(ReadRootOrEmpty(config.Guard.ClaudeSettingsPath))
+    private JsonObject? ReadEnv() => File.Exists(config.Claude.SettingsPath)
+        ? ReadEnvOf(ReadRootOrEmpty(config.Claude.SettingsPath))
         : null;
 
     /// <summary>

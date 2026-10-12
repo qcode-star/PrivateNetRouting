@@ -123,7 +123,7 @@ public partial class App : Application
 #endif
 
         _tray = new TrayIcon();
-        _tray.ShowLaunchClaude(config.Apps.Claude);
+        _tray.ShowLaunchClaude(config.Claude.Enabled);
         _tray.OpenRequested += ActivateMainWindow;
         _tray.ChainUpRequested += () => _ = window.ChainUpAsync();
         _tray.ChainDownRequested += () => _ = window.ChainDownAsync();
@@ -238,11 +238,11 @@ public partial class App : Application
     /// versions, the update feed (only when the proxy is already alive) and the AppX journal —
     /// without bringing up the chain and without UAC. If there
     /// is something to install — a line in the main window and a tray balloon; a failure is
-    /// written quietly to the updater log. Not run for an app turned off (apps.claude=false).
+    /// written quietly to the updater log. Not run for an app turned off (claude.enabled=false).
     /// </summary>
     private async Task RunStartupUpdateCheckAsync(MainWindow window)
     {
-        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart || !_runtime.Config.Apps.Claude)
+        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart || !_runtime.Config.Claude.Enabled)
         {
             return;
         }
@@ -274,11 +274,11 @@ public partial class App : Application
     /// An update — a dot on the Codex update button and a tray balloon; the Store being
     /// unreachable is not announced (the dot just stays off). Runs a beat behind the Claude
     /// check so two balloons do not fight for the tray. Not run for an app turned off
-    /// (apps.codex=false).
+    /// (codex.enabled=false).
     /// </summary>
     private async Task RunStartupCodexUpdateCheckAsync(MainWindow window)
     {
-        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart || !_runtime.Config.Apps.Codex)
+        if (_runtime is null || !_runtime.Config.Ui.CheckUpdatesOnStart || !_runtime.Config.Codex.Enabled)
         {
             return;
         }

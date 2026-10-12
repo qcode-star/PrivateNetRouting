@@ -3,45 +3,77 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Configuration;
 
-/// <summary>Root user config of the application (see config/appsettings.example.json).</summary>
+/// <summary>
+/// Root user config (see config/appsettings.example.json). The shared facts (bypass zones,
+/// direct TLDs, the restart grace, the PowerShell path) live at the top level; everything
+/// app-specific lives in the claude/codex sections; the WSL layer has its own section.
+/// </summary>
 public sealed class AppConfig
 {
-    public AppsConfig Apps { get; set; } = new();
+    /// <summary>
+    /// Proxy bypass zones shared by every consumer: both apps' --proxy-bypass-list flags,
+    /// NO_PROXY of the settings sync (Claude/Codex/WSL), the system proxy bypass, the browser
+    /// profile. Each zone goes into the lists in two forms (zone and *.zone); the base entries
+    /// (localhost, private ranges) are fixed in code.
+    /// </summary>
+    public List<string> BypassDomains { get; set; } = [];
+
+    /// <summary>
+    /// TLDs that never leave through the chain exit (*.tld): the browser profile bypass and
+    /// the WinINET system proxy bypass are both built from this one list.
+    /// </summary>
+    public List<string> DirectTlds { get; set; } = [];
+
+    /// <summary>
+    /// Restart of an already running copy without our proxy flags: how long to wait for it to
+    /// close after a window close request before the rest is killed; sec. Shared by the Claude
+    /// and Codex launches.
+    /// </summary>
+    public int RestartGraceSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// Closing a desktop app before an update installation: how many seconds to wait for a
+    /// graceful exit before killing the processes. Shared by the Claude and Codex updates.
+    /// </summary>
+    public int CloseWaitSeconds { get; set; } = 25;
+
+    /// <summary>Pause after killing the app processes before an installation, sec.</summary>
+    public int KillSettleSeconds { get; set; } = 3;
+
+    /// <summary>Windows PowerShell (AppX and NRPT/firewall cmdlets) — an OS component.</summary>
+    public string PowerShellPath { get; set; } = @"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe";
 
     public UiConfig Ui { get; set; } = new();
 
     public LoggingConfig Logging { get; set; } = new();
 
+    public ClaudeConfig Claude { get; set; } = new();
+
+    public CodexConfig Codex { get; set; } = new();
+
     public ForwardProxyConfig ForwardProxy { get; set; } = new();
 
     public ChainConfig Chain { get; set; } = new();
 
-    public LauncherConfig Launcher { get; set; } = new();
-
-    public CodexConfig Codex { get; set; } = new();
-
-    public BrowserConfig Browser { get; set; } = new();
+    public WslConfig Wsl { get; set; } = new();
 
     public WatchdogConfig Watchdog { get; set; } = new();
 
-    public UpdaterConfig Updater { get; set; } = new();
+    public BrowserConfig Browser { get; set; } = new();
 
     public GuardConfig Guard { get; set; } = new();
-}
 
-/// <summary>
-/// Which applications this installation uses. An app turned off: its launch/update buttons and
-/// its startup update check disappear from the interface, the corresponding `pnr` commands refuse
-/// with a note; the guards, the chain and the idle stopper keep working as before. For an owner
-/// who uses only one of the two apps.
-/// </summary>
-public sealed class AppsConfig
-{
-    /// <summary>Claude Desktop: the launch/update buttons, `pnr launch`/`pnr update`, the startup update check.</summary>
-    public bool Claude { get; set; } = true;
+    /// <summary>Hosts names of the local ban: the union of the Claude and Codex lists.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> BanHosts => Claude.BanHosts.Concat(Codex.BanHosts).ToArray();
 
-    /// <summary>Codex desktop app: the launch/update buttons, `pnr codex launch|update`, the startup update check.</summary>
-    public bool Codex { get; set; } = true;
+    /// <summary>NRPT subtree apexes of the local ban: the union of the Claude and Codex lists.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> BanTrees => Claude.BanTrees.Concat(Codex.BanTrees).ToArray();
+
+    /// <summary>Firewall outbound Block subnets: the union of the Claude and Codex lists.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> FirewallSubnets => Claude.FirewallSubnets.Concat(Codex.FirewallSubnets).ToArray();
 }
 
 /// <summary>WPF application UI settings. The CLI is always English and never reads them.</summary>
@@ -51,8 +83,8 @@ public sealed class UiConfig
     public string Language { get; set; } = AppLanguage.Auto;
 
     /// <summary>
-    /// Check at GUI start whether a Claude update is available: read-only versions and the AppX
-    /// journal, without bringing up the chain and without UAC; if present — a line in the window and a tray balloon.
+    /// Check at GUI start whether a Claude/Codex update is available: read-only versions and
+    /// catalogs, without bringing up the chain and without UAC.
     /// </summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 
@@ -71,35 +103,112 @@ public sealed class UiConfig
 }
 
 /// <summary>
-/// Launching Claude Desktop through the proxy: chain check/bring-up,
-/// the --proxy-server/--proxy-bypass-list flags. Base bypass entries (localhost, private
-/// ranges) are fixed in code — only the zone domains are environment-dependent.
+/// Claude Desktop: the launch/update buttons, `pnr launch`/`pnr update`, the startup update
+/// check; the guard files and the ban name lists of the Claude side.
 /// </summary>
-public sealed class LauncherConfig
+public sealed class ClaudeConfig
 {
-    /// <summary>Claude Desktop executable (MSIX execution alias); environment variables are expanded.</summary>
+    /// <summary>
+    /// Whether this installation uses Claude Desktop at all: false — its launch/update buttons,
+    /// its tray item and its startup update check disappear, `pnr launch`/`pnr update` refuse
+    /// with a note. The guards, the chain and the idle stopper keep working as before.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Desktop app executable (MSIX execution alias); environment variables are expanded.</summary>
     public string AliasPath { get; set; } = @"%LOCALAPPDATA%\Microsoft\WindowsApps\claude-desktop.exe";
 
-    /// <summary>Proxy bypass zones: each goes into the bypass-list in two forms (zone and *.zone).</summary>
-    public List<string> BypassDomains { get; set; } = [];
+    /// <summary>Desktop app main process name — closed before an update installation.</summary>
+    public string ProcessName { get; set; } = "Claude";
 
     /// <summary>
-    /// How long to wait for an already running Claude/Codex to close itself after a window close
-    /// request, before the remaining processes of the restart are killed; sec. The restart is
-    /// offered by the launcher when the running copy carries no proxy flags of ours.
+    /// settings.json of Claude Code on Windows: the settings sync keeps the proxy env
+    /// (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) there; surgical edits, .pnr-bak-* backups.
     /// </summary>
-    public int RestartGraceSeconds { get; set; } = 15;
+    public string SettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
+
+    /// <summary>Exact names for the hosts layer of the local ban (public Anthropic domains).</summary>
+    public List<string> BanHosts { get; set; } =
+    [
+        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
+        "api.anthropic.com", "console.anthropic.com", "statsig.anthropic.com",
+        "downloads.claude.ai", "a.claude.ai", "assets.claude.ai", "assets-proxy.anthropic.com",
+        "anthropic.qualtrics.com", "servd-anthropic-website.b-cdn.net",
+    ];
+
+    /// <summary>Subtree apexes for the NRPT layer of the local ban.</summary>
+    public List<string> BanTrees { get; set; } =
+    [
+        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
+    ];
+
+    /// <summary>
+    /// Anthropic subnets for the firewall outbound Block: Anthropic runs its own network, so
+    /// banning by destination IP is possible.
+    /// </summary>
+    public List<string> FirewallSubnets { get; set; } = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
+
+    public ClaudeUpdateConfig Update { get; set; } = new();
 }
 
 /// <summary>
-/// Launching and updating the Codex desktop app (OpenAI, a Microsoft Store MSIX). The app is
-/// Electron/Chromium: the main process takes --proxy-server/--proxy-bypass-list like Claude,
-/// and its embedded CLI core takes the standard proxy env variables (config.toml has no proxy
-/// key). The launch goes through Invoke-CommandInDesktopPackage: the entry-point stub loses
-/// arguments, and the package-context launch hands the process both the flags and the env.
+/// Manual Claude Desktop (MSIX) update through the proxy chain: version check before the chain
+/// bring-up ("nothing to install" — no UAC), package URL from Claude's own update feed or the
+/// AppX journal (or manual entry), chunked download, Publisher verification, installation.
+/// </summary>
+public sealed class ClaudeUpdateConfig
+{
+    /// <summary>MSIX package name (Get-AppxPackage -Name).</summary>
+    public string PackageName { get; set; } = "Claude";
+
+    /// <summary>Package distribution host (a public constant; feed and journal URLs are filtered by it).</summary>
+    public string PackageHost { get; set; } = "downloads.claude.ai";
+
+    /// <summary>
+    /// Claude's own update feed (a public constant — the same endpoint its built-in updater
+    /// polls), asked through the live chain. Empty — do not ask the feed (the journal stays).
+    /// </summary>
+    public string UpdateFeedUrl { get; set; } = "https://api.anthropic.com/api/desktop/win32/x64/msix/update";
+
+    /// <summary>Timeout of one update feed request, sec.</summary>
+    public int FeedTimeoutSeconds { get; set; } = 15;
+
+    /// <summary>How many recent AppX journal events to scan when looking up the package URL.</summary>
+    public int JournalMaxEvents { get; set; } = 400;
+
+    /// <summary>Cache of packages and download fragments; environment variables are expanded.</summary>
+    public string CacheDir { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\update-cache";
+
+    /// <summary>Download chunk size.</summary>
+    public int ChunkBytes { get; set; } = 8 * 1024 * 1024;
+
+    /// <summary>Chunks to download in parallel (a single stream through the chain hits DoH latency).</summary>
+    public int ParallelChunks { get; set; } = 6;
+
+    /// <summary>Retries per chunk after a failure.</summary>
+    public int ChunkRetries { get; set; } = 3;
+
+    /// <summary>Pause between chunk attempts, sec.</summary>
+    public int RetryDelaySeconds { get; set; } = 5;
+
+    /// <summary>Timeout of a single chunk attempt, sec.</summary>
+    public int ChunkTimeoutSeconds { get; set; } = 1800;
+}
+
+/// <summary>
+/// Codex desktop app (OpenAI, a Microsoft Store MSIX): the launch/update buttons, `pnr codex
+/// launch|update`. Electron/Chromium: the main process takes --proxy-server/--proxy-bypass-list
+/// like Claude, its embedded CLI core takes the standard proxy env variables from CODEX_HOME/.env.
+/// The launch goes through Invoke-CommandInDesktopPackage: the entry-point stub loses arguments,
+/// and the package-context launch hands the process both the flags and the env.
 /// </summary>
 public sealed class CodexConfig
 {
+    /// <summary>Whether this installation uses the Codex desktop app at all (see claude.enabled).</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>MSIX package name of the Codex desktop app (Get-AppxPackage -Name).</summary>
     public string PackageName { get; set; } = "OpenAI.Codex";
 
@@ -109,115 +218,221 @@ public sealed class CodexConfig
     /// <summary>Main executable inside the package, relative to InstallLocation (the manifest entry point; the Codex.exe stub loses arguments).</summary>
     public string AppExecutable { get; set; } = @"app\ChatGPT.exe";
 
-    /// <summary>Microsoft Store product id of the app — the key the Store update check asks by (a public constant).</summary>
+    /// <summary>
+    /// Main process name of the desktop app: already-running detection, closing before an
+    /// update, the watchdog activity check.
+    /// </summary>
+    public string ProcessName { get; set; } = "ChatGPT";
+
+    /// <summary>
+    /// config.toml of Codex (desktop and CLI) — the settings sync adds
+    /// `[features] respect_system_proxy = true` there; surgical edits, .pnr-bak-* backups.
+    /// </summary>
+    public string SettingsPath { get; set; } = @"%USERPROFILE%\.codex\config.toml";
+
+    /// <summary>
+    /// .env of Codex in the same CODEX_HOME — the settings sync keeps the proxy env there. The
+    /// embedded CLI core loads this file after its own start: the desktop app strips the
+    /// inherited proxy env from the processes it spawns, so this file is what carries the proxy
+    /// to the core.
+    /// </summary>
+    public string EnvPath { get; set; } = @"%USERPROFILE%\.codex\.env";
+
+    /// <summary>Exact names for the hosts layer of the local ban (public OpenAI domains).</summary>
+    public List<string> BanHosts { get; set; } =
+    [
+        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
+        "chatgpt.site", "oaistatsig.com", "crixet.com",
+        "ab.chatgpt.com", "api.openai.com", "auth.openai.com", "platform.openai.com", "cdn.oaistatic.com",
+        "persistent.oaistatic.com", "releases.openai.com",
+        "openai.qualtrics.com", "chatgpt.livekit.cloud", "openai.com.cdn.cloudflare.net",
+        "openaicom.imgix.net", "openaiassets.blob.core.windows.net",
+        "openaicomproductionae4b.blob.core.windows.net", "openaiapi-site.azureedge.net",
+        "production-openaicom-storage.azureedge.net", "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+    ];
+
+    /// <summary>Subtree apexes for the NRPT layer of the local ban.</summary>
+    public List<string> BanTrees { get; set; } =
+    [
+        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
+        "chatgpt.site", "oaistatsig.com", "crixet.com",
+    ];
+
+    /// <summary>
+    /// Subnets for the firewall outbound Block: empty by default — OpenAI's endpoints ride on
+    /// shared clouds (Cloudflare anycast; only egress ranges are published), so there is nothing
+    /// of its own to ban by destination IP.
+    /// </summary>
+    public List<string> FirewallSubnets { get; set; } = [];
+
+    public CodexUpdateConfig Update { get; set; } = new();
+}
+
+/// <summary>Codex desktop app update through the Microsoft Store (no downloads of our own, no UAC).</summary>
+public sealed class CodexUpdateConfig
+{
+    /// <summary>Microsoft Store product id — the key the Store update check asks by (a public constant).</summary>
     public string StoreProductId { get; set; } = "9PLM9XGG6VKS";
 
     /// <summary>
-    /// OpenAI's own version manifest of the Store package (a public constant — the same endpoint
-    /// the codex CLI's doctor reads): only names the offered version for the tooltip, the bits
-    /// always come from the Store. The host is under the direct-access ban, so the lookup runs
-    /// only when the proxy chain is already alive (through the proxy). Empty — do not ask.
+    /// OpenAI's own version manifest of the Store package (a public constant): names the offered
+    /// version only, asked through the live chain — the host is under the direct-access ban.
+    /// Empty — do not ask.
     /// </summary>
     public string UpdateVersionUrl { get; set; } =
         "https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json";
 
-    /// <summary>Main process name of the desktop app (already-running detection, closing before an update).</summary>
-    public string ProcessName { get; set; } = "ChatGPT";
-
-    /// <summary>Hard limit of one Store update (search, download and install together).</summary>
+    /// <summary>Hard limit of one Store update (search, download and install together), sec.</summary>
     public int UpdateTimeoutSeconds { get; set; } = 1800;
 }
 
 /// <summary>
-/// Chain parameters. The mode picks what carries the traffic: "tailscale" — the userspace
-/// sidecar (daemon + keeper + node), "socks5" — an external SOCKS5 upstream taken from
-/// forwardProxy.socks5Upstream. Own pipe, own ports, own statedir. They change only by
-/// explicitly editing the user config.
+/// The userspace sidecar of the tailscale chain mode: daemon + keeper + node, their paths,
+/// listeners and timeouts.
+/// </summary>
+public sealed class ChainTailscaleConfig
+{
+    public string TailscaledPath { get; set; } = @"C:\Program Files\Tailscale\tailscaled.exe";
+
+    public string CliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
+
+    /// <summary>Daemon statedir: the node key lives here; an empty node requires a tailnet login.</summary>
+    public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\sidecar";
+
+    /// <summary>Daemon named pipe; the CLI and the DoH netmap discovery attach to it.</summary>
+    public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
+
+    /// <summary>Daemon SOCKS5 listener: the forward proxy and the browser egress=chain dial it.</summary>
+    public string SocksListen { get; set; } = "127.0.0.1:18083";
+
+    /// <summary>Daemon HTTP listener: its appearance = the daemon is alive.</summary>
+    public string HttpListen { get; set; } = "127.0.0.1:18082";
+
+    /// <summary>
+    /// How the daemon start/stop is elevated: "auto" (default) — directly on tailscale 1.104.1+
+    /// (--windows-mode=dev, the pipe is owned by the user), through the elevated runas copy
+    /// (UAC) on older builds; "never"/"always" force one of the modes ("always" — old builds
+    /// only: newer daemons reject a custom socket without the dev flag even elevated).
+    /// Unknown — auto.
+    /// </summary>
+    public string Elevation { get; set; } = "auto";
+
+    [JsonIgnore]
+    public DaemonElevationMode EffectiveElevation => DaemonElevationParser.Parse(Elevation);
+
+    /// <summary>Tailnet coordination server; empty — taken from the node state (statedir).</summary>
+    public string LoginServer { get; set; } = "";
+
+    /// <summary>Wait for the daemon listeners after start, sec.</summary>
+    public int DaemonWaitSeconds { get; set; } = 15;
+
+    /// <summary>Pause to check the keeper after start (one that exits immediately = an error), sec.</summary>
+    public int KeeperCheckSeconds { get; set; } = 2;
+
+    /// <summary>tailscale up timeout (login by key from statedir is silent), sec.</summary>
+    public int UpTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Hard limit of one tailscale CLI call (status, down): a daemon that stopped answering its
+    /// pipe must not hang the whole operation. "up" is bounded by upTimeoutSeconds plus a margin.
+    /// </summary>
+    public int CliTimeoutSeconds { get; set; } = 20;
+
+    /// <summary>Wait for UAC confirmation and the elevated daemon start, sec.</summary>
+    public int UacWaitSeconds { get; set; } = 90;
+}
+
+/// <summary>
+/// The external trusted SOCKS5 upstream of the socks5 chain mode: the target name rides the
+/// CONNECT and the upstream resolves it on its side. The tailscale mode ignores the whole section.
+/// </summary>
+public sealed class ChainSocks5Config
+{
+    /// <summary>The upstream "host:port".</summary>
+    public string Upstream { get; set; } = "127.0.0.1:18083";
+
+    /// <summary>Username of the upstream (RFC 1929); both empty — no authentication.</summary>
+    public string User { get; set; } = "";
+
+    /// <summary>Password of the upstream; lives only in the user config — the example holds an empty placeholder.</summary>
+    public string Password { get; set; } = "";
+}
+
+/// <summary>
+/// The chain that carries the traffic. The mode picks the shape (a change applies after a
+/// restart): "tailscale" — the userspace sidecar (the tailscale section), "socks5" — the
+/// external upstream (the socks5 section).
 /// </summary>
 public sealed class ChainConfig
 {
-    /// <summary>
-    /// What carries the traffic: "tailscale" (default) — the userspace sidecar daemon + keeper +
-    /// node below; "socks5" — an external SOCKS5 proxy (forwardProxy.socks5Upstream): every
-    /// tailscale step is skipped, replaced by one egress check. Unknown — tailscale.
-    /// Applies after a restart, like every config section.
-    /// </summary>
+    /// <summary>"tailscale" (default) or "socks5"; unknown — tailscale.</summary>
     public string Mode { get; set; } = "tailscale";
 
     [JsonIgnore]
     public ChainMode EffectiveMode => ChainModeParser.Parse(Mode);
 
-    public string TailscaledPath { get; set; } = @"C:\Program Files\Tailscale\tailscaled.exe";
-
-    public string TailscaleCliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
-
-    /// <summary>Daemon statedir: the node key is there; separate from the system Tailscale.</summary>
-    public string StateDir { get; set; } = @"%APPDATA%\PrivateNetRouting\sidecar";
-
-    /// <summary>Daemon named pipe (the CLI attaches to it).</summary>
-    public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
-
-    /// <summary>Daemon SOCKS5 listener (the forward proxy dials it).</summary>
-    public string DaemonSocksListen { get; set; } = "127.0.0.1:18083";
-
-    /// <summary>Daemon HTTP listener: its appearance = the daemon is alive.</summary>
-    public string DaemonHttpListen { get; set; } = "127.0.0.1:18082";
-
-    /// <summary>
-    /// How the daemon start/stop is elevated: "auto" (default) — directly on tailscale 1.104.1+
-    /// (--windows-mode=dev, the socket pipe is owned by the user), through the elevated runas copy
-    /// on older builds; "never"/"always" force one of the modes ("always" only makes sense for
-    /// tailscale older than 1.104.1 — newer daemons reject a custom socket without the dev flag
-    /// even elevated). Unknown — auto.
-    /// </summary>
-    public string DaemonElevation { get; set; } = "auto";
-
-    [JsonIgnore]
-    public DaemonElevationMode EffectiveDaemonElevation => DaemonElevationParser.Parse(DaemonElevation);
-
-    /// <summary>Wait for the daemon listeners after start.</summary>
-    public int DaemonWaitSeconds { get; set; } = 15;
-
-    /// <summary>Pause to check the keeper after start (one that exits immediately = an error).</summary>
-    public int KeeperCheckSeconds { get; set; } = 2;
-
-    /// <summary>Tailnet coordination server; empty — taken from the node state.</summary>
-    public string LoginServer { get; set; } = "";
-
-    /// <summary>tailscale up timeout (login by key from statedir is silent).</summary>
-    public int UpTimeoutSeconds { get; set; } = 60;
-
-    /// <summary>
-    /// Hard limit of one tailscale CLI call (status, down): a daemon that stopped answering
-    /// its pipe leaves the CLI hanging forever, and the whole operation would hang with it.
-    /// "up" is bounded by its own --timeout (upTimeoutSeconds) plus a margin on top.
-    /// </summary>
-    public int CliTimeoutSeconds { get; set; } = 20;
-
-    /// <summary>Wait for UAC confirmation and the elevated daemon start.</summary>
-    public int UacWaitSeconds { get; set; } = 90;
-
-    /// <summary>Wait for full chain health (CONNECT-roundtrip).</summary>
+    /// <summary>Wait for full chain health (CONNECT roundtrip), sec; both modes.</summary>
     public int HealthWaitSeconds { get; set; } = 90;
+
+    public ChainTailscaleConfig Tailscale { get; set; } = new();
+
+    public ChainSocks5Config Socks5 { get; set; } = new();
 }
 
 /// <summary>
-/// The browser profile, created once through the application's dialog (the "?" help menu →
-/// "Create browser profile…"): a separate profile whose traffic goes through the browser egress
-/// chosen by <see cref="Egress"/> — the application's forward proxy by default (names are resolved
-/// on its side over DoH, past the local ban), or the chain's final SOCKS5 (the profile is then
-/// self-sufficient, but in the tailscale mode the sidecar resolves via the system resolver and
-/// names blocked from direct access do not open through it). A profile that has not been created
-/// yet has an empty Type (and empty paths).
+/// The WSL layer: the guard sync into the distros and the idle-stop WSL step; entirely optional.
+/// Mode "off" wins over the sync flags. The idle stopper only touches RUNNING distros of the
+/// list — no distro is booted just for a check.
+/// </summary>
+public sealed class WslConfig
+{
+    /// <summary>"on" | "off" | "auto" (auto — on if WSL exists and a configured distro is installed).</summary>
+    public string Mode { get; set; } = "auto";
+
+    /// <summary>Sync the Claude layer (the startup script + settings.json env) into every configured distro.</summary>
+    public bool SyncClaude { get; set; } = true;
+
+    /// <summary>Sync the Codex proxy env layer (proxyEnvPath) into every configured distro.</summary>
+    public bool SyncCodex { get; set; } = true;
+
+    /// <summary>Distros the application works with: the name as in `wsl --list`, the user — the owner of ~/.claude.</summary>
+    public List<WslDistroConfig> Distros { get; set; } = [];
+
+    /// <summary>
+    /// Startup script inside the distro (the same path in all of them): refreshes the proxy
+    /// address (the WSL NAT gateway) and the Codex env when the distro starts.
+    /// </summary>
+    public string StartupScriptPath { get; set; } = "/etc/wsl.d/startup/10-claude-proxy.sh";
+
+    /// <summary>
+    /// Codex proxy env snippet inside the distro: exports the application proxy only to the
+    /// shells Codex itself starts (its WSL processes carry CODEX_HOME); ordinary shells stay direct.
+    /// </summary>
+    public string ProxyEnvPath { get; set; } = "/etc/profile.d/20-pnr-codex-proxy.sh";
+}
+
+public sealed class WslDistroConfig
+{
+    /// <summary>Distro name, as in `wsl --list`.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Distro user (owner of ~/.claude/settings.json).</summary>
+    public string User { get; set; } = "";
+}
+
+/// <summary>
+/// The browser profile, created once through the application's dialog (the "?" help menu):
+/// a separate profile whose traffic goes through the browser egress chosen by
+/// <see cref="Egress"/>. The direct TLDs of the profile bypass come from the top-level
+/// directTlds; the bypass zone domains — from the top-level bypassDomains.
 /// </summary>
 public sealed class BrowserConfig
 {
     /// <summary>
-    /// Which egress the profile points at: "forward-proxy" (the application's proxy,
-    /// forwardProxy.listen — HTTP CONNECT, names resolved on its side over DoH; default) or
-    /// "chain" (the chain's final SOCKS5: tailscale — chain.daemonSocksListen, socks5 —
-    /// forwardProxy.socks5Upstream; the browser then needs no application process). An unknown
-    /// value — forward-proxy.
+    /// Which egress the profile points at: "forward-proxy" (the application's proxy — HTTP
+    /// CONNECT, names resolved on its side over DoH; default) or "chain" (the chain's final
+    /// SOCKS5: tailscale — chain.tailscale.socksListen, socks5 — chain.socks5.upstream; the
+    /// browser then needs no application process). An unknown value — forward-proxy.
     /// </summary>
     public string Egress { get; set; } = "forward-proxy";
 
@@ -239,13 +454,6 @@ public sealed class BrowserConfig
 
     /// <summary>Timeout of the egress reachability probe before a launch, sec.</summary>
     public int ProbeTimeoutSeconds { get; set; } = 5;
-
-    /// <summary>
-    /// Top-level domains that go around the egress (*.tld): local sites must not leave through a
-    /// foreign exit. The bypass zone domains are shared with the Claude launcher (launcher.bypassDomains);
-    /// there is no separate list here.
-    /// </summary>
-    public List<string> DirectTlds { get; set; } = ["ru", "su", "by", "kz"];
 
     /// <summary>Family of the profile; null — not created yet (or an unknown value in the config).</summary>
     [JsonIgnore]
@@ -326,9 +534,6 @@ public sealed class WatchdogConfig
     /// <summary>Busyness check interval, sec; also the freshness window of the activity marker.</summary>
     public int CheckSeconds { get; set; } = 600;
 
-    /// <summary>WSL distro with the Claude Desktop host; empty — the WSL host is not touched on idle auto-stop.</summary>
-    public string WslDistro { get; set; } = "";
-
     /// <summary>How many seconds to wait for the detached worker to appear in the process list after its launch.</summary>
     public int WorkerStartWaitSeconds { get; set; } = 15;
 
@@ -337,74 +542,13 @@ public sealed class WatchdogConfig
 }
 
 /// <summary>
-/// Manual Claude Desktop update (MSIX): installed version, package URL from Claude's own
-/// update feed or the AppX journal (or manual), multithreaded chunked download through the
-/// proxy chain, Publisher verification, closing Claude and Add-AppxPackage.
-/// </summary>
-public sealed class UpdaterConfig
-{
-    /// <summary>MSIX package name of Claude Desktop (Get-AppxPackage -Name).</summary>
-    public string PackageName { get; set; } = "Claude";
-
-    /// <summary>Package distribution host (a public Anthropic constant; feed and journal URLs are filtered by it).</summary>
-    public string PackageHost { get; set; } = "downloads.claude.ai";
-
-    /// <summary>
-    /// Claude's own update feed (a public Anthropic constant — the same endpoint its built-in
-    /// updater polls): asking it returns the latest .msix address at once, without waiting
-    /// until the built-in updater leaves one in the AppX journal. Reachable only through the
-    /// proxy chain — the lookup runs only when the chain is already alive. Empty — do not ask
-    /// the feed (the journal lookup stays).
-    /// </summary>
-    public string UpdateFeedUrl { get; set; } = "https://api.anthropic.com/api/desktop/win32/x64/msix/update";
-
-    /// <summary>Timeout of one update feed request, sec.</summary>
-    public int FeedTimeoutSeconds { get; set; } = 15;
-
-    /// <summary>Cache of packages and download chunks; environment variables are expanded.</summary>
-    public string CacheDir { get; set; } = @"%LOCALAPPDATA%\PrivateNetRouting\update-cache";
-
-    /// <summary>Windows PowerShell (Get-AppxPackage/Add-AppxPackage/Get-WinEvent) — an OS component.</summary>
-    public string PowerShellPath { get; set; } = @"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe";
-
-    /// <summary>Claude Desktop process name — closed before installation.</summary>
-    public string ClaudeProcessName { get; set; } = "Claude";
-
-    /// <summary>How many recent AppX journal events to scan when looking up the URL.</summary>
-    public int JournalMaxEvents { get; set; } = 400;
-
-    /// <summary>Download chunk size.</summary>
-    public int ChunkBytes { get; set; } = 8 * 1024 * 1024;
-
-    /// <summary>Chunks to download in parallel (a single stream through the chain hits DoH latency).</summary>
-    public int ParallelChunks { get; set; } = 6;
-
-    /// <summary>Retries per chunk after a failure.</summary>
-    public int ChunkRetries { get; set; } = 3;
-
-    /// <summary>Pause between chunk attempts, sec.</summary>
-    public int RetryDelaySeconds { get; set; } = 5;
-
-    /// <summary>Timeout of a single chunk attempt, sec.</summary>
-    public int ChunkTimeoutSeconds { get; set; } = 1800;
-
-    /// <summary>How many seconds to wait for Claude to close on its own before killing the process.</summary>
-    public int CloseWaitSeconds { get; set; } = 25;
-
-    /// <summary>Pause after killing the Claude processes before installation, sec.</summary>
-    public int KillSettleSeconds { get; set; } = 3;
-}
-
-/// <summary>
 /// Direct-access guards: the managed policy egressProxyUrl, three layers of the local ban
-/// (hosts/NRPT/firewall), env in Claude Code settings.json (Windows and WSL), the WinINET
-/// system proxy. The ban rule identifiers are configurable: the application looks up and
-/// maintains a ban with these identifiers rather than creating a parallel one.
+/// (hosts/NRPT/firewall — the name lists live in the claude/codex sections, the rule identifiers
+/// here; the application maintains a ban with these identifiers, not a parallel one), the WSL
+/// layer (the wsl section) and the WinINET system proxy.
 /// </summary>
 public sealed class GuardConfig
 {
-    // --- local ban: hosts + NRPT + firewall ---
-
     /// <summary>hosts file; environment variables are expanded.</summary>
     public string HostsFile { get; set; } = @"%SystemRoot%\System32\drivers\etc\hosts";
 
@@ -416,122 +560,20 @@ public sealed class GuardConfig
     /// <summary>Comment line inside the block (human-readable, not tied to anything).</summary>
     public string HostsComment { get; set; } = "# AI services (Claude/OpenAI) are blocked from direct access; Claude: only through the local forward proxy";
 
-    /// <summary>
-    /// Exact names in hosts (subtree apexes plus hosts that applications actually call,
-    /// and service-specific names on shared CDNs). Public Anthropic/OpenAI domains.
-    /// </summary>
-    public List<string> BanHosts { get; set; } =
-    [
-        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
-        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
-        "api.anthropic.com", "console.anthropic.com", "statsig.anthropic.com",
-        "downloads.claude.ai", "a.claude.ai", "assets.claude.ai", "assets-proxy.anthropic.com",
-        "anthropic.qualtrics.com", "servd-anthropic-website.b-cdn.net",
-        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
-        "chatgpt.site", "oaistatsig.com", "crixet.com",
-        "ab.chatgpt.com", "api.openai.com", "auth.openai.com", "platform.openai.com", "cdn.oaistatic.com",
-        "persistent.oaistatic.com", "releases.openai.com",
-        "openai.qualtrics.com", "chatgpt.livekit.cloud", "openai.com.cdn.cloudflare.net",
-        "openaicom.imgix.net", "openaiassets.blob.core.windows.net",
-        "openaicomproductionae4b.blob.core.windows.net", "openaiapi-site.azureedge.net",
-        "production-openaicom-storage.azureedge.net", "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
-    ];
-
-    /// <summary>Subtrees for NRPT: two entries each — the apex and ".apex" (all subdomains).</summary>
-    public List<string> BanTrees { get; set; } =
-    [
-        "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
-        "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
-        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "chat.com", "sora.com",
-        "chatgpt.site", "oaistatsig.com", "crixet.com",
-    ];
-
     /// <summary>DisplayName of the NRPT rule — by it the rule is identified and removed.</summary>
     public string NrptRuleName { get; set; } = "ai-direct-ban";
 
     /// <summary>Comment of the NRPT rule (human-readable text, not tied to anything).</summary>
     public string NrptComment { get; set; } = "Claude/OpenAI: direct access blocked; Claude — only through the local forward proxy";
 
-    /// <summary>Anthropic subnets for firewall outbound Block (public constants; shared clouds are not banned by IP).</summary>
-    public List<string> FirewallSubnets { get; set; } = ["160.79.104.0/21", "2607:6bc0::/48", "2607:6bc0:11::/48"];
-
     /// <summary>Group of the firewall rules — by it the rules are identified and removed.</summary>
     public string FirewallGroup { get; set; } = "ai-direct-ban";
 
-    /// <summary>Probe name of the anthropic.com subtree: absent from hosts, resolves before the ban — a clean NRPT check.</summary>
-    public string BanProbeName { get; set; } = "www.anthropic.com";
-
-    // --- env in Claude Code settings.json ---
-
-    /// <summary>Claude Code settings.json on Windows; environment variables are expanded.</summary>
-    public string ClaudeSettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
-
     /// <summary>
-    /// config.toml of Codex (desktop and CLI) — the sync adds `[features] respect_system_proxy = true`
-    /// there, the file itself belongs to the application; environment variables are expanded.
+    /// Live ban probes: each name must be inside the ban trees but absent from the hosts lists —
+    /// a clean NRPT check (one per app).
     /// </summary>
-    public string CodexSettingsPath { get; set; } = @"%USERPROFILE%\.codex\config.toml";
-
-    /// <summary>
-    /// .env of Codex in the same CODEX_HOME — the sync keeps the proxy env (HTTP_PROXY/
-    /// HTTPS_PROXY/ALL_PROXY/NO_PROXY) there. The embedded CLI core loads this file after its own
-    /// start: the desktop app strips the inherited proxy env from the processes it spawns, so this
-    /// file is what actually carries the proxy to the core. Environment variables are expanded.
-    /// </summary>
-    public string CodexEnvPath { get; set; } = @"%USERPROFILE%\.codex\.env";
-
-    // --- WSL: startup script + settings.json of the distros (the whole layer is optional) ---
-
-    /// <summary>The whole WSL guard layer: mode and list of distros with an individual sync choice.</summary>
-    public GuardWslConfig Wsl { get; set; } = new();
-
-    /// <summary>WSL startup script that refreshes the proxy address (NAT gateway) when the distro starts; the path is the same in all distros.</summary>
-    public string WslStartupScript { get; set; } = "/etc/wsl.d/startup/10-claude-proxy.sh";
-
-    // --- WinINET system proxy ---
-
-    /// <summary>Additional system proxy bypass entries (local addresses and private ranges are fixed in code).</summary>
-    public List<string> SystemProxyExtraBypass { get; set; } = ["*.ru", "*.su", "*.by", "*.kz"];
-}
-
-/// <summary>
-/// WSL guard layer: fully optional. mode: "on" — always maintain; "off" — do not touch at all;
-/// "auto" — on if WSL is present and at least one configured distro is installed on the machine,
-/// otherwise off. For each distro in the list — its own choice of whether to sync the config
-/// into it (sync=false — only show status, write nothing).
-/// </summary>
-public sealed class GuardWslConfig
-{
-    /// <summary>"on" | "off" | "auto".</summary>
-    public string Mode { get; set; } = "auto";
-
-    /// <summary>Distros: the name and user (owner of ~/.claude) are required, the rest is ignored.</summary>
-    public List<WslDistroConfig> Distros { get; set; } = [];
-
-    /// <summary>
-    /// Path of the Codex proxy env layer inside the distro: a profile snippet that exports the
-    /// application proxy to the shells Codex starts (its own WSL processes carry CODEX_HOME) and
-    /// to nothing else. The same path in every distro.
-    /// </summary>
-    public string ProxyEnvPath { get; set; } = "/etc/profile.d/20-pnr-codex-proxy.sh";
-}
-
-public sealed class WslDistroConfig
-{
-    /// <summary>Distro name, as in `wsl --list`.</summary>
-    public string Name { get; set; } = "";
-
-    /// <summary>Distro user (owner of ~/.claude/settings.json).</summary>
-    public string User { get; set; } = "";
-
-    /// <summary>Sync the Claude config into this distro; false — status only.</summary>
-    public bool Sync { get; set; } = true;
-
-    /// <summary>
-    /// Sync the Codex proxy env layer into this distro (guard.wsl.proxyEnvPath): without it a
-    /// project opened in WSL keeps the direct route — 127.0.0.1 there is the distro itself.
-    /// </summary>
-    public bool ProxyEnv { get; set; } = true;
+    public List<string> BanProbes { get; set; } = ["www.anthropic.com", "www.openai.com"];
 }
 
 public sealed class LoggingConfig
@@ -555,29 +597,31 @@ public sealed class LoggingConfig
     public LogLevel EffectiveLevel => LogLevelParser.Parse(Level);
 }
 
+/// <summary>
+/// The local CONNECT proxy. It exists for two reasons. The main one is the tailscale mode: the
+/// sidecar's own SOCKS5 (and HTTP) proxy resolves names with the system resolver, and the
+/// direct-access ban blackholes exactly the AI names there — so this proxy does DoH itself and
+/// dials by IP through the sidecar. The second one is a plain SOCKS5 upstream that does not
+/// speak HTTP: applications need HTTP CONNECT, and this proxy translates.
+/// </summary>
 public sealed class ForwardProxyConfig
 {
-    /// <summary>Gates the <c>pnr proxy</c> command only; otherwise the proxy is raised explicitly
-    /// as part of the chain (chain up, launches), regardless of this flag — the GUI does not
-    /// auto-start it on open.</summary>
+    /// <summary>
+    /// THE switch of the local proxy. true — the proxy runs as part of the chain (the GUI does
+    /// not raise it on open; chain up and the launches do), and `pnr proxy` may start it
+    /// standalone. false — the local proxy does not exist at all: in the socks5 mode every
+    /// client is pointed at <see cref="ExternalAppsEndpoint"/> instead (the upstream's own mixed
+    /// HTTP+SOCKS inbound does the translation itself); in the tailscale mode the proxy is
+    /// load-bearing — a chain bring-up refuses with an explicit error.
+    /// </summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Main listener "host:port".</summary>
+    /// <summary>Main listener "host:port" (clients connect here).</summary>
     public string Listen { get; set; } = "127.0.0.1:18081";
 
     /// <summary>
-    /// socks5 mode only: run no local proxy at all — every client is pointed at
-    /// <see cref="ExternalAppsEndpoint"/> instead, the mixed HTTP+SOCKS inbound of the external
-    /// upstream (e.g. sing-box), which does the HTTP CONNECT-to-SOCKS translation itself. The
-    /// tailscale mode ignores the flag: there the local proxy is load-bearing (DoH resolution,
-    /// dialing by IP through the sidecar). The chain restart applies a mode change; the rest of
-    /// this section applies after an application restart, like every config section.
-    /// </summary>
-    public bool SkipInSocks5Mode { get; set; }
-
-    /// <summary>
-    /// The HTTP CONNECT endpoint ("host:port") written for the applications when the local proxy
-    /// is skipped. Must be reachable from the WSL distros when the WSL guard sync is on — the
+    /// The HTTP CONNECT endpoint written for the applications when the local proxy is off
+    /// (socks5 mode). Must be reachable from the WSL distros when the WSL sync is on: the
     /// upstream has to listen on the WSL-facing address then (loopback-only is unreachable from
     /// a distro, and the guard status warns about it).
     /// </summary>
@@ -598,24 +642,6 @@ public sealed class ForwardProxyConfig
 
     /// <summary>How many seconds to wait for the port to be released after stopping the detached worker.</summary>
     public int WorkerStopWaitSeconds { get; set; } = 10;
-
-    /// <summary>
-    /// SOCKS5 upstream of the socks5 mode: an external trusted proxy "host:port" — the target
-    /// name rides the CONNECT and the upstream resolves it on its side. In the tailscale mode
-    /// this field is not used: the proxy dials the sidecar's own listener (chain.daemonSocksListen)
-    /// by IP after DoH resolution.
-    /// </summary>
-    public string Socks5Upstream { get; set; } = "127.0.0.1:18083";
-
-    /// <summary>
-    /// Username of the external SOCKS5 upstream (RFC 1929), together with Socks5UpstreamPassword;
-    /// both empty — no authentication. The credentials belong to the socks5 mode: the tailscale
-    /// sidecar's listener needs none.
-    /// </summary>
-    public string Socks5UpstreamUser { get; set; } = "";
-
-    /// <summary>Password of the external SOCKS5 upstream; lives only in the user config — the repository example holds an empty placeholder.</summary>
-    public string Socks5UpstreamPassword { get; set; } = "";
 
     /// <summary>
     /// Optional extra DoH resolvers ("http(s)://IP:PORT/dns-query") on top of netmap discovery
@@ -659,21 +685,11 @@ public sealed class ForwardProxyConfig
     public int ActivityTouchIntervalSeconds { get; set; } = 60;
 }
 
+/// <summary>
+/// Auto-completion of the DoH pool from the tailnet config (tailscale debug netmap through the
+/// sidecar pipe of chain.tailscale). On by default; in the socks5 mode DoH is not used at all.
+/// </summary>
 public sealed class DohDiscoveryConfig
 {
-    /// <summary>
-    /// Auto-completion of the DoH pool from the tailnet config (tailscale debug netmap);
-    /// on by default — it fills the pool with the resolvers of any tailscale DNS config, so
-    /// dohSeed stays empty unless the user wants extra resolvers. Only the tailscale mode has
-    /// a sidecar pipe; in the socks5 mode DoH is not used and the flag is inert.
-    /// </summary>
     public bool Enabled { get; set; } = true;
-
-    public string CliPath { get; set; } = @"C:\Program Files\Tailscale\tailscale.exe";
-
-    /// <summary>Named pipe of the sidecar daemon.</summary>
-    public string Socket { get; set; } = @"\\.\pipe\pnr-sidecar";
-
-    [JsonIgnore]
-    public TimeSpan NetmapTimeout => TimeSpan.FromSeconds(40);
 }

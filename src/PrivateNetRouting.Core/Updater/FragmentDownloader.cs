@@ -26,7 +26,7 @@ public interface IMsixDownloader
 /// chain hits the DoH+sidecar latency, several threads yield a few MB/s. A fragment with
 /// retries, then a size check and concatenation.
 /// </summary>
-public sealed class FragmentDownloader(HttpClient http, UpdaterConfig config, FileLog log) : IMsixDownloader
+public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig config, FileLog log) : IMsixDownloader
 {
     private sealed record Chunk(long Start, long End, string File)
     {

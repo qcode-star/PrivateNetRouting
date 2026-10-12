@@ -56,15 +56,14 @@ public class CodexTests : IDisposable
     private AppConfig DefaultConfig() => new()
     {
         ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
-        Launcher = new LauncherConfig { BypassDomains = ["corp.example.com"] },
-        Guard = new GuardConfig { CodexEnvPath = _envPath },
+        BypassDomains = ["corp.example.com"],
         Codex = new CodexConfig
         {
             PackageName = "OpenAI.Codex",
             AppId = "App",
             AppExecutable = @"app\ChatGPT.exe",
-            StoreProductId = "9PLM9XGG6VKS",
             ProcessName = "ChatGPT",
+            EnvPath = _envPath,
         },
     };
 
@@ -96,7 +95,7 @@ public class CodexTests : IDisposable
     public void LaunchScriptEscapesSingleQuotes()
     {
         var config = DefaultConfig();
-        config.Launcher.BypassDomains = ["o'brien.example"];
+        config.BypassDomains = ["o'brien.example"];
 
         var script = new CodexLauncher(
             config, _chain, _ => Task.FromResult(true), _processes, _log, new FakePowerShell())
@@ -126,13 +125,13 @@ public class CodexTests : IDisposable
         var config = DefaultConfig();
         // what a WSL codex shell leaves behind: the NAT gateway address, unreachable from Windows
         // once WSL is down
-        File.WriteAllText(config.Guard.CodexEnvPath, "HTTP_PROXY=http://192.0.2.1:18082\nMY_VAR=keep\n");
+        File.WriteAllText(config.Codex.EnvPath, "HTTP_PROXY=http://192.0.2.1:18082\nMY_VAR=keep\n");
         var powershell = new FakePowerShell();
         var launcher = CreateLauncher(config, healthy: true, powershell: powershell);
 
         await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
 
-        var text = File.ReadAllText(config.Guard.CodexEnvPath);
+        var text = File.ReadAllText(config.Codex.EnvPath);
         Assert.Contains("HTTP_PROXY=http://127.0.0.1:18082\n", text);
         Assert.Contains("MY_VAR=keep\n", text); // the foreign line survives
         Assert.DoesNotContain("192.0.2.1", text);

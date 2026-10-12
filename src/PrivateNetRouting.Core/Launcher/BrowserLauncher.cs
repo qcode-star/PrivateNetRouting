@@ -137,10 +137,10 @@ public sealed class BrowserLauncher(
             : !AppProxyEndpoint.IsSkipped(config);
 
     public string BuildChromiumBypassList() =>
-        BrowserBypassList.BuildChromium(config.Launcher.BypassDomains, config.Browser.DirectTlds);
+        BrowserBypassList.BuildChromium(config.BypassDomains, config.DirectTlds);
 
     public string BuildFirefoxNoProxies() =>
-        BrowserBypassList.BuildFirefoxNoProxies(config.Launcher.BypassDomains, config.Browser.DirectTlds);
+        BrowserBypassList.BuildFirefoxNoProxies(config.BypassDomains, config.DirectTlds);
 
     /// <summary>
     /// Readiness of the egress: a plain TCP connect (a SOCKS5 handshake would add nothing to the

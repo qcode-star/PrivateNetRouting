@@ -165,7 +165,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             // netmap discovery reads the tailnet config through the sidecar pipe; disabled — the
             // pool lives on the seed set alone
             IDohEndpointSource? source = fp.DohDiscovery.Enabled
-                ? new TailscaleNetmapDohSource(fp.DohDiscovery, log)
+                ? new TailscaleNetmapDohSource(config.Chain.Tailscale, log)
                 : null;
             if (source is null && seed.Count == 0)
             {
@@ -196,7 +196,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
         if (skipProxy)
         {
-            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.skipInSocks5Mode) — the applications point at {fp.ExternalAppsEndpoint}");
+            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {fp.ExternalAppsEndpoint}");
         }
 
         ForwardProxyService? proxy = skipProxy
@@ -210,14 +210,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var watchdogLog = NewLog("watchdog.log");
         var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");
-        var elevated = new ElevatedRunner(config.Chain, chainLog);
+        var elevated = new ElevatedRunner(config.Chain.Tailscale, chainLog);
         var chain = new ChainSupervisor(
             config.Chain,
             proxyControl,
-            new SidecarDaemon(config.Chain, ports, processes, chainLog, elevated,
-                new TailscaleVersionProbe(config.Chain.TailscaledPath)),
-            new SidecarKeeper(config.Chain, processes, chainLog),
-            new SidecarCli(config.Chain),
+            new SidecarDaemon(config.Chain.Tailscale, ports, processes, chainLog, elevated,
+                new TailscaleVersionProbe(config.Chain.Tailscale.TailscaledPath)),
+            new SidecarKeeper(config.Chain.Tailscale, processes, chainLog),
+            new SidecarCli(config.Chain.Tailscale),
             chainLog,
             ct => ChainHealthAsync(config, ct),
             // after every successful raise the idle stopper re-arms itself (watchdog.autoStart);
@@ -230,7 +230,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             config.Chain.EffectiveMode == ChainMode.Socks5
                 ? ct => EgressCheckAsync(config, socks, chainLog, ct)
                 : null,
-            proxySkipped: skipProxy);
+            proxyDisabled: !config.ForwardProxy.Enabled);
 
         var launcherLog = NewLog("launcher.log");
         var launcher = new ClaudeLauncher(
@@ -247,7 +247,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             ct => ChainHealthAsync(config, ct),
             processes,
             codexLauncherLog,
-            new PowerShellRunner(config.Updater.PowerShellPath));
+            new PowerShellRunner(config.PowerShellPath));
 
         var browserLog = NewLog("browser.log");
         var browser = new BrowserLauncher(
@@ -257,9 +257,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes);
         var browserProfile = new BrowserProfileService(config, new WScriptShortcutFactory(), browserLog);
 
-        IWslClaudeHost? wslHost = string.IsNullOrWhiteSpace(config.Watchdog.WslDistro)
+        IWslAppHost? wslHost = config.Wsl.Distros.Count == 0
             ? null
-            : new WslClaudeHostStopper(config.Watchdog.WslDistro, new WslProcessRunner());
+            : new WslAppHostStopper(
+                config.Wsl.Distros.Select(distro => distro.Name).ToList(),
+                config.Claude.Enabled,
+                config.Codex.Enabled,
+                new WslProcessRunner());
         // The idle stopper also reads the chain's egress listener: the browser profile goes straight
         // there (mitigating the application proxy), so its live connections are what keeps the chain
         // from being stopped under an open browser. In the socks5 mode the egress is external —
@@ -268,7 +272,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         // the external endpoint's in the skipped one (the clients connect there all the same).
         var egressPort = config.Chain.EffectiveMode == ChainMode.Socks5
             ? 0
-            : Socks5Client.ParseEndPoint(config.Chain.DaemonSocksListen).Port;
+            : Socks5Client.ParseEndPoint(config.Chain.Tailscale.SocksListen).Port;
         var usage = new ClaudeUsageProbe(
             processes,
             new TcpEstablishedConnectionCounter(),
@@ -290,15 +294,15 @@ public sealed class ProxyRuntime : IAsyncDisposable
         {
             Timeout = Timeout.InfiniteTimeSpan,
         };
-        var powershell = new PowerShellRunner(config.Updater.PowerShellPath);
+        var powershell = new PowerShellRunner(config.PowerShellPath);
         var updater = new ClaudeUpdater(
             config,
             chain,
             ct => ChainHealthAsync(config, ct),
             new PowerShellAppxPackageSource(powershell, updaterLog),
-            new PowerShellJournalUrlFinder(config.Updater, powershell, updaterLog),
-            new UpdateFeedUrlFinder(updaterHttp, config.Updater, updaterLog),
-            new FragmentDownloader(updaterHttp, config.Updater, updaterLog),
+            new PowerShellJournalUrlFinder(config.Claude.Update, powershell, updaterLog),
+            new UpdateFeedUrlFinder(updaterHttp, config.Claude.Update, updaterLog),
+            new FragmentDownloader(updaterHttp, config.Claude.Update, updaterLog),
             marker,
             new RunningClaudeProcessSource(),
             updaterLog);
@@ -313,19 +317,19 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new PowerShellAppxPackageSource(powershell, codexUpdaterLog),
             new StoreUpdateSource(),
             new RunningClaudeProcessSource(),
-            new CodexVersionManifest(updaterHttp, config.Codex, codexUpdaterLog),
+            new CodexVersionManifest(updaterHttp, config.Codex.Update, codexUpdaterLog),
             codexUpdaterLog);
 
         var guardLog = NewLog("guard.log");
         var guard = new GuardService(
             config,
             new RegistryEgressPolicyStore(),
-            new PowerShellBanSystemOps(config.Guard, powershell),
+            new PowerShellBanSystemOps(config, powershell),
             new ClaudeSettingsGuard(config),
             new CodexSettingsGuard(config),
             new WslConfigGuard(config, new WslProcessRunner()),
             new WinInetSystemProxyStore(),
-            new ElevatedRunner(config.Chain, guardLog, executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile)),
+            new ElevatedRunner(config.Chain.Tailscale, guardLog, executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile)),
             guardLog,
             ct => ChainHealthAsync(config, ct));
 
@@ -420,16 +424,16 @@ public sealed class ProxyRuntime : IAsyncDisposable
     private readonly ForwardProxyConfig? _builtProxyConfig;
 
     /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
-    /// trusted proxy from forwardProxy.socks5Upstream (with its RFC 1929 credentials); in the
-    /// tailscale mode — the sidecar's own listener (chain.daemonSocksListen), which needs no
+    /// trusted proxy from chain.socks5 (with its RFC 1929 credentials); in the tailscale
+    /// mode — the sidecar's own listener (chain.tailscale.socksListen), which needs no
     /// authentication. Deriving it from the daemon's listener keeps the address in one place:
     /// the proxy cannot drift from the listener it must dial.</summary>
     internal static (string EndPoint, string User, string Password) ResolveUpstream(AppConfig config) =>
         config.Chain.EffectiveMode == ChainMode.Socks5
-            ? (config.ForwardProxy.Socks5Upstream,
-                config.ForwardProxy.Socks5UpstreamUser,
-                config.ForwardProxy.Socks5UpstreamPassword)
-            : (config.Chain.DaemonSocksListen, "", "");
+            ? (config.Chain.Socks5.Upstream,
+                config.Chain.Socks5.User,
+                config.Chain.Socks5.Password)
+            : (config.Chain.Tailscale.SocksListen, "", "");
 
     internal static bool SameProxyConfig(ForwardProxyConfig a, ForwardProxyConfig b) =>
         JsonSerializer.Serialize(a, ConfigComparisonOptions) == JsonSerializer.Serialize(b, ConfigComparisonOptions);

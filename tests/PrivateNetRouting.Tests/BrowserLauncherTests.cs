@@ -30,15 +30,19 @@ public class BrowserLauncherTests : IDisposable
 
     private static AppConfig NewConfig(BrowserKind kind = BrowserKind.Firefox, int egressPort = 18083) => new()
     {
-        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081", Socks5Upstream = "127.0.0.1:18099" },
-        Chain = new ChainConfig { DaemonSocksListen = $"127.0.0.1:{egressPort}" },
-        Launcher = new LauncherConfig { BypassDomains = ["corp.example.com", ".team.example.net"] },
+        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081" },
+        Chain = new ChainConfig
+        {
+            Tailscale = new ChainTailscaleConfig { SocksListen = $"127.0.0.1:{egressPort}" },
+            Socks5 = new ChainSocks5Config { Upstream = "127.0.0.1:18099" },
+        },
+        BypassDomains = ["corp.example.com", ".team.example.net"],
+        DirectTlds = ["ru", "by"],
         Browser = new BrowserConfig
         {
             Type = kind == BrowserKind.Chrome ? "chrome" : "firefox",
             // the chain egress: the forward-proxy default has its own tests
             Egress = "chain",
-            DirectTlds = ["ru", "by"],
         },
     };
 
@@ -111,12 +115,12 @@ public class BrowserLauncherTests : IDisposable
     public void ChainEgressFollowsTheModeAndIsOursButForTheExternalUpstream()
     {
         var config = ConfiguredConfig();
-        Assert.Equal(config.Chain.DaemonSocksListen, BrowserEgress.Resolve(config));
+        Assert.Equal(config.Chain.Tailscale.SocksListen, BrowserEgress.Resolve(config));
         Assert.Equal(BrowserEgress.Socks5Scheme, BrowserEgress.Scheme(config));
         Assert.True(Create(config).ChainOwnsEgress); // a dead one is fixed by a chain bring-up
 
         config.Chain.Mode = "socks5";
-        Assert.Equal(config.ForwardProxy.Socks5Upstream, BrowserEgress.Resolve(config));
+        Assert.Equal(config.Chain.Socks5.Upstream, BrowserEgress.Resolve(config));
         Assert.False(Create(config).ChainOwnsEgress); // external: there is nothing of ours to raise
     }
 
@@ -146,7 +150,7 @@ public class BrowserLauncherTests : IDisposable
         var config = ConfiguredConfig();
         config.Browser.Egress = "forward-proxy";
         config.Chain.Mode = "socks5";
-        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.Enabled = false;
         config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
 
         Assert.Equal("192.0.2.10:7080", BrowserEgress.Resolve(config));
@@ -387,7 +391,7 @@ public class BrowserLauncherTests : IDisposable
         listener.Stop();
         var config = ConfiguredConfig(BrowserKind.Chrome, port);
         config.Chain.Mode = "socks5";
-        config.ForwardProxy.Socks5Upstream = $"127.0.0.1:{port}"; // the dead port is the external upstream
+        config.Chain.Socks5.Upstream = $"127.0.0.1:{port}"; // the dead port is the external upstream
 
         var result = await Create(config).LaunchAsync(
             BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(true) },

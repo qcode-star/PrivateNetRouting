@@ -263,8 +263,8 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplyAppAvailability()
     {
-        var claude = _runtime.Config.Apps.Claude ? Visibility.Visible : Visibility.Collapsed;
-        var codex = _runtime.Config.Apps.Codex ? Visibility.Visible : Visibility.Collapsed;
+        var claude = _runtime.Config.Claude.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        var codex = _runtime.Config.Codex.Enabled ? Visibility.Visible : Visibility.Collapsed;
         BtnLaunchClaude.Visibility = claude;
         BtnUpdateClaude.Visibility = claude;
         BtnUpdateCodex.Visibility = codex;
@@ -717,6 +717,11 @@ public partial class MainWindow : Window
             return Loc.S("Main.Guard.Wsl.NotConfigured");
         }
 
+        if (reason.Contains("nothing to sync", StringComparison.Ordinal))
+        {
+            return Loc.S("Main.Guard.Wsl.NoSync");
+        }
+
         if (reason.Contains("auto", StringComparison.Ordinal))
         {
             return Loc.S("Main.Guard.Wsl.AutoNone");
@@ -1104,7 +1109,7 @@ public partial class MainWindow : Window
             _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
             ApplyCardLayout();
             ApplyAppAvailability();
-            _tray?.ShowLaunchClaude(_runtime.Config.Apps.Claude);
+            _tray?.ShowLaunchClaude(_runtime.Config.Claude.Enabled);
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);
@@ -1134,7 +1139,7 @@ public partial class MainWindow : Window
     /// </summary>
     public async void LaunchFromShortcut()
     {
-        if (!_runtime.Config.Apps.Claude)
+        if (!_runtime.Config.Claude.Enabled)
         {
             _viewModel.SetCheckResult("Main.Launch.ClaudeDisabled");
             return;
@@ -1168,7 +1173,7 @@ public partial class MainWindow : Window
     /// <summary>Launching Claude from the tray: the same path as the window's launch button.</summary>
     public async Task LaunchClaudeAsync()
     {
-        if (!_runtime.Config.Apps.Claude)
+        if (!_runtime.Config.Claude.Enabled)
         {
             _viewModel.SetCheckResult("Main.Launch.ClaudeDisabled");
             return;
@@ -2193,15 +2198,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
         if (_socks5)
         {
-            var fp = _runtime.Config.ForwardProxy;
-            UpstreamListeners = string.IsNullOrEmpty(fp.Socks5UpstreamUser)
-                ? fp.Socks5Upstream
-                : $"{fp.Socks5UpstreamUser}@{fp.Socks5Upstream}";
+            var socks5 = _runtime.Config.Chain.Socks5;
+            UpstreamListeners = string.IsNullOrEmpty(socks5.User)
+                ? socks5.Upstream
+                : $"{socks5.User}@{socks5.Upstream}";
             RefreshEgressState();
         }
         else
         {
-            UpstreamListeners = $"{_runtime.Config.Chain.DaemonHttpListen}, {_runtime.Config.Chain.DaemonSocksListen}";
+            UpstreamListeners = $"{_runtime.Config.Chain.Tailscale.HttpListen}, {_runtime.Config.Chain.Tailscale.SocksListen}";
             RefreshTailscaleState();
         }
     }
@@ -2215,8 +2220,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         try
         {
-            var http = Socks5Client.ParseEndPoint(_runtime.Config.Chain.DaemonHttpListen).Port;
-            var socks = Socks5Client.ParseEndPoint(_runtime.Config.Chain.DaemonSocksListen).Port;
+            var http = Socks5Client.ParseEndPoint(_runtime.Config.Chain.Tailscale.HttpListen).Port;
+            var socks = Socks5Client.ParseEndPoint(_runtime.Config.Chain.Tailscale.SocksListen).Port;
             var httpListening = _tcpTable.GetListeners(http).Count > 0;
             var socksListening = _tcpTable.GetListeners(socks).Count > 0;
             (UpstreamState, UpstreamBrush) = (httpListening, socksListening) switch

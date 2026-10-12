@@ -23,7 +23,7 @@ public class ChainSupervisorTests : IDisposable
         string? mode = null,
         Func<CancellationToken, Task>? chainStopped = null,
         Func<CancellationToken, Task<bool>>? upstream = null,
-        bool proxySkipped = false)
+        bool proxyDisabled = false)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
@@ -38,7 +38,7 @@ public class ChainSupervisorTests : IDisposable
             chainRaised,
             chainStopped,
             upstream,
-            proxySkipped);
+            proxyDisabled);
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public class ChainSupervisorTests : IDisposable
     }
 
     /// <summary>
-    /// The skipped socks5 shape (forwardProxy.skipInSocks5Mode): the bring-up is the egress check
+    /// The skipped socks5 shape (forwardProxy.enabled=false): the bring-up is the egress check
     /// and health against the external endpoint — the proxy link does not exist at all.
     /// </summary>
     [Fact]
@@ -437,11 +437,27 @@ public class ChainSupervisorTests : IDisposable
             mode: "socks5",
             upstream: _ => Task.FromResult(true),
             health: _ => Task.FromResult(true),
-            proxySkipped: true);
+            proxyDisabled: true);
 
         await supervisor.EnsureRunningAsync(null, CancellationToken.None);
 
         Assert.Empty(_calls); // no proxy start, no daemon/keeper/cli touches
+    }
+
+    /// <summary>
+    /// The tailscale mode with the local proxy off is a config error: the proxy is load-bearing
+    /// there (DoH resolution, dialing by IP) — the bring-up refuses before touching anything.
+    /// </summary>
+    [Fact]
+    public async Task TailscaleModeWithDisabledProxyRefusesBringUp()
+    {
+        var supervisor = Create(proxyDisabled: true);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() => supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        Assert.Contains("forwardProxy.enabled=false", ex.Message);
+        Assert.Contains("required in the tailscale mode", ex.Message);
+        Assert.Empty(_calls); // nothing was started before the refusal
     }
 
     [Fact]
@@ -451,7 +467,7 @@ public class ChainSupervisorTests : IDisposable
             mode: "socks5",
             upstream: _ => Task.FromResult(true),
             health: _ => Task.FromResult(true),
-            proxySkipped: true);
+            proxyDisabled: true);
 
         var state = await supervisor.GetStateAsync(CancellationToken.None);
 
@@ -469,7 +485,7 @@ public class ChainSupervisorTests : IDisposable
             mode: "socks5",
             upstream: _ => Task.FromResult(false),
             health: _ => Task.FromResult(true),
-            proxySkipped: true);
+            proxyDisabled: true);
 
         var state = await supervisor.GetStateAsync(CancellationToken.None);
 
@@ -487,7 +503,7 @@ public class ChainSupervisorTests : IDisposable
         var tokens = new List<CancellationToken>();
         var supervisor = Create(
             mode: "socks5",
-            proxySkipped: true,
+            proxyDisabled: true,
             chainStopped: ct =>
             {
                 tokens.Add(ct);
@@ -508,7 +524,7 @@ public class ChainSupervisorTests : IDisposable
             mode: "socks5",
             upstream: _ => Task.FromResult(false),
             healthWaitSeconds: 1,
-            proxySkipped: true);
+            proxyDisabled: true);
 
         var ex = await Assert.ThrowsAsync<ChainException>(() =>
             supervisor.EnsureRunningAsync(null, CancellationToken.None));
@@ -669,7 +685,7 @@ public class ChainSupervisorTests : IDisposable
     public async Task ElevatedRunnerCreatesStateDirForTheResultFile()
     {
         var stateDir = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}", "nested");
-        var config = new ChainConfig { StateDir = stateDir };
+        var config = new ChainTailscaleConfig { StateDir = stateDir };
         var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
         var log = new FileLog(logPath);
         string? writtenTo = null;

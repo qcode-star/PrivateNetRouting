@@ -20,7 +20,8 @@ public interface ISidecarKeeper
 /// local ipn client disconnects and resets WantRunning — so we keep a permanent bus subscriber.
 /// stdout (a continuous netmap-JSON stream) goes to NUL, stderr — to watch.err.log.
 /// </summary>
-public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, FileLog log) : ISidecarKeeper
+public sealed class SidecarKeeper(
+    ChainTailscaleConfig config, IProcessFinder processes, FileLog log) : ISidecarKeeper
 {
     public bool IsRunning =>
         processes.Find("tailscale.exe", config.Socket)
@@ -36,7 +37,7 @@ public sealed class SidecarKeeper(ChainConfig config, IProcessFinder processes, 
 
         Directory.CreateDirectory(config.StateDir);
         var commandLine = string.Join(' ',
-            ProcessOps.Quote(config.TailscaleCliPath),
+            ProcessOps.Quote(config.CliPath),
             ProcessOps.Quote($"--socket={config.Socket}"),
             "debug", "watch-ipn");
         var started = ProcessOps.StartViaCmd(

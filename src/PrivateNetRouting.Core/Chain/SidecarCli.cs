@@ -24,7 +24,7 @@ public interface ISidecarCli
 /// <summary>
 /// Wrapper around `tailscale --socket &lt;pipe&gt; …` (a direct launch).
 /// </summary>
-public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
+public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCli
 {
     [GeneratedRegex(@"""BackendState"":\s*""([^""]+)""")]
     private static partial Regex BackendStateRegex();
@@ -42,7 +42,7 @@ public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
 
-        var info = new ProcessStartInfo(config.TailscaleCliPath)
+        var info = new ProcessStartInfo(config.CliPath)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -57,7 +57,7 @@ public sealed partial class SidecarCli(ChainConfig config) : ISidecarCli
         }
 
         using var process = Process.Start(info)
-            ?? throw new IOException($"failed to start {config.TailscaleCliPath}");
+            ?? throw new IOException($"failed to start {config.CliPath}");
         try
         {
             var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);

@@ -18,18 +18,22 @@ public interface IDohEndpointSource
 /// to IP literals or to names. Any tailscale DNS config is honored: a named resolver is
 /// resolved once at discovery by the system resolver (resolver names are not part of the
 /// AI ban) and the name is kept for the TLS SNI; an IPv6 literal is skipped — the dial is
-/// IPv4-only. Changes on the admins' side are picked up automatically.
+/// IPv4-only. Changes on the admins' side are picked up automatically. The CLI and the pipe
+/// are chain.tailscale.cliPath / .socket — the same ones the chain itself speaks through.
 /// </summary>
-public sealed partial class TailscaleNetmapDohSource(DohDiscoveryConfig config, FileLog? log = null) : IDohEndpointSource
+public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailscale, FileLog? log = null) : IDohEndpointSource
 {
+    /// <summary>Hard limit of one netmap call.</summary>
+    private static readonly TimeSpan NetmapTimeout = TimeSpan.FromSeconds(40);
+
     [GeneratedRegex(@"(https?)://(?<host>[A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(?<port>\d+))?/dns-query")]
     private static partial Regex DohRouteRegex();
 
     public async Task<IReadOnlyList<DohEndpoint>> GetEndpointsAsync(CancellationToken ct)
     {
-        var info = new ProcessStartInfo(config.CliPath)
+        var info = new ProcessStartInfo(tailscale.CliPath)
         {
-            ArgumentList = { "--socket", config.Socket, "debug", "netmap" },
+            ArgumentList = { "--socket", tailscale.Socket, "debug", "netmap" },
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -37,9 +41,9 @@ public sealed partial class TailscaleNetmapDohSource(DohDiscoveryConfig config, 
         };
 
         using var process = Process.Start(info)
-            ?? throw new IOException($"failed to start {config.CliPath}");
+            ?? throw new IOException($"failed to start {tailscale.CliPath}");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(config.NetmapTimeout);
+        cts.CancelAfter(NetmapTimeout);
 
         var stdout = await process.StandardOutput.ReadToEndAsync(cts.Token);
         await process.WaitForExitAsync(cts.Token);

@@ -8,7 +8,8 @@ namespace PrivateNetRouting.Core.Guard;
 /// (SETTINGS_CHANGED/REFRESH — otherwise applications pick up the setting only after a restart).
 /// Requires no administrator rights; the address is the address of the application's forward proxy,
 /// exceptions are local addresses, private ranges (masks like 10.*, WinINET does not understand CIDR),
-/// extra zones from the config and corporate domains (launcher.bypassDomains, both forms).
+/// corporate domains from the top-level bypassDomains (both forms) and *.tld entries from the
+/// top-level directTlds.
 /// </summary>
 public interface ISystemProxyStore
 {
@@ -67,7 +68,7 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
     private static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 }
 
-/// <summary>Builds the ProxyOverride value from base entries, config zones and extra zones.</summary>
+/// <summary>Builds the ProxyOverride value from base entries, the bypass zones and the direct TLDs.</summary>
 public static class SystemProxyBypass
 {
     /// <summary>Base entries are fixed in code (protocol constants, not environment).</summary>
@@ -77,7 +78,7 @@ public static class SystemProxyBypass
         "10.*", "192.168.*", "169.254.*", "100.64.*",
     ];
 
-    public static string Build(IEnumerable<string> bypassDomains, IEnumerable<string> extraParts)
+    public static string Build(IEnumerable<string> bypassDomains, IEnumerable<string> directTlds)
     {
         var parts = new List<string>(BaseParts);
         for (var i = 16; i <= 31; i++)
@@ -85,7 +86,7 @@ public static class SystemProxyBypass
             parts.Add($"172.{i}.*");
         }
 
-        parts.AddRange(extraParts);
+        parts.AddRange(directTlds.Select(TldBypassPart));
         foreach (var domain in bypassDomains)
         {
             if (string.IsNullOrWhiteSpace(domain))
@@ -98,5 +99,12 @@ public static class SystemProxyBypass
         }
 
         return string.Join(";", parts);
+    }
+
+    /// <summary>A direct TLD becomes the bypass form "*.tld" (an already-spelled bypass entry is kept as is).</summary>
+    internal static string TldBypassPart(string tld)
+    {
+        var trimmed = tld.Trim();
+        return trimmed.StartsWith("*.") ? trimmed : "*." + trimmed.TrimStart('*', '.');
     }
 }

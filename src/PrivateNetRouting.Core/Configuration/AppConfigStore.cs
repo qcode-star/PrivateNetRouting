@@ -89,15 +89,21 @@ public static class AppConfigStore
     public static void ReloadInto(AppConfig target, string? path = null)
     {
         var fresh = LoadOrCreate(path);
+        target.BypassDomains = fresh.BypassDomains;
+        target.DirectTlds = fresh.DirectTlds;
+        target.RestartGraceSeconds = fresh.RestartGraceSeconds;
+        target.CloseWaitSeconds = fresh.CloseWaitSeconds;
+        target.KillSettleSeconds = fresh.KillSettleSeconds;
+        target.PowerShellPath = fresh.PowerShellPath;
         target.Ui = fresh.Ui;
         target.Logging = fresh.Logging;
+        target.Claude = fresh.Claude;
+        target.Codex = fresh.Codex;
         target.ForwardProxy = fresh.ForwardProxy;
         target.Chain = fresh.Chain;
-        target.Launcher = fresh.Launcher;
-        target.Codex = fresh.Codex;
-        target.Browser = fresh.Browser;
+        target.Wsl = fresh.Wsl;
         target.Watchdog = fresh.Watchdog;
-        target.Updater = fresh.Updater;
+        target.Browser = fresh.Browser;
         target.Guard = fresh.Guard;
     }
 }
@@ -108,18 +114,18 @@ file static class AppConfigExtensions
     public static void ExpandEnvironmentVariables(this AppConfig config)
     {
         config.Logging.Directory = Environment.ExpandEnvironmentVariables(config.Logging.Directory);
+        config.PowerShellPath = Environment.ExpandEnvironmentVariables(config.PowerShellPath);
         config.ForwardProxy.ActivityMarkerPath =
             Environment.ExpandEnvironmentVariables(config.ForwardProxy.ActivityMarkerPath);
-        config.Chain.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.StateDir);
-        config.Launcher.AliasPath = Environment.ExpandEnvironmentVariables(config.Launcher.AliasPath);
+        config.Chain.Tailscale.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.Tailscale.StateDir);
+        config.Claude.AliasPath = Environment.ExpandEnvironmentVariables(config.Claude.AliasPath);
+        config.Claude.SettingsPath = Environment.ExpandEnvironmentVariables(config.Claude.SettingsPath);
+        config.Claude.Update.CacheDir = Environment.ExpandEnvironmentVariables(config.Claude.Update.CacheDir);
+        config.Codex.SettingsPath = Environment.ExpandEnvironmentVariables(config.Codex.SettingsPath);
+        config.Codex.EnvPath = Environment.ExpandEnvironmentVariables(config.Codex.EnvPath);
         config.Browser.ExecutablePath = Environment.ExpandEnvironmentVariables(config.Browser.ExecutablePath);
         config.Browser.ProfileDir = Environment.ExpandEnvironmentVariables(config.Browser.ProfileDir);
         config.Browser.ShortcutPath = Environment.ExpandEnvironmentVariables(config.Browser.ShortcutPath);
-        config.Updater.CacheDir = Environment.ExpandEnvironmentVariables(config.Updater.CacheDir);
-        config.Updater.PowerShellPath = Environment.ExpandEnvironmentVariables(config.Updater.PowerShellPath);
         config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);
-        config.Guard.ClaudeSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.ClaudeSettingsPath);
-        config.Guard.CodexSettingsPath = Environment.ExpandEnvironmentVariables(config.Guard.CodexSettingsPath);
-        config.Guard.CodexEnvPath = Environment.ExpandEnvironmentVariables(config.Guard.CodexEnvPath);
     }
 }

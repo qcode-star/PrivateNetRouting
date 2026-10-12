@@ -30,12 +30,12 @@ public interface IBanSystemOps
     Task FlushDnsCacheAsync(CancellationToken ct);
 }
 
-public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecutor powershell) : IBanSystemOps
+public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor powershell) : IBanSystemOps
 {
     public async Task<BanLayersState> GetLayersStateAsync(CancellationToken ct)
     {
-        var name = PsLiteral(config.NrptRuleName);
-        var group = PsLiteral(config.FirewallGroup);
+        var name = PsLiteral(config.Guard.NrptRuleName);
+        var group = PsLiteral(config.Guard.FirewallGroup);
         var (code, output) = await powershell.RunScriptAsync($$"""
             $nrpt = @(Get-DnsClientNrptRule | Where-Object { $_.DisplayName -eq {{name}} })
             $fw = @(Get-NetFirewallRule -Group {{group}} -ErrorAction SilentlyContinue)
@@ -67,7 +67,7 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
     /// <summary>One NRPT rule for all subtrees: apex + ".apex"; the rule is removed first — applying is idempotent.</summary>
     internal string BuildNrptScript(bool apply)
     {
-        var name = PsLiteral(config.NrptRuleName);
+        var name = PsLiteral(config.Guard.NrptRuleName);
         var remove = $"Get-DnsClientNrptRule | Where-Object {{ $_.DisplayName -eq {name} }} | Remove-DnsClientNrptRule -Force";
         if (!apply)
         {
@@ -75,7 +75,7 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
         }
 
         var namespaces = string.Join(",", config.BanTrees.SelectMany(t => new[] { t, "." + t }).Select(PsLiteral));
-        var comment = PsLiteral(config.NrptComment);
+        var comment = PsLiteral(config.Guard.NrptComment);
         return $"""
             {remove}
             Add-DnsClientNrptRule -Namespace @({namespaces}) -NameServers @('127.0.0.1') -DisplayName {name} -Comment {comment} | Out-Null
@@ -85,14 +85,14 @@ public sealed class PowerShellBanSystemOps(GuardConfig config, IPowerShellExecut
     /// <summary>Outbound Block rules grouped by address family (IPv4/IPv6); the group is removed first — applying is idempotent.</summary>
     internal string BuildFirewallScript(bool apply)
     {
-        var group = PsLiteral(config.FirewallGroup);
+        var group = PsLiteral(config.Guard.FirewallGroup);
         var remove = $"Get-NetFirewallRule -Group {group} -ErrorAction SilentlyContinue | Remove-NetFirewallRule";
         if (!apply)
         {
             return remove;
         }
 
-        var name = config.NrptRuleName;
+        var name = config.Guard.NrptRuleName;
         var rules = config.FirewallSubnets
             .GroupBy(subnet => subnet.Contains(':') ? "IPv6" : "IPv4")
             .Select(family => $"""

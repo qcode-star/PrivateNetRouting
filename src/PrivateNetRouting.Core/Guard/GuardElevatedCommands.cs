@@ -32,15 +32,15 @@ public static class GuardElevatedCommands
             var log = new FileLog(
                 Path.Combine(config.Logging.Directory, "guard-elevated.log"),
                 config.Logging.EffectiveLevel);
-            var powershell = new PowerShellRunner(config.Updater.PowerShellPath);
+            var powershell = new PowerShellRunner(config.PowerShellPath);
             var detail = command switch
             {
-                BanOn => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config.Guard, powershell), enable: true),
-                BanOff => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config.Guard, powershell), enable: false),
+                BanOn => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config, powershell), enable: true),
+                BanOff => ApplyBanLayers(config, log, new PowerShellBanSystemOps(config, powershell), enable: false),
                 PolicyOn => ApplyPolicy(config, new RegistryEgressPolicyStore(), enable: true),
                 PolicyOff => ApplyPolicy(config, new RegistryEgressPolicyStore(), enable: false),
-                AllOn => ApplyAll(config, log, new PowerShellBanSystemOps(config.Guard, powershell), new RegistryEgressPolicyStore(), enable: true),
-                AllOff => ApplyAll(config, log, new PowerShellBanSystemOps(config.Guard, powershell), new RegistryEgressPolicyStore(), enable: false),
+                AllOn => ApplyAll(config, log, new PowerShellBanSystemOps(config, powershell), new RegistryEgressPolicyStore(), enable: true),
+                AllOff => ApplyAll(config, log, new PowerShellBanSystemOps(config, powershell), new RegistryEgressPolicyStore(), enable: false),
                 _ => $"unknown command: {command}",
             };
             log.Info($"elevated {command}: {detail}");
@@ -62,28 +62,30 @@ public static class GuardElevatedCommands
     }
 
     /// <summary>
-    /// Three layers of the ban: the hosts block is rebuilt from the list,
+    /// Three layers of the ban: the hosts block is rebuilt from the union of the app lists,
     /// the NRPT rule and the firewall group are removed and re-created (idempotent), the DNS cache is
-    /// flushed; after applying, a probe subtree name must not resolve.
+    /// flushed; after applying, every probe name must not resolve.
     /// </summary>
     internal static string ApplyBanLayers(AppConfig config, FileLog log, IBanSystemOps ops, bool enable)
     {
         var guard = config.Guard;
         if (enable)
         {
-            HostsFileBlock.Apply(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, guard.BanHosts);
+            HostsFileBlock.Apply(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, config.BanHosts);
             ops.ApplyNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.ApplyFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.FlushDnsCacheAsync(CancellationToken.None).GetAwaiter().GetResult();
-            var probeBlocked = ProbeBlocked(guard.BanProbeName);
-            if (!probeBlocked)
+            var probes = guard.BanProbes.Count > 0 ? guard.BanProbes : ["www.anthropic.com"];
+            var blocked = probes.ToDictionary(probe => probe, ProbeBlocked);
+            if (blocked.Any(pair => !pair.Value))
             {
-                log.Warn($"elevated ban: probe {guard.BanProbeName} still resolves — subtrees are not closed");
+                var offenders = string.Join(", ", blocked.Where(pair => !pair.Value).Select(pair => pair.Key));
+                log.Warn($"elevated ban: probes still resolve ({offenders}) — subtrees are not closed");
             }
 
-            return $"hosts {guard.BanHosts.Count} names, NRPT rule on {guard.BanTrees.Count * 2} namespaces, "
-                + $"firewall {guard.FirewallSubnets.Count} subnets; probe {guard.BanProbeName} "
-                + (probeBlocked ? "does not resolve" : "STILL RESOLVES (check NRPT)");
+            return $"hosts {config.BanHosts.Count} names, NRPT rule on {config.BanTrees.Count * 2} namespaces, "
+                + $"firewall {config.FirewallSubnets.Count} subnets; probes "
+                + string.Join(", ", blocked.Select(pair => $"{pair.Key} {(pair.Value ? "does not resolve" : "STILL RESOLVES")}"));
         }
         else
         {

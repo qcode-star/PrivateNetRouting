@@ -87,12 +87,12 @@ public sealed class ClaudeUpdater(
 
     public FileLog Log => log;
 
-    public bool IsClaudeRunning() => claudeProcesses.Find(config.Updater.ClaudeProcessName).Count > 0;
+    public bool IsClaudeRunning() => claudeProcesses.Find(config.Claude.ProcessName).Count > 0;
 
     /// <summary>Step "Version check": installed package, URL from the feed/journal (or manual), comparison.</summary>
     public async Task<UpdateCheckResult> CheckAsync(UpdateOptions options, CancellationToken ct)
     {
-        var installed = await appx.GetInstalledAsync(config.Updater.PackageName, ct);
+        var installed = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct);
         if (installed is null)
         {
             return new UpdateCheckResult(null, null, null, UpToDate: false);
@@ -155,8 +155,8 @@ public sealed class ClaudeUpdater(
             throw new IOException($"the URL does not point to an .msix package: {url}");
         }
 
-        Directory.CreateDirectory(config.Updater.CacheDir);
-        var file = Path.Combine(config.Updater.CacheDir, fileName);
+        Directory.CreateDirectory(config.Claude.Update.CacheDir);
+        var file = Path.Combine(config.Claude.Update.CacheDir, fileName);
         var total = await downloader.GetLengthAsync(url, ct);
         if (total <= 0)
         {
@@ -164,7 +164,7 @@ public sealed class ClaudeUpdater(
         }
 
         activityMarker.Touch();
-        var free = _freeSpace(config.Updater.CacheDir);
+        var free = _freeSpace(config.Claude.Update.CacheDir);
         if (free >= 0 && free < total + InstallHeadroomBytes)
         {
             throw new IOException($"not enough disk space: need {ByteSize.Format(total + InstallHeadroomBytes)}, available {ByteSize.Format(free)}");
@@ -183,7 +183,7 @@ public sealed class ClaudeUpdater(
     {
         var identity = MsixPackage.TryReadIdentity(file)
             ?? throw new IOException("no AppxManifest.xml in the package — this is not a standalone MSIX; it cannot be installed manually");
-        var installed = await appx.GetInstalledAsync(config.Updater.PackageName, ct)
+        var installed = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
         if (!string.Equals(identity.Publisher, installed.Publisher, StringComparison.OrdinalIgnoreCase))
         {
@@ -205,7 +205,7 @@ public sealed class ClaudeUpdater(
     public async Task<InstalledPackage> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         await VerifyAsync(file, ct);
-        var before = await appx.GetInstalledAsync(config.Updater.PackageName, ct)
+        var before = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
 
         if (!options.KeepRunning)
@@ -216,7 +216,7 @@ public sealed class ClaudeUpdater(
         progress?.Report(new UpdateProgress(UpdatePhase.Install, 0, 0, "Add-AppxPackage"));
         await appx.AddPackageAsync(file, ct);
 
-        var after = await appx.GetInstalledAsync(config.Updater.PackageName, ct) ?? before;
+        var after = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct) ?? before;
         if (after.Version == before.Version)
         {
             log.Warn("updater: version did not change after install — check the AppX journal");
@@ -283,7 +283,7 @@ public sealed class ClaudeUpdater(
     /// <summary>Closing Claude: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>
     private async Task CloseClaudeAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
-        var processes = claudeProcesses.Find(config.Updater.ClaudeProcessName);
+        var processes = claudeProcesses.Find(config.Claude.ProcessName);
         if (processes.Count == 0)
         {
             log.Info("updater: Claude is not running");
@@ -297,23 +297,23 @@ public sealed class ClaudeUpdater(
             process.CloseMainWindow();
         }
 
-        var waits = Math.Max(1, config.Updater.CloseWaitSeconds);
+        var waits = Math.Max(1, config.CloseWaitSeconds);
         for (var i = 0; i < waits; i++)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
-            if (claudeProcesses.Find(config.Updater.ClaudeProcessName).Count == 0)
+            if (claudeProcesses.Find(config.Claude.ProcessName).Count == 0)
             {
                 return;
             }
         }
 
         log.Warn("updater: Claude did not close on its own — killing the process");
-        foreach (var process in claudeProcesses.Find(config.Updater.ClaudeProcessName))
+        foreach (var process in claudeProcesses.Find(config.Claude.ProcessName))
         {
             process.Kill();
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.Updater.KillSettleSeconds)), ct);
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.KillSettleSeconds)), ct);
     }
 
     private static long GetFreeSpace(string directory)

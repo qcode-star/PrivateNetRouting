@@ -6,9 +6,10 @@ namespace PrivateNetRouting.Core.Watchdog;
 
 /// <summary>
 /// Idle auto-stop supervisor: every checkSeconds
-/// it checks whether Claude is busy; when idle it first shuts down the WSL host (its processes
-/// are not visible as Windows processes and would otherwise linger in the distro until the next
-/// Desktop start), then stops the chain and exits — the next launcher start brings everything back up.
+/// it checks whether Claude is busy; when idle it first stops the app hosts inside the RUNNING
+/// configured WSL distros (their processes are not visible as Windows processes and would
+/// otherwise linger in the distro until the next Desktop start), then stops the chain and exits —
+/// the next launcher start brings everything back up.
 /// The first poll happens one interval after startup; every timer firing is logged at Debug,
 /// at Info — only a change of the busy reason and the auto-stop itself. The chain stop goes through
 /// the existing orchestrator (killing the daemon raises UAC if needed). It is started only by an explicit
@@ -17,7 +18,7 @@ namespace PrivateNetRouting.Core.Watchdog;
 public sealed class WatchdogService(
     WatchdogConfig config,
     IClaudeUsageProbe usage,
-    IWslClaudeHost? wslHost,
+    IWslAppHost? wslHost,
     IChainSupervisor chain,
     FileLog log,
     Func<TimeSpan, CancellationToken, Task>? delay = null)
@@ -50,7 +51,7 @@ public sealed class WatchdogService(
             log.Info("watchdog: idle — stopping");
             if (wslHost is null)
             {
-                log.Info("watchdog: WSL distro is not set, the WSL host is not stopped");
+                log.Info("watchdog: no distros configured (wsl.distros), the WSL step is skipped");
             }
             else
             {

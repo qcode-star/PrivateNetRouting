@@ -14,13 +14,12 @@ public class ProxyRuntimeTests
     {
         var config = new AppConfig
         {
-            Chain = new ChainConfig { Mode = "tailscale", DaemonSocksListen = "127.0.0.1:18083" },
-            ForwardProxy = new ForwardProxyConfig
+            Chain = new ChainConfig
             {
+                Mode = "tailscale",
+                Tailscale = new ChainTailscaleConfig { SocksListen = "127.0.0.1:18083" },
                 // a leftover from socks5-mode experiments: must not leak into the tailscale mode
-                Socks5Upstream = "127.0.0.1:11055",
-                Socks5UpstreamUser = "alice",
-                Socks5UpstreamPassword = "s3cret",
+                Socks5 = new ChainSocks5Config { Upstream = "127.0.0.1:11055", User = "alice", Password = "s3cret" },
             },
         };
 
@@ -37,12 +36,10 @@ public class ProxyRuntimeTests
     {
         var config = new AppConfig
         {
-            Chain = new ChainConfig { Mode = "socks5" },
-            ForwardProxy = new ForwardProxyConfig
+            Chain = new ChainConfig
             {
-                Socks5Upstream = "127.0.0.1:11055",
-                Socks5UpstreamUser = "alice",
-                Socks5UpstreamPassword = "s3cret",
+                Mode = "socks5",
+                Socks5 = new ChainSocks5Config { Upstream = "127.0.0.1:11055", User = "alice", Password = "s3cret" },
             },
         };
 

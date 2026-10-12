@@ -26,7 +26,7 @@ public class WatchdogTests : IDisposable
 
         await watchdog.RunAsync(null, CancellationToken.None);
 
-        Assert.Equal(["wsl.stop", "chain.stop"], events);
+        Assert.Equal(["wsl.stop:pnr-test", "chain.stop"], events);
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class WatchdogTests : IDisposable
 
         await watchdog.RunAsync(null, CancellationToken.None);
 
-        Assert.Equal(["delay", "usage.check", "wsl.stop", "chain.stop"], events);
+        Assert.Equal(["delay", "usage.check", "wsl.stop:pnr-test", "chain.stop"], events);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class WatchdogTests : IDisposable
         await watchdog.RunAsync(null, CancellationToken.None);
 
         Assert.Equal(2, usage.Checks);
-        Assert.Equal(["delay", "usage.check", "delay", "usage.check", "wsl.stop", "chain.stop"], events);
+        Assert.Equal(["delay", "usage.check", "delay", "usage.check", "wsl.stop:pnr-test", "chain.stop"], events);
     }
 
     [Fact]
@@ -76,19 +76,19 @@ public class WatchdogTests : IDisposable
 
         await Assert.ThrowsAsync<ChainException>(() => watchdog.RunAsync(null, CancellationToken.None));
 
-        Assert.Equal(["wsl.stop", "chain.stop"], events); // the WSL host is shut down before the attempt to stop the chain
+        Assert.Equal(["wsl.stop:pnr-test", "chain.stop"], events); // the WSL host is shut down before the attempt to stop the chain
     }
 
     [Fact]
     public async Task DistroNotRunningSkipsBash()
     {
         var wsl = new FakeWsl([]) { ListResponse = "Ubuntu\r\n" };
-        var stopper = new WslClaudeHostStopper("pnr-test", wsl);
+        var stopper = new WslAppHostStopper(["pnr-test"], stopClaude: true, stopCodex: true, wsl);
 
         var result = await stopper.StopAsync(CancellationToken.None);
 
         Assert.Equal(WslHostState.None, result.State);
-        Assert.Contains("distro-not-running", result.Detail);
+        Assert.Contains("no configured distro is running", result.Detail);
         Assert.Single(wsl.Calls); // bash was not started; the distro is not brought up just for the check
     }
 
@@ -96,7 +96,7 @@ public class WatchdogTests : IDisposable
     public async Task DistroListingNulsAreStripped()
     {
         var wsl = new FakeWsl([]) { ListResponse = "pnr\0-test\r\n" }; // UTF-16LE-like junk
-        var stopper = new WslClaudeHostStopper("pnr-test", wsl);
+        var stopper = new WslAppHostStopper(["pnr-test"], stopClaude: true, stopCodex: true, wsl);
 
         await stopper.StopAsync(CancellationToken.None);
 
@@ -118,12 +118,12 @@ public class WatchdogTests : IDisposable
     [InlineData("STOP pid=7 -> ok\nREMAIN=0\nSTATE=stopped", WslHostState.Stopped)]
     [InlineData("wsl: some error", WslHostState.Stuck)]
     public void ParseReadsState(string output, WslHostState expected) =>
-        Assert.Equal(expected, WslClaudeHostStopper.Parse(output).State);
+        Assert.Equal(expected, WslAppHostStopper.Parse(output).State);
 
     [Fact]
     public void ParseKeepsDetailWithoutStateLine()
     {
-        var result = WslClaudeHostStopper.Parse("wsl: error\r\n");
+        var result = WslAppHostStopper.Parse("wsl: error\r\n");
         Assert.Equal(WslHostState.Stuck, result.State);
         Assert.Contains("no STATE", result.Detail);
     }
@@ -133,14 +133,61 @@ public class WatchdogTests : IDisposable
     [Fact]
     public void StopScriptPortsSourceSemantics()
     {
-        Assert.Contains(@"\/\.claude\/remote\/srv\/[^/]+\/server$", WslClaudeHostStopper.StopScript);
-        Assert.Contains(@"\/\.claude\/remote\/ccd-cli\/", WslClaudeHostStopper.StopScript);
-        Assert.Contains("--stop --socket", WslClaudeHostStopper.StopScript);
-        Assert.Contains("kill -TERM", WslClaudeHostStopper.StopScript);
-        Assert.Contains("kill -KILL", WslClaudeHostStopper.StopScript);
-        Assert.Contains("wait_empty 15", WslClaudeHostStopper.StopScript); // wait after RPC
-        Assert.Contains("wait_empty 10", WslClaudeHostStopper.StopScript); // wait after SIGTERM
-        Assert.Contains("STATE=", WslClaudeHostStopper.StopScript);
+        Assert.Contains(@"\/\.claude\/remote\/srv\/[^/]+\/server$", WslAppHostStopper.Script(true, true));
+        Assert.Contains(@"\/\.claude\/remote\/ccd-cli\/", WslAppHostStopper.Script(true, true));
+        Assert.Contains("--stop --socket", WslAppHostStopper.Script(true, true));
+        Assert.Contains("kill -TERM", WslAppHostStopper.Script(true, true));
+        Assert.Contains("kill -KILL", WslAppHostStopper.Script(true, true));
+        Assert.Contains("wait_empty 15", WslAppHostStopper.Script(true, true)); // wait after RPC
+        Assert.Contains("wait_empty 10", WslAppHostStopper.Script(true, true)); // wait after SIGTERM
+        Assert.Contains("STATE=", WslAppHostStopper.Script(true, true));
+    }
+
+    /// <summary>The Codex pass keys on the desktop app's signature — CODEX_HOME in the
+    /// process environment — and never names a bare codex process.</summary>
+    [Fact]
+    public void StopScriptTargetsCodexByCodexHomeEnvOnly()
+    {
+        var script = WslAppHostStopper.Script(true, true);
+        Assert.Contains("grep -q '^CODEX_HOME='", script);
+        Assert.Contains("$p/environ", script);
+        Assert.DoesNotContain("pgrep codex", script);
+        Assert.DoesNotContain("pkill codex", script);
+    }
+
+    /// <summary>The app gates are baked into the script: an app disabled in the config
+    /// leaves its whole pass inert.</summary>
+    [Fact]
+    public void StopScriptGatesTheAppPassesByFlags()
+    {
+        var both = WslAppHostStopper.Script(true, true);
+        Assert.Contains("STOP_CLAUDE=1", both);
+        Assert.Contains("STOP_CODEX=1", both);
+
+        var claudeOnly = WslAppHostStopper.Script(stopClaude: true, stopCodex: false);
+        Assert.Contains("STOP_CLAUDE=1", claudeOnly);
+        Assert.Contains("STOP_CODEX=0", claudeOnly);
+
+        var neither = WslAppHostStopper.Script(false, false);
+        Assert.Contains("STOP_CLAUDE=0", neither);
+        Assert.Contains("STOP_CODEX=0", neither);
+    }
+
+    /// <summary>Every RUNNING configured distro is visited; a distro that is not running
+    /// is not started for the stop. The aggregate state is the worst of the distros.</summary>
+    [Fact]
+    public async Task StopperVisitsEveryRunningConfiguredDistroAndAggregates()
+    {
+        var wsl = new FakeWsl([]) { ListResponse = "Ubuntu\r\npnr-a\r\npnr-b\r\n" };
+        var stopper = new WslAppHostStopper(["pnr-a", "pnr-b", "pnr-c"], stopClaude: true, stopCodex: true, wsl);
+
+        var result = await stopper.StopAsync(CancellationToken.None);
+
+        Assert.Equal(WslHostState.Stopped, result.State);
+        Assert.Equal(3, wsl.Calls.Count); // listing + two bash stops; pnr-c is not running
+        Assert.Contains("[pnr-a]", result.Detail);
+        Assert.Contains("[pnr-b]", result.Detail);
+        Assert.DoesNotContain("[pnr-c]", result.Detail);
     }
 
     [Fact]
@@ -248,7 +295,7 @@ public class WatchdogTests : IDisposable
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
-        IWslClaudeHost? host = wsl is null ? null : new WslClaudeHostStopper("pnr-test", wsl);
+        IWslAppHost? host = wsl is null ? null : new WslAppHostStopper(["pnr-test"], stopClaude: true, stopCodex: true, wsl);
         return new WatchdogService(
             new WatchdogConfig { CheckSeconds = 600 },
             usage,
@@ -314,8 +361,8 @@ public class WatchdogTests : IDisposable
                 return Task.FromResult(ListResponse);
             }
 
-            events.Add("wsl.stop");
-            Assert.Equal("-d pnr-test -- bash -s", string.Join(' ', arguments));
+            events.Add("wsl.stop:" + arguments[1]);
+            Assert.Equal(["-d", "--", "bash", "-s"], [arguments[0], arguments[2], arguments[3], arguments[4]]);
             return Task.FromResult(BashResponse);
         }
     }

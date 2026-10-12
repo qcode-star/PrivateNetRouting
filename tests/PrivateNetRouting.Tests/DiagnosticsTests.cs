@@ -85,8 +85,8 @@ public class DiagnosticsTests : IDisposable
         File.WriteAllText(marker, string.Empty);
 
         var service = MakeService(out var config, out var proxy, out var table, out var finder, out var probe, out var guardCore);
-        var daemonHttp = ParsePort(config.Chain.DaemonHttpListen);
-        var daemonSocks = ParsePort(config.Chain.DaemonSocksListen);
+        var daemonHttp = ParsePort(config.Chain.Tailscale.HttpListen);
+        var daemonSocks = ParsePort(config.Chain.Tailscale.SocksListen);
         var proxyPort = ParsePort(config.ForwardProxy.Listen);
         config.ForwardProxy.ActivityMarkerPath = marker;
         proxy.IsRunning = true;
@@ -101,7 +101,7 @@ public class DiagnosticsTests : IDisposable
             new TcpListenerEntry(IPAddress.Loopback, proxyPort, Environment.ProcessId, "testhost"),
             new TcpListenerEntry(IPAddress.Parse("192.0.2.1"), proxyPort, Environment.ProcessId, "testhost"),
         ];
-        finder.ByName["tailscale.exe"] = [new FoundProcess(101, $"tailscale --socket={config.Chain.Socket} debug watch-ipn")];
+        finder.ByName["tailscale.exe"] = [new FoundProcess(101, $"tailscale --socket={config.Chain.Tailscale.Socket} debug watch-ipn")];
         finder.ByName["pnr.exe"] = [new FoundProcess(202, "pnr watchdog")];
         probe.Result = HealthProbeResult.OkIn(320, "HTTP/1.1 200 Connection Established");
         guardCore.Status = (
@@ -163,8 +163,8 @@ public class DiagnosticsTests : IDisposable
     public async Task HealthIsSkippedWhenProxyDoesNotListen()
     {
         var service = MakeService(out var config, out _, out var table, out _, out var probe, out _);
-        table.Listeners[ParsePort(config.Chain.DaemonHttpListen)] =
-            [new TcpListenerEntry(IPAddress.Loopback, ParsePort(config.Chain.DaemonHttpListen), 100, "tailscaled")];
+        table.Listeners[ParsePort(config.Chain.Tailscale.HttpListen)] =
+            [new TcpListenerEntry(IPAddress.Loopback, ParsePort(config.Chain.Tailscale.HttpListen), 100, "tailscaled")];
         probe.Result = HealthProbeResult.FailIn(0, "must not be called");
 
         var summary = await service.GetSummaryAsync(CancellationToken.None);
@@ -179,7 +179,7 @@ public class DiagnosticsTests : IDisposable
     {
         var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _,
             mode: "socks5", upstreamReachable: true);
-        config.ForwardProxy.Socks5UpstreamUser = "alice";
+        config.Chain.Socks5.User = "alice";
         var proxyPort = ParsePort(config.ForwardProxy.Listen);
         table.Listeners[proxyPort] = [new TcpListenerEntry(IPAddress.Loopback, proxyPort, Environment.ProcessId, "testhost")];
         proxy.IsRunning = true;
@@ -191,7 +191,7 @@ public class DiagnosticsTests : IDisposable
         Assert.Equal(["chain", "proxy", "health", "guards", "watchdog", "logs"], summary.Sections.Select(s => s.Key));
 
         var egress = Section(summary, "chain").Single();
-        Assert.Equal($"egress (alice@{config.ForwardProxy.Socks5Upstream})", egress.Name);
+        Assert.Equal($"egress (alice@{config.Chain.Socks5.Upstream})", egress.Name);
         Assert.Equal("reachable", egress.Value);
         Assert.Equal(DiagMark.Good, egress.Mark);
     }
@@ -208,7 +208,7 @@ public class DiagnosticsTests : IDisposable
         var summary = await service.GetSummaryAsync(CancellationToken.None);
 
         var egress = Section(summary, "chain").Single();
-        Assert.Equal($"egress ({config.ForwardProxy.Socks5Upstream})", egress.Name);
+        Assert.Equal($"egress ({config.Chain.Socks5.Upstream})", egress.Name);
         Assert.Equal("no route", egress.Value);
         Assert.Equal(DiagMark.Bad, egress.Mark);
     }
@@ -218,7 +218,7 @@ public class DiagnosticsTests : IDisposable
     {
         var service = MakeService(out var config, out var proxy, out var table, out _, out _, out _, mode: "socks5");
         proxy.IsRunning = false;
-        var daemonHttp = ParsePort(config.Chain.DaemonHttpListen);
+        var daemonHttp = ParsePort(config.Chain.Tailscale.HttpListen);
         table.Listeners[daemonHttp] = [new TcpListenerEntry(IPAddress.Loopback, daemonHttp, 100, "tailscaled")];
 
         var summary = await service.GetSummaryAsync(CancellationToken.None);
@@ -394,9 +394,9 @@ public class DiagnosticsTests : IDisposable
         }
 
         config.ForwardProxy.Listen = "127.0.0.1:18082";
-        config.ForwardProxy.SkipInSocks5Mode = skipProxy;
-        config.Chain.DaemonHttpListen = "127.0.0.1:18081";
-        config.Chain.DaemonSocksListen = "127.0.0.1:18083";
+        config.ForwardProxy.Enabled = !skipProxy;
+        config.Chain.Tailscale.HttpListen = "127.0.0.1:18081";
+        config.Chain.Tailscale.SocksListen = "127.0.0.1:18083";
         config.ForwardProxy.ActivityMarkerPath = Path.Combine(_tempDir, "absent-marker");
         config.Logging.Directory = _tempDir;
         proxy = new FakeProxyStats();

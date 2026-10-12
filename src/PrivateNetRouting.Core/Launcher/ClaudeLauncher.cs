@@ -104,7 +104,7 @@ public sealed class ClaudeLauncher(
     /// <summary>Proxy URL for --proxy-server and for comparison with the managed policy.</summary>
     public string ProxyUrl => AppProxyEndpoint.Url(config);
 
-    public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
+    public string BuildBypassList() => ClaudeBypassList.Build(config.BypassDomains);
 
     public async Task<LaunchResult> LaunchAsync(LauncherOptions options, IProgress<ChainStep>? progress, CancellationToken ct)
     {
@@ -136,7 +136,7 @@ public sealed class ClaudeLauncher(
             // The owner has already agreed to the restart (GUI dialog, CLI question): a copy
             // that carries our proxy is left alone — a new start only activates its window.
             restarted = (await _running
-                    .CloseAsync("Claude", TimeSpan.FromSeconds(config.Launcher.RestartGraceSeconds), ct)
+                    .CloseAsync("Claude", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
                     .ConfigureAwait(false))
                 .AnythingClosed;
         }
@@ -145,7 +145,7 @@ public sealed class ClaudeLauncher(
             _running.Report(running, "Claude");
         }
 
-        var info = new ProcessStartInfo(config.Launcher.AliasPath)
+        var info = new ProcessStartInfo(config.Claude.AliasPath)
         {
             UseShellExecute = true,
         };
@@ -157,7 +157,7 @@ public sealed class ClaudeLauncher(
         }
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
         {
-            throw new IOException($"failed to start Claude ({config.Launcher.AliasPath}): {ex.Message}", ex);
+            throw new IOException($"failed to start Claude ({config.Claude.AliasPath}): {ex.Message}", ex);
         }
 
         log.Info("launcher: Claude started with --proxy-server/--proxy-bypass-list");

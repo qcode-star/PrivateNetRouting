@@ -28,11 +28,16 @@ public class BrowserProfileTests : IDisposable
 
     private static AppConfig NewConfig() => new()
     {
-        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081", Socks5Upstream = "127.0.0.1:18099" },
-        Chain = new ChainConfig { DaemonSocksListen = "127.0.0.1:18083" },
-        Launcher = new LauncherConfig { BypassDomains = ["corp.example.com"] },
+        ForwardProxy = new ForwardProxyConfig { Listen = "127.0.0.1:18081" },
+        Chain = new ChainConfig
+        {
+            Tailscale = new ChainTailscaleConfig { SocksListen = "127.0.0.1:18083" },
+            Socks5 = new ChainSocks5Config { Upstream = "127.0.0.1:18099" },
+        },
+        BypassDomains = ["corp.example.com"],
+        DirectTlds = ["ru", "by"],
         // the chain egress: the forward-proxy one has its own tests below
-        Browser = new BrowserConfig { Egress = "chain", DirectTlds = ["ru", "by"] },
+        Browser = new BrowserConfig { Egress = "chain" },
     };
 
     private BrowserProfileService CreateService(AppConfig config, Func<string, bool>? fileExists = null) =>
