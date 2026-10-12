@@ -7,13 +7,14 @@ namespace PrivateNetRouting.Core.Guard;
 /// <summary>Expected env values for settings.json (Windows and WSL are built the same way, except the proxy address).</summary>
 public static class ClaudeEnvValues
 {
-    public static string WindowsProxyUrl(ForwardProxyConfig fp) => "http://" + fp.Listen;
+    /// <summary>The proxy URL the Windows clients are pointed at (the applications proxy endpoint).</summary>
+    public static string WindowsProxyUrl(AppConfig config) => AppProxyEndpoint.Url(config);
 
-    /// <summary>Proxy address for WSL: IP of the Windows side of WSL NAT (vEthernet (WSL...)) — not 127.0.0.1.</summary>
-    public static string? WslProxyUrl(System.Net.IPAddress? gateway, ForwardProxyConfig fp) =>
-        gateway is null ? null : $"http://{gateway}:{Port(fp)}";
+    /// <summary>Proxy address for WSL: IP of the Windows side of WSL NAT (vEthernet (WSL...)) — not 127.0.0.1; the port is the applications proxy endpoint's.</summary>
+    public static string? WslProxyUrl(System.Net.IPAddress? gateway, AppConfig config) =>
+        gateway is null ? null : $"http://{gateway}:{Port(config)}";
 
-    public static int Port(ForwardProxyConfig fp) => Net.Socks.Socks5Client.ParseEndPoint(fp.Listen).Port;
+    public static int Port(AppConfig config) => AppProxyEndpoint.Port(config);
 
     /// <summary>
     /// NO_PROXY (curl style): base entries + each zone in two forms — "zone" and ".zone"
@@ -55,7 +56,7 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
 {
     public ClaudeSettingsStatus Read()
     {
-        var expectedProxy = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
+        var expectedProxy = ClaudeEnvValues.WindowsProxyUrl(config);
         var expectedNoProxy = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
         if (!File.Exists(config.Guard.ClaudeSettingsPath))
         {
@@ -90,7 +91,7 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         var path = config.Guard.ClaudeSettingsPath;
         var root = ReadRootOrEmpty(path);
         var env = root["env"] as JsonObject ?? [];
-        var proxy = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
+        var proxy = ClaudeEnvValues.WindowsProxyUrl(config);
         var noProxy = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains);
         string? backup = null;
         var written = !(env["HTTPS_PROXY"]?.GetValue<string>() == proxy

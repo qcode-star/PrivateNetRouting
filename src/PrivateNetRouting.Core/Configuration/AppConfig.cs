@@ -565,6 +565,24 @@ public sealed class ForwardProxyConfig
     /// <summary>Main listener "host:port".</summary>
     public string Listen { get; set; } = "127.0.0.1:18081";
 
+    /// <summary>
+    /// socks5 mode only: run no local proxy at all — every client is pointed at
+    /// <see cref="ExternalAppsEndpoint"/> instead, the mixed HTTP+SOCKS inbound of the external
+    /// upstream (e.g. sing-box), which does the HTTP CONNECT-to-SOCKS translation itself. The
+    /// tailscale mode ignores the flag: there the local proxy is load-bearing (DoH resolution,
+    /// dialing by IP through the sidecar). The chain restart applies a mode change; the rest of
+    /// this section applies after an application restart, like every config section.
+    /// </summary>
+    public bool SkipInSocks5Mode { get; set; }
+
+    /// <summary>
+    /// The HTTP CONNECT endpoint ("host:port") written for the applications when the local proxy
+    /// is skipped. Must be reachable from the WSL distros when the WSL guard sync is on — the
+    /// upstream has to listen on the WSL-facing address then (loopback-only is unreachable from
+    /// a distro, and the guard status warns about it).
+    /// </summary>
+    public string ExternalAppsEndpoint { get; set; } = "127.0.0.1:2080";
+
     /// <summary>One-time bind on the WSL NAT gateway (the adapter address is looked up at start with retries).</summary>
     public bool BindWslGateway { get; set; } = true;
 

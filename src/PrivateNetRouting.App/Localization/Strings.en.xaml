@@ -14,6 +14,7 @@
     <s:String x:Key="Main.EgressListeners">Egress upstream</s:String>
     <s:String x:Key="Main.Listeners.Partial">partial</s:String>
     <s:String x:Key="Main.Metric.Connections">connections:</s:String>
+    <s:String x:Key="Main.Proxy.SkippedFmt">skipped — the applications point at {0}</s:String>
     <s:String x:Key="Main.Metric.Active">active</s:String>
     <s:String x:Key="Main.Metric.Total">total</s:String>
     <s:String x:Key="Main.Metric.Errors">errors</s:String>
@@ -210,6 +211,7 @@
     <s:String x:Key="Main.Guard.Wsl.DistroPartialFmt">{0}: partial, codex WSL env {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvOnFmt">on ({0})</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvMissing">file not found</s:String>
+    <s:String x:Key="Main.Guard.Wsl.Loopback">the applications proxy endpoint is loopback-only — unreachable from the distros</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">codex env written</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">codex env up to date</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>

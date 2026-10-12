@@ -135,6 +135,26 @@ public class BrowserLauncherTests : IDisposable
         Assert.True(Create(config).ChainOwnsEgress);
     }
 
+    /// <summary>
+    /// The skipped socks5 shape: the "forward-proxy" egress resolves to the external mixed
+    /// inbound — still HTTP CONNECT, but not ours to raise (the dead-egress question is then
+    /// "start anyway", like over the external upstream).
+    /// </summary>
+    [Fact]
+    public void SkippedShapePointsTheForwardProxyEgressAtTheExternalEndpoint()
+    {
+        var config = ConfiguredConfig();
+        config.Browser.Egress = "forward-proxy";
+        config.Chain.Mode = "socks5";
+        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+
+        Assert.Equal("192.0.2.10:7080", BrowserEgress.Resolve(config));
+        Assert.Equal(BrowserEgress.HttpScheme, BrowserEgress.Scheme(config)); // the mixed inbound speaks CONNECT
+        Assert.Equal("http://192.0.2.10:7080", BrowserEgress.ProxyUrl(config));
+        Assert.False(Create(config).ChainOwnsEgress);
+    }
+
     [Fact]
     public async Task EgressProbeSeesALiveListenerAndARefusedPort()
     {

@@ -105,6 +105,14 @@ internal static class Program
             return 0;
         }
 
+        if (AppProxyEndpoint.IsSkipped(config))
+        {
+            Console.WriteLine(
+                "the local forward proxy is skipped in the socks5 mode (forwardProxy.skipInSocks5Mode) — " +
+                $"the applications point at {config.ForwardProxy.ExternalAppsEndpoint}");
+            return 0;
+        }
+
         if (detached)
         {
             config.ForwardProxy.Detached = true; // the flag overrides the config — for this run only
@@ -128,7 +136,7 @@ internal static class Program
             stop.Cancel();
         };
 
-        await consoleRuntime.ProxyService.StartAsync(stop.Token);
+        await consoleRuntime.ProxyService!.StartAsync(stop.Token);
         Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyService.ListenerEndpoints)}");
         Console.WriteLine($"log: {consoleRuntime.Log.FilePath}");
         Console.WriteLine("Ctrl+C to stop");
@@ -148,6 +156,7 @@ internal static class Program
         {
             case "status":
                 var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
+                var skipProxy = AppProxyEndpoint.IsSkipped(config);
                 if (config.Chain.EffectiveMode == ChainMode.Socks5)
                 {
                     var upstream = string.IsNullOrEmpty(config.ForwardProxy.Socks5UpstreamUser)
@@ -162,7 +171,9 @@ internal static class Program
                     Console.WriteLine($"node:      BackendState={state.BackendState ?? "no response"}");
                 }
 
-                Console.WriteLine($"proxy:     {(state.ProxyRunning ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
+                Console.WriteLine(skipProxy
+                    ? $"proxy:     skipped (the applications point at {config.ForwardProxy.ExternalAppsEndpoint}), health {(state.ProxyHealthy ? "alive" : "failed")}"
+                    : $"proxy:     {(state.ProxyRunning == true ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
                 Console.WriteLine(state.IsFullyUp ? "chain: fully up" : state.IsStopped ? "chain: stopped" : "chain: partial");
                 return 0;
 
@@ -187,7 +198,7 @@ internal static class Program
     {
         var config = AppConfigStore.LoadOrCreate();
         var fp = config.ForwardProxy;
-        var endpoint = Socks5Client.ParseEndPoint(fp.Listen);
+        var endpoint = AppProxyEndpoint.EndPoint(config);
         Console.WriteLine($"CONNECT-roundtrip {endpoint} -> {fp.HealthCheckHost}:{fp.HealthCheckPort}...");
         await using var runtime = ProxyRuntime.FromConfig(config);
         var alive = await runtime.CheckHealthAsync(TimeSpan.FromSeconds(20));
@@ -1047,9 +1058,11 @@ internal static class Program
             pnr chain status     chain state; tailscale mode: daemon/keeper/node/proxy/health,
                                  socks5 mode: upstream/proxy/health (chain.mode)
             pnr chain up         bring the chain up (tailscale: daemon -> keeper -> node -> proxy;
-                                 socks5: egress check -> proxy; UAC only in the tailscale mode)
+                                 socks5: egress check -> proxy, or straight to the health check
+                                 when forwardProxy.skipInSocks5Mode; UAC only in the tailscale mode)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC; in the
-                                 socks5 mode only the proxy stops)
+                                 socks5 mode only the proxy stops, in the skipped shape nothing
+                                 of ours is running)
             pnr check            check the chain with a CONNECT-roundtrip
             pnr status           read-only state summary:
                                  chain processes and port owners (pid), WSL bind, proxy

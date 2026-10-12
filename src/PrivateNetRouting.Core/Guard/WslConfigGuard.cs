@@ -46,13 +46,14 @@ public sealed record WslDistroStatus(
     bool ProxyEnvPresent = false,
     int? ProxyEnvPort = null);
 
-/// <summary>Status of the WSL layer: off (Reason explains) or an aggregate over distros.</summary>
+/// <summary>Status of the WSL layer: off (Reason explains) or an aggregate over distros. Warning — a read-only note about the environment (e.g. a loopback-only applications proxy endpoint the distros cannot reach).</summary>
 public sealed record WslConfigStatus(
     GuardState State,
     IReadOnlyList<WslDistroStatus> Distros,
     int ExpectedPort,
     string? ExpectedProxy,
-    string Reason)
+    string Reason,
+    string? Warning = null)
 {
     public static WslConfigStatus LayerOff(string reason) => new(GuardState.Off, [], 0, null, reason);
 }
@@ -120,8 +121,8 @@ public sealed class WslConfigGuard(
             return WslConfigStatus.LayerOff(reason);
         }
 
-        var expectedPort = ClaudeEnvValues.Port(config.ForwardProxy);
-        var expectedProxy = ClaudeEnvValues.WslProxyUrl(_gateway(), config.ForwardProxy);
+        var expectedPort = ClaudeEnvValues.Port(config);
+        var expectedProxy = ClaudeEnvValues.WslProxyUrl(_gateway(), config);
         var running = await ListDistrosAsync("--running", ct);
         var installed = await ListDistrosAsync("--quiet", ct);
 
@@ -131,7 +132,28 @@ public sealed class WslConfigGuard(
             distros.Add(await ReadDistroAsync(distro, running, installed, expectedPort, expectedProxy, ct));
         }
 
-        return new WslConfigStatus(Aggregate(distros), distros, expectedPort, expectedProxy, "");
+        return new WslConfigStatus(Aggregate(distros), distros, expectedPort, expectedProxy, "", ReachabilityWarning(config));
+    }
+
+    /// <summary>
+    /// Read-only note for the status (no firewall or listen changes on our own — rule #6): with
+    /// the local proxy skipped the applications endpoint is the upstream's inbound, and a
+    /// loopback-only one is unreachable from the distros — the synced proxy addresses would point
+    /// at nothing. The upstream has to listen on the WSL-facing address (and Windows firewall
+    /// must allow it); the exact listen setup is the owner's side.
+    /// </summary>
+    internal static string? ReachabilityWarning(AppConfig config)
+    {
+        if (!AppProxyEndpoint.IsSkipped(config))
+        {
+            return null;
+        }
+
+        var endpoint = AppProxyEndpoint.EndPoint(config);
+        return !System.Net.IPAddress.IsLoopback(endpoint.Address)
+            ? null
+            : $"the applications proxy endpoint {endpoint} is loopback-only — unreachable from the distros; " +
+              "the upstream must listen on the WSL-facing address (and Windows firewall must allow it)";
     }
 
     public async Task<WslSyncResult> SyncAsync(CancellationToken ct)
@@ -292,7 +314,7 @@ public sealed class WslConfigGuard(
 
     private async Task<WslDistroSyncResult> SyncDistroAsync(WslDistroConfig distro, System.Net.IPAddress? gateway, CancellationToken ct)
     {
-        var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config.ForwardProxy)
+        var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config)
             ?? throw new IOException($"WSL NAT gateway (vEthernet) not found for '{distro.Name}' — is WSL up?");
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
@@ -355,7 +377,7 @@ public sealed class WslConfigGuard(
         RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
         // startup script: refreshes the proxy address on every distro start
-        var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config.ForwardProxy));
+        var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config));
         var rootScript = $$"""
             {{PnrBakFn}}
             SCRIPT="{{scriptPath}}"
@@ -387,7 +409,7 @@ public sealed class WslConfigGuard(
         if (distro.ProxyEnv && !string.IsNullOrWhiteSpace(envPath))
         {
             var envContent = BuildCodexProxyEnvScript(
-                ClaudeEnvValues.Port(config.ForwardProxy),
+                ClaudeEnvValues.Port(config),
                 ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains));
             var envScript = $$"""
                 {{PnrBakFn}}

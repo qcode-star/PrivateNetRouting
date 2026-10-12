@@ -14,6 +14,7 @@
     <s:String x:Key="Main.EgressListeners">Выход (upstream)</s:String>
     <s:String x:Key="Main.Listeners.Partial">частично</s:String>
     <s:String x:Key="Main.Metric.Connections">соединения:</s:String>
+    <s:String x:Key="Main.Proxy.SkippedFmt">не запущен — приложения указаны на {0}</s:String>
     <s:String x:Key="Main.Metric.Active">активных</s:String>
     <s:String x:Key="Main.Metric.Total">всего</s:String>
     <s:String x:Key="Main.Metric.Errors">ошибок</s:String>
@@ -210,6 +211,7 @@
     <s:String x:Key="Main.Guard.Wsl.DistroPartialFmt">{0}: частично, WSL-окружение codex {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvOnFmt">включено ({0})</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvMissing">файл не найден</s:String>
+    <s:String x:Key="Main.Guard.Wsl.Loopback">адрес прокси приложений — только loopback, дистрибутивы его не видят</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">окружение codex записано</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">окружение codex актуально</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">Синхронизация WSL пропущена: {0}</s:String>

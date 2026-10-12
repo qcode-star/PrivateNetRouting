@@ -19,19 +19,21 @@ public sealed record ChainStep(string Component, ChainStepStatus Status, string 
 /// <summary>
 /// Snapshot of all chain links (read-only). In the socks5 mode the daemon/keeper/node fields stay
 /// neutral and UpstreamReachable carries the egress state; null — the tailscale mode, where the
-/// link trio speaks through those fields.
+/// link trio speaks through those fields. ProxyRunning is null when there is no local proxy in
+/// this shape at all (socks5 + forwardProxy.skipInSocks5Mode): the applications point at the
+/// external endpoint and "is our proxy running" is not a meaningful question.
 /// </summary>
 public sealed record ChainState(
     bool DaemonHttpListening,
     bool DaemonProcessAlive,
     bool KeeperRunning,
     string? BackendState,
-    bool ProxyRunning,
+    bool? ProxyRunning,
     bool ProxyHealthy,
     bool? UpstreamReachable = null)
 {
     public bool IsFullyUp =>
-        ProxyRunning
+        ProxyRunning != false
         && ProxyHealthy
         && (UpstreamReachable.HasValue
             ? UpstreamReachable.Value
@@ -39,7 +41,7 @@ public sealed record ChainState(
 
     /// <summary>Nothing is up at all — the chain's normal resting state, not a partial one.</summary>
     public bool IsStopped =>
-        !ProxyRunning
+        ProxyRunning != true
         && !DaemonProcessAlive
         && !DaemonHttpListening
         && !KeeperRunning
@@ -76,9 +78,11 @@ public interface IChainSupervisor
 /// Chain orchestrator: idempotent bring-up and full shutdown. The mode picks the first stages:
 /// tailscale — daemon → keeper → node (liveness: daemon HTTP listener, watch-ipn process,
 /// BackendState=Running), socks5 — a single check of the provided external upstream. Both
-/// continue proxy → health (proxy listener, live CONNECT-roundtrip). A successful bring-up ends
-/// with the chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart);
-/// a completed stop ends with the chainStopped hook — the idle stopper is taken down through it
+/// continue proxy → health (proxy listener, live CONNECT-roundtrip) — except the socks5 shape
+/// with the local proxy skipped (forwardProxy.skipInSocks5Mode), where there is no proxy link
+/// and health probes the external endpoint straight away. A successful bring-up ends with the
+/// chainRaised hook — the idle stopper re-arms itself through it (watchdog.autoStart); a
+/// completed stop ends with the chainStopped hook — the idle stopper is taken down through it
 /// (a stopped chain has nothing left to stop).
 /// </summary>
 public sealed class ChainSupervisor(
@@ -91,9 +95,13 @@ public sealed class ChainSupervisor(
     Func<CancellationToken, Task<bool>> healthCheck,
     Action? chainRaised = null,
     Func<CancellationToken, Task>? chainStopped = null,
-    Func<CancellationToken, Task<bool>>? upstreamCheck = null) : IChainSupervisor
+    Func<CancellationToken, Task<bool>>? upstreamCheck = null,
+    bool proxySkipped = false) : IChainSupervisor
 {
     private readonly bool _socks5 = config.EffectiveMode == ChainMode.Socks5;
+
+    /// <summary>No local proxy in this shape: bring-up stops after the egress check, health probes the external endpoint.</summary>
+    private readonly bool _skipProxy = proxySkipped && config.EffectiveMode == ChainMode.Socks5;
 
     // the socks5 mode needs the check; without it everything honestly reports "not reachable"
     private readonly Func<CancellationToken, Task<bool>> _upstreamCheck =
@@ -103,6 +111,20 @@ public sealed class ChainSupervisor(
     {
         if (_socks5)
         {
+            if (_skipProxy)
+            {
+                var reachable = await _upstreamCheck(ct);
+                var healthy = reachable && await healthCheck(ct);
+                return new ChainState(
+                    DaemonHttpListening: false,
+                    DaemonProcessAlive: false,
+                    KeeperRunning: false,
+                    BackendState: null,
+                    ProxyRunning: null,
+                    ProxyHealthy: healthy,
+                    UpstreamReachable: reachable);
+            }
+
             var socksProxyRunning = proxy.IsRunning;
             var socksProxyHealthy = socksProxyRunning && await healthCheck(ct);
             return new ChainState(
@@ -206,23 +228,27 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // forward proxy
-        if (proxy.IsRunning)
+        // forward proxy — unless the skipped socks5 shape: the applications point at the external
+        // endpoint and there is no local listener to start (the rail has no Proxy stage either)
+        if (!_skipProxy)
         {
-            Report(progress, "Proxy", ChainStepStatus.Skipped, "already running");
-        }
-        else
-        {
-            Report(progress, "Proxy", ChainStepStatus.Active, "starting listener");
-            try
+            if (proxy.IsRunning)
             {
-                await proxy.StartAsync(ct);
-                Report(progress, "Proxy", ChainStepStatus.Done, "listening");
+                Report(progress, "Proxy", ChainStepStatus.Skipped, "already running");
             }
-            catch (Exception ex) when (ex is not ChainException and not OperationCanceledException)
+            else
             {
-                Report(progress, "Proxy", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("proxy", ex);
+                Report(progress, "Proxy", ChainStepStatus.Active, "starting listener");
+                try
+                {
+                    await proxy.StartAsync(ct);
+                    Report(progress, "Proxy", ChainStepStatus.Done, "listening");
+                }
+                catch (Exception ex) when (ex is not ChainException and not OperationCanceledException)
+                {
+                    Report(progress, "Proxy", ChainStepStatus.Failed, ex.Message);
+                    throw new ChainException("proxy", ex);
+                }
             }
         }
 
@@ -280,9 +306,13 @@ public sealed class ChainSupervisor(
 
     public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
-        Report(progress, "Proxy", ChainStepStatus.Active, "stopping");
-        await proxy.StopAsync();
-        Report(progress, "Proxy", ChainStepStatus.Done, "stopped");
+        // the skipped socks5 shape has no local proxy to stop; the external upstream is not ours
+        if (!_skipProxy)
+        {
+            Report(progress, "Proxy", ChainStepStatus.Active, "stopping");
+            await proxy.StopAsync();
+            Report(progress, "Proxy", ChainStepStatus.Done, "stopped");
+        }
 
         // socks5 egress: the external upstream is not ours — nothing to bring down past the proxy
         if (!_socks5)

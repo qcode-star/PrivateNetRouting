@@ -93,7 +93,7 @@ public sealed class ClaudeLauncher(
         processFinder,
         ProcessNamePart,
         commandLineMarker: null,
-        "http://" + config.ForwardProxy.Listen,
+        AppProxyEndpoint.Url(config),
         appCloser ?? new WindowsRunningAppCloser(),
         log,
         "launcher");
@@ -102,7 +102,7 @@ public sealed class ClaudeLauncher(
     public FileLog Log => log;
 
     /// <summary>Proxy URL for --proxy-server and for comparison with the managed policy.</summary>
-    public string ProxyUrl => "http://" + config.ForwardProxy.Listen;
+    public string ProxyUrl => AppProxyEndpoint.Url(config);
 
     public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
 
@@ -112,7 +112,7 @@ public sealed class ClaudeLauncher(
         var chainRaised = false;
         if (await healthCheck(ct))
         {
-            log.Info($"launcher: proxy {config.ForwardProxy.Listen} responds");
+            log.Info($"launcher: proxy {AppProxyEndpoint.Address(config)} responds");
         }
         else
         {

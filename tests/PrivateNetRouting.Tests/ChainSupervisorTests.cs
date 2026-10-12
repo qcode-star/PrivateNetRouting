@@ -22,7 +22,8 @@ public class ChainSupervisorTests : IDisposable
         int healthWaitSeconds = 5,
         string? mode = null,
         Func<CancellationToken, Task>? chainStopped = null,
-        Func<CancellationToken, Task<bool>>? upstream = null)
+        Func<CancellationToken, Task<bool>>? upstream = null,
+        bool proxySkipped = false)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
@@ -36,7 +37,8 @@ public class ChainSupervisorTests : IDisposable
             health ?? (_ => Task.FromResult(true)),
             chainRaised,
             chainStopped,
-            upstream);
+            upstream,
+            proxySkipped);
     }
 
     [Fact]
@@ -418,10 +420,101 @@ public class ChainSupervisorTests : IDisposable
         var state = await supervisor.GetStateAsync(CancellationToken.None);
 
         Assert.True(state.UpstreamReachable);
-        Assert.True(state.ProxyRunning);
+        Assert.True(state.ProxyRunning == true);
         Assert.True(state.ProxyHealthy);
         Assert.True(state.IsFullyUp);
         Assert.Empty(_calls); // the tailscale links were not consulted for the state either
+    }
+
+    /// <summary>
+    /// The skipped socks5 shape (forwardProxy.skipInSocks5Mode): the bring-up is the egress check
+    /// and health against the external endpoint — the proxy link does not exist at all.
+    /// </summary>
+    [Fact]
+    public async Task Socks5SkippedBringUpRunsEgressThenHealthWithoutTheProxy()
+    {
+        var supervisor = Create(
+            mode: "socks5",
+            upstream: _ => Task.FromResult(true),
+            health: _ => Task.FromResult(true),
+            proxySkipped: true);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Empty(_calls); // no proxy start, no daemon/keeper/cli touches
+    }
+
+    [Fact]
+    public async Task Socks5SkippedStateReportsNotApplicableProxy()
+    {
+        var supervisor = Create(
+            mode: "socks5",
+            upstream: _ => Task.FromResult(true),
+            health: _ => Task.FromResult(true),
+            proxySkipped: true);
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.Null(state.ProxyRunning); // "not applicable", not false — there is no local proxy here
+        Assert.True(state.ProxyHealthy);
+        Assert.True(state.UpstreamReachable);
+        Assert.True(state.IsFullyUp);
+        Assert.False(state.IsStopped);
+    }
+
+    [Fact]
+    public async Task Socks5SkippedHealthFailsWithoutTheEgress()
+    {
+        var supervisor = Create(
+            mode: "socks5",
+            upstream: _ => Task.FromResult(false),
+            health: _ => Task.FromResult(true),
+            proxySkipped: true);
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.Null(state.ProxyRunning);
+        Assert.False(state.ProxyHealthy); // health never runs past a dead egress
+        Assert.False(state.UpstreamReachable);
+        Assert.False(state.IsFullyUp);
+        Assert.True(state.IsStopped); // nothing of ours is up — the normal resting state
+    }
+
+    /// <summary>The skipped shape stop: nothing of ours is running — no steps, and the idle stopper still goes down.</summary>
+    [Fact]
+    public async Task Socks5SkippedStopTouchesNothingAndFiresTheHook()
+    {
+        var tokens = new List<CancellationToken>();
+        var supervisor = Create(
+            mode: "socks5",
+            proxySkipped: true,
+            chainStopped: ct =>
+            {
+                tokens.Add(ct);
+                return Task.CompletedTask;
+            });
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Empty(_calls);
+        Assert.Equal([CancellationToken.None], tokens);
+    }
+
+    /// <summary>The skipped shape draw rail has no Proxy component — a failing egress reports Egress, nothing else.</summary>
+    [Fact]
+    public async Task Socks5SkippedEgressFailureKeepsEverythingDown()
+    {
+        var supervisor = Create(
+            mode: "socks5",
+            upstream: _ => Task.FromResult(false),
+            healthWaitSeconds: 1,
+            proxySkipped: true);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        Assert.Contains("egress", ex.Message);
+        Assert.Empty(_calls);
     }
 
     [Fact]

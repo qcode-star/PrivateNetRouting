@@ -20,9 +20,9 @@ public static class CodexEnvFile
     /// <summary>The values the Windows side writes: the forward proxy address and the bypass list.</summary>
     public static IReadOnlyDictionary<string, string> Values(AppConfig config) => new Dictionary<string, string>
     {
-        ["HTTP_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
-        ["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
-        ["ALL_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
+        ["HTTP_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
+        ["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
+        ["ALL_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
     };
 

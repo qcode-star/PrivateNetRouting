@@ -9,14 +9,15 @@ namespace PrivateNetRouting.Core.Launcher;
 
 /// <summary>
 /// Where a browser profile's traffic goes — chosen by browser.egress. "forward-proxy" (default):
-/// the application's own forward proxy (forwardProxy.listen), spoken over HTTP CONNECT, so the
-/// names ride the CONNECT and are resolved on the proxy side over DoH — the local ban cannot
-/// poison them; the proxy process (the GUI in the tray or the detached worker) has to be running.
-/// "chain": the chain's final SOCKS5 — the sidecar's own listener (chain.daemonSocksListen) in the
-/// tailscale mode, the external upstream (forwardProxy.socks5Upstream) in the socks5 one; the
-/// profile then works on its own (its desktop shortcut needs no application process), but the
-/// tailscale sidecar resolves names with the system resolver, and names blocked from direct
-/// access do not open through it.
+/// the applications proxy endpoint (AppProxyEndpoint — the local forward proxy forwardProxy.listen,
+/// or, when the local proxy is skipped in the socks5 mode, the external endpoint), spoken over HTTP
+/// CONNECT, so the names ride the CONNECT and are resolved on the proxy side — the local ban cannot
+/// poison them; in the default shape the proxy process (the GUI in the tray or the detached worker)
+/// has to be running, in the skipped shape the external upstream does. "chain": the chain's final
+/// SOCKS5 — the sidecar's own listener (chain.daemonSocksListen) in the tailscale mode, the external
+/// upstream (forwardProxy.socks5Upstream) in the socks5 one; the profile then works on its own (its
+/// desktop shortcut needs no application process), but the tailscale sidecar resolves names with
+/// the system resolver, and names blocked from direct access do not open through it.
 /// </summary>
 public static class BrowserEgress
 {
@@ -28,7 +29,7 @@ public static class BrowserEgress
             ? config.Chain.EffectiveMode == ChainMode.Socks5
                 ? config.ForwardProxy.Socks5Upstream
                 : config.Chain.DaemonSocksListen
-            : config.ForwardProxy.Listen;
+            : AppProxyEndpoint.Address(config);
 
     /// <summary>The URL scheme the profile must speak to the egress: the application proxy is HTTP CONNECT, the chain's own is SOCKS5.</summary>
     public static string Scheme(AppConfig config) =>

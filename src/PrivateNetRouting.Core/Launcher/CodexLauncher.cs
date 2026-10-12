@@ -53,7 +53,7 @@ public sealed class CodexLauncher(
         processFinder,
         config.Codex.ProcessName,
         config.Codex.PackageName,
-        "http://" + config.ForwardProxy.Listen,
+        AppProxyEndpoint.Url(config),
         appCloser ?? new WindowsRunningAppCloser(),
         log,
         "codex-launcher");
@@ -62,7 +62,7 @@ public sealed class CodexLauncher(
     public FileLog Log => log;
 
     /// <summary>Proxy URL for --proxy-server and for the proxy env variables.</summary>
-    public string ProxyUrl => "http://" + config.ForwardProxy.Listen;
+    public string ProxyUrl => AppProxyEndpoint.Url(config);
 
     public string BuildBypassList() => ClaudeBypassList.Build(config.Launcher.BypassDomains);
 
@@ -72,7 +72,7 @@ public sealed class CodexLauncher(
         var chainRaised = false;
         if (await healthCheck(ct))
         {
-            log.Info($"codex-launcher: proxy {config.ForwardProxy.Listen} responds");
+            log.Info($"codex-launcher: proxy {AppProxyEndpoint.Address(config)} responds");
         }
         else
         {

@@ -1,5 +1,6 @@
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
+using System.Net;
 
 namespace PrivateNetRouting.Tests;
 
@@ -206,6 +207,58 @@ public class AppConfigTests : IDisposable
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.False(loaded.Apps.Claude); // only Claude hides; Codex stays
         Assert.True(loaded.Apps.Codex);
+    }
+
+    [Fact]
+    public void SkipInSocks5ModeDefaultsOffAndRoundTrips()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+        Assert.False(config.ForwardProxy.SkipInSocks5Mode); // the local proxy runs by default
+        Assert.Equal("127.0.0.1:2080", config.ForwardProxy.ExternalAppsEndpoint);
+
+        File.WriteAllText(_path, """
+            {
+              "forwardProxy": {
+                "skipInSocks5Mode": true,
+                "externalAppsEndpoint": "127.0.0.1:7080"
+              }
+            }
+            """);
+
+        var loaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.True(loaded.ForwardProxy.SkipInSocks5Mode);
+        Assert.Equal("127.0.0.1:7080", loaded.ForwardProxy.ExternalAppsEndpoint);
+    }
+
+    [Fact]
+    public void AppProxyEndpointMatrix()
+    {
+        // default shape: every client is pointed at the local listener
+        var tailscale = new AppConfig();
+        Assert.Equal(ChainMode.Tailscale, tailscale.Chain.EffectiveMode);
+        Assert.Equal(tailscale.ForwardProxy.Listen, AppProxyEndpoint.Address(tailscale));
+        Assert.Equal("http://127.0.0.1:18081", AppProxyEndpoint.Url(tailscale));
+        Assert.Equal(18081, AppProxyEndpoint.Port(tailscale));
+        Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
+
+        // the skip flag alone (tailscale mode) is inert: the proxy is load-bearing there
+        tailscale.ForwardProxy.SkipInSocks5Mode = true;
+        Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
+        Assert.Equal(tailscale.ForwardProxy.Listen, AppProxyEndpoint.Address(tailscale));
+
+        // socks5 without the flag — the local proxy still runs
+        var socks5 = new AppConfig { Chain = { Mode = "socks5" } };
+        Assert.False(AppProxyEndpoint.IsSkipped(socks5));
+        Assert.Equal(socks5.ForwardProxy.Listen, AppProxyEndpoint.Address(socks5));
+
+        // the skipped shape: everything points at the external mixed inbound
+        socks5.ForwardProxy.SkipInSocks5Mode = true;
+        socks5.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        Assert.True(AppProxyEndpoint.IsSkipped(socks5));
+        Assert.Equal("192.0.2.10:7080", AppProxyEndpoint.Address(socks5));
+        Assert.Equal("http://192.0.2.10:7080", AppProxyEndpoint.Url(socks5));
+        Assert.Equal(7080, AppProxyEndpoint.Port(socks5));
+        Assert.Equal(IPAddress.Parse("192.0.2.10"), AppProxyEndpoint.EndPoint(socks5).Address);
     }
 
     [Fact]

@@ -206,6 +206,40 @@ public class WatchdogTests : IDisposable
         Assert.Null(withoutEgress.GetInUseReason(TimeSpan.FromMinutes(10)));
     }
 
+    /// <summary>
+    /// The skipped socks5 shape: no local proxy exists, nobody touches the marker — the signal
+    /// is skipped (a fresh marker file on disk must not look like activity), while connections
+    /// to the external endpoint's port still count.
+    /// </summary>
+    [Fact]
+    public void UsageProbeWithoutMarkerCountsOnlyConnections()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"pnr-marker-{Guid.NewGuid():N}");
+        File.WriteAllText(marker, "x"); // fresh mtime — would read as activity if consulted
+        try
+        {
+            var ports = new Dictionary<int, int> { [7080] = 4 };
+            var probe = new ClaudeUsageProbe(
+                new FakeFinder(0),
+                new PortsCounter(ports),
+                proxyPort: 7080,
+                activityMarkerPath: null);
+
+            Assert.Equal("established connections to 7080: 4", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
+
+            var idle = new ClaudeUsageProbe(
+                new FakeFinder(0),
+                new PortsCounter(new Dictionary<int, int> { [7080] = 0 }),
+                proxyPort: 7080,
+                activityMarkerPath: null);
+            Assert.Null(idle.GetInUseReason(TimeSpan.FromMinutes(10)));
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
+    }
+
     private WatchdogService Create(
         FakeUsage usage,
         FakeWsl? wsl,

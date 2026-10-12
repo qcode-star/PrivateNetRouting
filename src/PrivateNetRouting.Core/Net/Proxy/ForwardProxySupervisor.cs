@@ -16,17 +16,20 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// a busy port is never bound by a second instance (whosever it is), the shutdown kills only a
 /// worker identified by its command line, a foreign owner is not touched (warning in the log).
 /// Liveness for the chain is the port: whoever asks (GUI, pnr), the answer is the same.
+/// In the skipped socks5 shape (forwardProxy.skipInSocks5Mode) there is no local proxy at all:
+/// the supervisor becomes an honest no-op — never running, nothing to start/stop/detach.
 /// </summary>
 public sealed class ForwardProxySupervisor(
     ForwardProxyConfig config,
-    IForwardProxyInstance inner,
+    IForwardProxyInstance? inner,
     IPortProbe ports,
     ITcpConnectionTable tcpTable,
     IProcessFinder processes,
     FileLog log,
     Func<string, string?, string, int?>? spawnWorker = null,
     Action<int>? killProcess = null,
-    Func<string?>? currentExePath = null) : IProxyControl, IProxyStatistics
+    Func<string?>? currentExePath = null,
+    bool skipped = false) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
@@ -42,24 +45,32 @@ public sealed class ForwardProxySupervisor(
 
     private int Port => Socks5Client.ParseEndPoint(config.Listen).Port;
 
-    public bool IsRunning => inner.IsRunning || ports.IsListening(Port);
+    public bool IsRunning => !skipped && (inner!.IsRunning || ports.IsListening(Port));
 
     public IReadOnlyList<string> ListenerEndpoints =>
-        inner.IsRunning
-            ? inner.ListenerEndpoints
-            : tcpTable.GetListeners(Port)
-                .Select(entry => new IPEndPoint(entry.Address, entry.Port).ToString())
-                .ToList();
+        skipped
+            ? []
+            : inner!.IsRunning
+                ? inner.ListenerEndpoints
+                : tcpTable.GetListeners(Port)
+                    .Select(entry => new IPEndPoint(entry.Address, entry.Port).ToString())
+                    .ToList();
 
-    public int ActiveConnections => inner.ActiveConnections;
+    public int ActiveConnections => skipped ? 0 : inner!.ActiveConnections;
 
-    public long TotalConnections => inner.TotalConnections;
+    public long TotalConnections => skipped ? 0 : inner!.TotalConnections;
 
-    public long FailedConnections => inner.FailedConnections;
+    public long FailedConnections => skipped ? 0 : inner!.FailedConnections;
 
     public async Task StartAsync(CancellationToken ct)
     {
-        if (inner.IsRunning)
+        if (skipped)
+        {
+            log.Info(SkippedMessage);
+            return;
+        }
+
+        if (inner!.IsRunning)
         {
             return;
         }
@@ -110,11 +121,17 @@ public sealed class ForwardProxySupervisor(
     /// Hands the listener over to a detached worker so it survives this process's exit (the tray
     /// "Exit" with the chain kept): the in-process instance is stopped and a worker takes the port,
     /// so clients see only a short gap. A listener already held by our worker — or by anyone else —
-    /// is left as it is.
+    /// is left as it is. In the skipped shape there is nothing of ours on the port — a no-op.
     /// </summary>
     public async Task DetachAsync(CancellationToken ct)
     {
-        if (!inner.IsRunning)
+        if (skipped)
+        {
+            log.Info(SkippedMessage);
+            return;
+        }
+
+        if (!inner!.IsRunning)
         {
             if (ports.IsListening(Port))
             {
@@ -131,7 +148,12 @@ public sealed class ForwardProxySupervisor(
 
     public async Task StopAsync()
     {
-        if (inner.IsRunning)
+        if (skipped)
+        {
+            return; // the skipped shape has no local proxy: nothing of ours is on the port
+        }
+
+        if (inner!.IsRunning)
         {
             await inner.StopAsync().ConfigureAwait(false);
             return;
@@ -196,6 +218,9 @@ public sealed class ForwardProxySupervisor(
     }
 
     private string DescribeOwners() => DescribeOwners(tcpTable.GetListeners(Port));
+
+    private string SkippedMessage =>
+        $"forward-proxy: skipped in the socks5 mode (forwardProxy.skipInSocks5Mode) — the applications point at {config.ExternalAppsEndpoint}";
 
     private static string DescribeOwners(IReadOnlyList<TcpListenerEntry> owners) =>
         string.Join(", ", owners

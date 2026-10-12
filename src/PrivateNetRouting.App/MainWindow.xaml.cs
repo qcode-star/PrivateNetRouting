@@ -40,14 +40,19 @@ public partial class MainWindow : Window
     private static readonly string[] TailscaleComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
     private static readonly string[] Socks5Components = ["Egress", "Proxy", "Health"];
 
+    /// <summary>The skipped socks5 shape (forwardProxy.skipInSocks5Mode): no local proxy stage at all.</summary>
+    private static readonly string[] Socks5SkippedComponents = ["Egress", "Health"];
+
     private static readonly string[] TailscaleRailKeys =
         ["Main.Rail.Daemon", "Main.Rail.Keeper", "Main.Rail.Node", "Main.Rail.Proxy", "Main.Rail.Health"];
     private static readonly string[] Socks5RailKeys = ["Main.Rail.Egress", "Main.Rail.Proxy", "Main.Rail.Health"];
+    private static readonly string[] Socks5SkippedRailKeys = ["Main.Rail.Egress", "Main.Rail.Health"];
 
     private readonly ProxyRuntime _runtime;
     private readonly MainViewModel _viewModel;
     private readonly ChainRail _rail;
     private readonly bool _socks5Mode;
+    private readonly bool _skipProxy;
     private readonly string[] _chainComponents;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _chainTimer;
@@ -85,8 +90,15 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
         _socks5Mode = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
-        _chainComponents = _socks5Mode ? Socks5Components : TailscaleComponents;
-        _rail = new ChainRail(RailHost, _socks5Mode ? Socks5RailKeys : TailscaleRailKeys);
+        _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
+        _chainComponents = _socks5Mode
+            ? (_skipProxy ? Socks5SkippedComponents : Socks5Components)
+            : TailscaleComponents;
+        _rail = new ChainRail(
+            RailHost,
+            _socks5Mode
+                ? (_skipProxy ? Socks5SkippedRailKeys : Socks5RailKeys)
+                : TailscaleRailKeys);
         UpstreamListenersLabel.Text = Loc.S(_socks5Mode ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
@@ -351,6 +363,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void RenderRail(ChainState state)
     {
+        int proxyStage, healthStage;
         if (_socks5Mode)
         {
             _rail.SetStage(0, state.UpstreamReachable switch
@@ -359,6 +372,20 @@ public partial class MainWindow : Window
                 false => new RailStage(Loc.S("Main.Chain.Egress.NoRoute"), Theme.Bad),
                 _ => new RailStage(Loc.S("Main.State.Unknown"), Theme.Idle),
             });
+
+            if (_skipProxy)
+            {
+                // the skipped shape: the health stage follows the egress — no local proxy stage exists
+                _rail.SetStage(1, state.UpstreamReachable == true
+                    ? new RailStage(
+                        state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"),
+                        state.ProxyHealthy ? Theme.Ok : Theme.Bad)
+                    : new RailStage(Loc.S("Main.Chain.Health.Idle"), Theme.Idle));
+                return;
+            }
+
+            proxyStage = 1;
+            healthStage = 2;
         }
         else
         {
@@ -375,16 +402,17 @@ public partial class MainWindow : Window
             _rail.SetStage(2, state.BackendState is null
                 ? new RailStage(Loc.S("Main.Chain.Node.NoResponse"), Theme.Idle)
                 : new RailStage(state.BackendState, state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
+
+            // the two closing stages are the same in both modes, only the indexes differ
+            proxyStage = 3;
+            healthStage = 4;
         }
 
-        // the two closing stages are the same in both modes, only the indexes differ
-        var proxyStage = _socks5Mode ? 1 : 3;
-        var healthStage = _socks5Mode ? 2 : 4;
         _rail.SetStage(proxyStage, new RailStage(
-            state.ProxyRunning ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
-            state.ProxyRunning ? Theme.Ok : Theme.Idle));
+            state.ProxyRunning == true ? Loc.S("Main.Chain.Proxy.Running") : Loc.S("Main.Chain.Proxy.Stopped"),
+            state.ProxyRunning == true ? Theme.Ok : Theme.Idle));
 
-        _rail.SetStage(healthStage, !state.ProxyRunning
+        _rail.SetStage(healthStage, state.ProxyRunning != true
             ? new RailStage(Loc.S("Main.Chain.Health.Idle"), Theme.Idle)
             : new RailStage(
                 state.ProxyHealthy ? Loc.S("Main.Chain.Health.Ok") : Loc.S("Main.Chain.Health.Fail"),
@@ -552,9 +580,16 @@ public partial class MainWindow : Window
         };
         SettingsDetail.Text = $"{claude}; {codex}";
 
-        WslDetail.Text = snapshot.Wsl.Distros.Count == 0
+        var wslText = snapshot.Wsl.Distros.Count == 0
             ? LocalizeWslReason(snapshot.Wsl.Reason)
             : string.Join("; ", snapshot.Wsl.Distros.Select(LocalizeDistroStatus));
+        if (snapshot.Wsl.Warning is not null)
+        {
+            // a read-only environment note (e.g. a loopback-only applications proxy endpoint)
+            wslText += wslText.Length > 0 ? "; " + Loc.S("Main.Guard.Wsl.Loopback") : Loc.S("Main.Guard.Wsl.Loopback");
+        }
+
+        WslDetail.Text = wslText;
         WslDetail.ToolTip = snapshot.Wsl.Distros.Count == 0
             ? null
             : string.Join("\n", snapshot.Wsl.Distros.Select(d => $"{d.Distro}: {d.Reason}"));
@@ -1845,11 +1880,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string? _updateNoticeKey;
     private object?[] _updateNoticeArgs = [];
     private readonly bool _socks5;
+    private readonly bool _skipProxy;
 
     public MainViewModel(ProxyRuntime runtime)
     {
         _runtime = runtime;
         _socks5 = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
+        _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
         Loc.LanguageChanged += OnLanguageChanged;
         // until the first liveness poll — the same word the not-running state uses
         IdleStopAction = Loc.S("Main.IdleStop.Button.Start");
@@ -2057,7 +2094,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         || state.DaemonHttpListening
         || state.KeeperRunning
         || state.BackendState == "Running"
-        || state.ProxyRunning;
+        || state.ProxyRunning == true;
 
     /// <summary>Summary word of the chain card; the rail itself is drawn by the window.</summary>
     public string ChainSummary
@@ -2138,9 +2175,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         // the port is the truth: in detached mode the listener is held by the worker, the card shows it
         var proxy = _runtime.ProxyControl;
-        Endpoints = proxy.IsRunning && proxy.ListenerEndpoints.Count > 0
-            ? string.Join(", ", proxy.ListenerEndpoints)
-            : "—";
+        if (_skipProxy)
+        {
+            // the local proxy does not exist in this shape — the row says what the clients get instead
+            Endpoints = Loc.F("Main.Proxy.SkippedFmt", AppProxyEndpoint.Address(_runtime.Config));
+        }
+        else
+        {
+            Endpoints = proxy.IsRunning && proxy.ListenerEndpoints.Count > 0
+                ? string.Join(", ", proxy.ListenerEndpoints)
+                : "—";
+        }
+
         ActiveConnections = proxy.ActiveConnections.ToString();
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;

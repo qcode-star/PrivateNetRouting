@@ -251,10 +251,42 @@ public class GuardTests : IDisposable
     {
         var config = new AppConfig();
         config.ForwardProxy.Listen = "127.0.0.1:18082"; // pinned: the test is about URL building, not the default
-        Assert.Equal("http://127.0.0.1:18082", ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy));
-        Assert.Equal(18082, ClaudeEnvValues.Port(config.ForwardProxy));
-        Assert.Null(ClaudeEnvValues.WslProxyUrl(null, config.ForwardProxy));
-        Assert.Equal("http://192.0.2.1:18082", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config.ForwardProxy));
+        Assert.Equal("http://127.0.0.1:18082", ClaudeEnvValues.WindowsProxyUrl(config));
+        Assert.Equal(18082, ClaudeEnvValues.Port(config));
+        Assert.Null(ClaudeEnvValues.WslProxyUrl(null, config));
+        Assert.Equal("http://192.0.2.1:18082", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
+
+        // the skipped socks5 shape: the guard files carry the external endpoint instead
+        config.Chain.Mode = "socks5";
+        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WindowsProxyUrl(config));
+        Assert.Equal(7080, ClaudeEnvValues.Port(config));
+        Assert.Equal("http://192.0.2.1:7080", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
+    }
+
+    [Fact]
+    public void WslReachabilityWarningOnlyForLoopbackExternalEndpoint()
+    {
+        // the default shape: our proxy binds the WSL gateway itself — nothing to warn about
+        var config = new AppConfig();
+        Assert.Null(WslConfigGuard.ReachabilityWarning(config));
+
+        // the skip flag alone (tailscale mode) changes nothing
+        config.ForwardProxy.SkipInSocks5Mode = true;
+        Assert.Null(WslConfigGuard.ReachabilityWarning(config));
+
+        // a skipped shape with a public/LAN endpoint is reachable in principle — no warning
+        config.Chain.Mode = "socks5";
+        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        Assert.Null(WslConfigGuard.ReachabilityWarning(config));
+
+        // loopback-only endpoint: unreachable from the distros — the read-only warning fires
+        config.ForwardProxy.ExternalAppsEndpoint = "127.0.0.1:7080";
+        var warning = WslConfigGuard.ReachabilityWarning(config);
+        Assert.NotNull(warning);
+        Assert.Contains("127.0.0.1:7080", warning);
+        Assert.Contains("loopback", warning);
     }
 
     [Fact]
@@ -314,6 +346,31 @@ public class GuardTests : IDisposable
         var again = guard.Sync();
         Assert.False(again.Written);
         Assert.Null(again.BackupPath);
+    }
+
+    /// <summary>The skipped socks5 shape: the synced env carries the external endpoint, not the local listener.</summary>
+    [Fact]
+    public void SettingsSyncPointsAtTheExternalEndpointWhenSkipped()
+    {
+        var config = SettingsConfig();
+        config.Chain.Mode = "socks5";
+        config.ForwardProxy.SkipInSocks5Mode = true;
+        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Guard.CodexEnvPath = Path.Combine(_tempDir, "codex.env");
+
+        var guard = new ClaudeSettingsGuard(config);
+        guard.Sync();
+        var status = guard.Read();
+        Assert.Equal(GuardState.On, status.State);
+        Assert.Equal("http://192.0.2.10:7080", status.ExpectedProxy);
+
+        var json = JsonNode.Parse(File.ReadAllText(config.Guard.ClaudeSettingsPath))!;
+        Assert.Equal("http://192.0.2.10:7080", (string?)json["env"]!["HTTPS_PROXY"]);
+
+        CodexEnvFile.Write(config);
+        var env = File.ReadAllText(config.Guard.CodexEnvPath);
+        Assert.Contains("HTTP_PROXY=http://192.0.2.10:7080", env);
+        Assert.Contains("ALL_PROXY=http://192.0.2.10:7080", env);
     }
 
     [Fact]

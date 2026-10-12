@@ -3,7 +3,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Watchdog;
 
-/// <summary>Established connections to the local port (the listener side of the proxy).</summary>
+/// <summary>Established connections on the port (either end): the listener side for a local proxy, the remote side when the endpoint belongs to an external process.</summary>
 public interface IEstablishedConnectionCounter
 {
     int CountOnLocalPort(int port);
@@ -14,7 +14,8 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
     public int CountOnLocalPort(int port) =>
         IPGlobalProperties.GetIPGlobalProperties()
             .GetActiveTcpConnections()
-            .Count(connection => connection.LocalEndPoint.Port == port && connection.State == TcpState.Established);
+            .Count(connection => connection.State == TcpState.Established
+                && (connection.LocalEndPoint.Port == port || connection.RemoteEndPoint.Port == port));
 }
 
 /// <summary>
@@ -25,19 +26,23 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
 /// also counts through the connection check, but an idle open app must not let the chain die under
 /// it). The egress listener carries the browser profile: it goes straight to the chain's egress,
 /// past the application proxy, and a chain stopped under an open browser would cut it off.
+/// The proxy port is the applications proxy endpoint — the local listener's port, or the external
+/// endpoint's in the skipped shape. The marker is only counted when a local proxy exists to touch
+/// it (a null path — the skipped shape, where nobody writes the marker).
 /// </summary>
 public interface IClaudeUsageProbe
 {
     string? GetInUseReason(TimeSpan idleWindow);
 }
 
-/// <param name="proxyPort">Local port of the application's forward proxy (its clients are counted here).</param>
+/// <param name="proxyPort">Port of the applications proxy endpoint (its clients are counted here).</param>
+/// <param name="activityMarkerPath">Activity marker file; null — the shape has no local proxy to touch it (skipped socks5).</param>
 /// <param name="egressPort">Local port of the chain's own egress listener (chain.daemonSocksListen); 0 — the mode has no local egress to guard (socks5).</param>
 public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
     IEstablishedConnectionCounter connections,
     int proxyPort,
-    string activityMarkerPath,
+    string? activityMarkerPath,
     string codexProcessName = "",
     int egressPort = 0) : IClaudeUsageProbe
 {
@@ -88,20 +93,23 @@ public sealed class ClaudeUsageProbe(
             }
         }
 
-        try
+        if (!string.IsNullOrEmpty(activityMarkerPath))
         {
-            if (File.Exists(activityMarkerPath))
+            try
             {
-                var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(activityMarkerPath);
-                if (age < idleWindow)
+                if (File.Exists(activityMarkerPath))
                 {
-                    return $"proxy activity {(int)age.TotalSeconds}s ago";
+                    var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(activityMarkerPath);
+                    if (age < idleWindow)
+                    {
+                        return $"proxy activity {(int)age.TotalSeconds}s ago";
+                    }
                 }
             }
-        }
-        catch (IOException)
-        {
-            // marker unavailable — simply no signal
+            catch (IOException)
+            {
+                // marker unavailable — simply no signal
+            }
         }
 
         return null;

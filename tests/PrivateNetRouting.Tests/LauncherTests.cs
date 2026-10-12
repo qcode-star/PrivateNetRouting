@@ -105,6 +105,36 @@ public class LauncherTests : IDisposable
         Assert.Single(_started);
     }
 
+    /// <summary>The skipped socks5 shape: the flags point Claude at the external mixed inbound.</summary>
+    [Fact]
+    public async Task SkippedShapeLaunchCarriesTheExternalEndpoint()
+    {
+        var config = new AppConfig
+        {
+            Chain = new ChainConfig { Mode = "socks5" },
+            ForwardProxy = new ForwardProxyConfig
+            {
+                Listen = "127.0.0.1:18082",
+                SkipInSocks5Mode = true,
+                ExternalAppsEndpoint = "192.0.2.10:7080",
+            },
+            Launcher = new LauncherConfig
+            {
+                AliasPath = @"C:\fake\claude.exe",
+                BypassDomains = ["corp.example.com"],
+            },
+        };
+        var launcher = Create(config, policy: "http://192.0.2.10:7080");
+
+        var result = await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal(LaunchOutcome.Launched, result.Outcome);
+        Assert.Equal("http://192.0.2.10:7080", launcher.ProxyUrl);
+        var psi = Assert.Single(_started);
+        Assert.Equal("--proxy-server=http://192.0.2.10:7080", psi.ArgumentList[0]);
+        Assert.DoesNotContain("missing or different", ReadLog()); // the policy matching the endpoint is recognized
+    }
+
     [Fact]
     public async Task CheckOnlyRaisesChainButDoesNotStartClaude()
     {

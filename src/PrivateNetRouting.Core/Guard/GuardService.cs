@@ -113,7 +113,7 @@ public sealed class GuardService(
         EgressPolicyStatus policyStatus;
         try
         {
-            var expected = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
+            var expected = ClaudeEnvValues.WindowsProxyUrl(config);
             var values = policy.Read();
             policyStatus = values.EgressProxyUrl is null
                 ? new EgressPolicyStatus(GuardState.Off, null, expected, values.DisableWslSessions)
@@ -166,7 +166,8 @@ public sealed class GuardService(
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
                 : string.Join("; ", wsl.Distros.Select(d =>
-                    $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")} (claude script {(d.ScriptPort?.ToString() ?? "-")}, codex proxy env {(d.ProxyEnvPresent ? d.ProxyEnvPort?.ToString() ?? "present" : "missing")}){(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))),
+                    $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")} (claude script {(d.ScriptPort?.ToString() ?? "-")}, codex proxy env {(d.ProxyEnvPresent ? d.ProxyEnvPort?.ToString() ?? "present" : "missing")}){(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))
+                + (wsl.Warning is null ? "" : (wsl.Distros.Count == 0 && wsl.Reason.Length > 0 ? "; " : "") + wsl.Warning)),
             new(GuardKind.SystemProxy, sysProxy.Enabled ? GuardState.On : GuardState.Off,
                 sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled"),
         ];
@@ -252,7 +253,7 @@ public sealed class GuardService(
             var outcome = new SettingsSyncResult(
                 sync.Written,
                 sync.BackupPath,
-                ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy),
+                ClaudeEnvValues.WindowsProxyUrl(config),
                 ClaudeEnvValues.BuildNoProxy(config.Launcher.BypassDomains),
                 codexSync.Written,
                 codexSync.BackupPath,
@@ -329,13 +330,13 @@ public sealed class GuardService(
         return result;
     }
 
-    /// <summary>WinINET system proxy (requires no rights); disabling restores direct access.</summary>
+    /// <summary>WinINET system proxy (requires no rights); disabling restores direct access. Points at the applications proxy endpoint.</summary>
     public Task SetSystemProxyAsync(bool enable, CancellationToken ct) =>
         Task.Run(() =>
         {
             if (enable)
             {
-                var endpoint = Net.Socks.Socks5Client.ParseEndPoint(config.ForwardProxy.Listen);
+                var endpoint = AppProxyEndpoint.EndPoint(config);
                 var bypass = SystemProxyBypass.Build(config.Launcher.BypassDomains, config.Guard.SystemProxyExtraBypass);
                 systemProxy.Enable($"{endpoint.Address}:{endpoint.Port}", bypass);
                 log.Info($"guard sysproxy on: {endpoint.Address}:{endpoint.Port} (bypass {config.Launcher.BypassDomains.Count} domains + extras)");

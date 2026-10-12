@@ -26,8 +26,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
 {
     public AppConfig Config { get; }
 
-    /// <summary>The proxy server itself (in-process); the console mode and the worker start it directly.</summary>
-    public ForwardProxyService ProxyService { get; }
+    /// <summary>
+    /// The proxy server itself (in-process); the console mode and the worker start it directly.
+    /// Null in the skipped socks5 shape (forwardProxy.skipInSocks5Mode): there is no local proxy.
+    /// </summary>
+    public ForwardProxyService? ProxyService { get; }
 
     /// <summary>Port listener management: in-process or a detached worker (forwardProxy.detached).</summary>
     public ForwardProxySupervisor ProxyControl { get; }
@@ -91,12 +94,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService? proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Config = config;
         Log = log;
         DohPool = pool;
         ProxyService = proxy;
+        _builtProxyConfig = config.ForwardProxy;
         ProxyControl = proxyControl;
         Chain = chain;
         _chainLog = chainLog;
@@ -187,12 +191,22 @@ public sealed class ProxyRuntime : IAsyncDisposable
             fp.ActivityMarkerPath,
             TimeSpan.FromSeconds(fp.ActivityTouchIntervalSeconds));
 
-        var proxy = new ForwardProxyService(fp, resolver, socks, marker, log, passHostNameToUpstream: socks5);
+        // the skipped socks5 shape: no local proxy at all — the applications point at the
+        // external endpoint (forwardProxy.externalAppsEndpoint), the supervisor is a no-op
+        var skipProxy = AppProxyEndpoint.IsSkipped(config);
+        if (skipProxy)
+        {
+            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.skipInSocks5Mode) — the applications point at {fp.ExternalAppsEndpoint}");
+        }
+
+        ForwardProxyService? proxy = skipProxy
+            ? null
+            : new ForwardProxyService(fp, resolver, socks, marker, log, passHostNameToUpstream: socks5);
 
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
         var tcpTable = new TcpConnectionTable();
-        var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log);
+        var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log, skipped: skipProxy);
         var watchdogLog = NewLog("watchdog.log");
         var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");
@@ -215,7 +229,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
             ct => watchdogControl.StopAsync(ct),
             config.Chain.EffectiveMode == ChainMode.Socks5
                 ? ct => EgressCheckAsync(config, socks, chainLog, ct)
-                : null);
+                : null,
+            proxySkipped: skipProxy);
 
         var launcherLog = NewLog("launcher.log");
         var launcher = new ClaudeLauncher(
@@ -248,25 +263,28 @@ public sealed class ProxyRuntime : IAsyncDisposable
         // The idle stopper also reads the chain's egress listener: the browser profile goes straight
         // there (mitigating the application proxy), so its live connections are what keeps the chain
         // from being stopped under an open browser. In the socks5 mode the egress is external —
-        // stopping the chain does not cut the browser, and the port means nothing (0).
+        // stopping the chain does not cut the browser, and the port means nothing (0). The proxy
+        // port is the applications proxy endpoint: the local listener's port in the default shape,
+        // the external endpoint's in the skipped one (the clients connect there all the same).
         var egressPort = config.Chain.EffectiveMode == ChainMode.Socks5
             ? 0
             : Socks5Client.ParseEndPoint(config.Chain.DaemonSocksListen).Port;
         var usage = new ClaudeUsageProbe(
             processes,
             new TcpEstablishedConnectionCounter(),
-            Socks5Client.ParseEndPoint(fp.Listen).Port,
-            fp.ActivityMarkerPath,
+            AppProxyEndpoint.Port(config),
+            skipProxy ? null : fp.ActivityMarkerPath,
             config.Codex.ProcessName,
             egressPort);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
-        // the download goes through its own forward proxy (DoH resolution, SOCKS5 dial);
-        // the global HttpClient timeout is disabled — the limit is set per fragment (chunkTimeoutSeconds)
+        // the download goes through the applications proxy endpoint (the local CONNECT proxy, or
+        // the external mixed inbound in the skipped shape); the global HttpClient timeout is
+        // disabled — the limit is set per fragment (chunkTimeoutSeconds)
         var updaterHttp = new HttpClient(new SocketsHttpHandler
         {
-            Proxy = new WebProxy("http://" + fp.Listen),
+            Proxy = new WebProxy(AppProxyEndpoint.Url(config)),
             UseProxy = true,
         })
         {
@@ -322,7 +340,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var diagnostics = new DiagnosticsService(
             config,
             chain,
-            proxy,
+            proxyControl,
             tcpTable,
             processes,
             ct => ChainProbeAsync(config, ct),
@@ -365,7 +383,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private static Task<HealthProbeResult> ChainProbeAsync(AppConfig config, CancellationToken ct)
     {
-        var endpoint = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen);
+        var endpoint = AppProxyEndpoint.EndPoint(config);
         return ProxyHealthCheck.ProbeAsync(
             endpoint.Address.ToString(),
             endpoint.Port,
@@ -385,9 +403,21 @@ public sealed class ProxyRuntime : IAsyncDisposable
     /// <summary>
     /// Whether the freshly loaded proxy section has drifted from the one the running proxy
     /// service was built with: ReloadConfig swaps the sections in the shared AppConfig, and
-    /// the service keeps its captured section until the process restarts.
+    /// the service keeps its captured section until the process restarts. In the skipped
+    /// shape there is no running service — the flag just compares the loaded section against
+    /// the one the process was built with.
     /// </summary>
-    public bool ProxyConfigNeedsRestart => !SameProxyConfig(ProxyService.CapturedConfig, Config.ForwardProxy);
+    public bool ProxyConfigNeedsRestart
+    {
+        get
+        {
+            var captured = ProxyService?.CapturedConfig ?? _builtProxyConfig;
+            return captured is null || !SameProxyConfig(captured, Config.ForwardProxy);
+        }
+    }
+
+    /// <summary>The proxy section this runtime was built from (kept for the skipped shape, where no service captures it).</summary>
+    private readonly ForwardProxyConfig? _builtProxyConfig;
 
     /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
     /// trusted proxy from forwardProxy.socks5Upstream (with its RFC 1929 credentials); in the
@@ -408,13 +438,12 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {
-        var fp = Config.ForwardProxy;
-        var endpoint = Socks5Client.ParseEndPoint(fp.Listen);
+        var endpoint = AppProxyEndpoint.EndPoint(Config);
         return ProxyHealthCheck.CheckAsync(
             endpoint.Address.ToString(),
             endpoint.Port,
-            fp.HealthCheckHost,
-            fp.HealthCheckPort,
+            Config.ForwardProxy.HealthCheckHost,
+            Config.ForwardProxy.HealthCheckPort,
             timeout,
             ct);
     }
@@ -441,7 +470,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
     {
         // ConfigureAwait: Dispose is awaited blocking from the GUI (OnExit) — without it the
         // shutdown chain hits the captured Dispatcher context and deadlocks the process
-        await ProxyService.DisposeAsync().ConfigureAwait(false);
+        if (ProxyService is not null)
+        {
+            await ProxyService.DisposeAsync().ConfigureAwait(false);
+        }
+
         DohPool?.Dispose();
         _chainLog.Dispose();
         _launcherLog.Dispose();

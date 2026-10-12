@@ -113,7 +113,7 @@ public static class GuardElevatedCommands
     {
         if (enable)
         {
-            var url = ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy);
+            var url = ClaudeEnvValues.WindowsProxyUrl(config);
             policy.Apply(url);
             return $"egressProxyUrl={url}, disableWslSessions=0";
         }

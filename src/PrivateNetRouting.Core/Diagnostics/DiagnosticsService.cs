@@ -26,9 +26,9 @@ public sealed record DiagSection(string Key, IReadOnlyList<DiagLine> Lines);
 
 /// <summary>
 /// State summary. ChainStopped is the edge case where no listener of the chain exists at all —
-/// the daemon's in the tailscale mode, the proxy's in the socks5 mode — and the proxy is not
-/// running either; that is normal while Claude is not needed (a short message instead of the
-/// full picture).
+/// the daemon's in the tailscale mode, the proxy's in the socks5 mode (in the skipped shape the
+/// egress check stands in for the listeners) — and the proxy is not running either; that is
+/// normal while Claude is not needed (a short message instead of the full picture).
 /// </summary>
 public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSection> Sections);
 
@@ -55,26 +55,37 @@ public sealed class DiagnosticsService(
     {
         var chainConfig = config.Chain;
         var socks5 = chainConfig.EffectiveMode == ChainMode.Socks5;
+        var skipProxy = AppProxyEndpoint.IsSkipped(config);
         var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.DaemonHttpListen).Port;
         var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.DaemonSocksListen).Port;
-        var proxyPort = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen).Port;
+        var proxyPort = AppProxyEndpoint.Port(config);
 
         var state = await chain.GetStateAsync(ct);
-        var proxyListeners = tcpTable.GetListeners(proxyPort);
+        // in the skipped shape the forward-proxy port belongs to nobody of ours — it is not consulted;
+        // the chain is "stopped" when the egress does not answer (there is nothing else to look at)
+        IReadOnlyList<TcpListenerEntry> proxyListeners = skipProxy
+            ? []
+            : tcpTable.GetListeners(Socks5Client.ParseEndPoint(config.ForwardProxy.Listen).Port);
         // in the socks5 mode the daemon ports are foreign — they say nothing about our chain
         IReadOnlyList<TcpListenerEntry> daemonListeners = socks5 ? [] : tcpTable.GetListeners(daemonHttpPort);
-        if (daemonListeners.Count == 0 && proxyListeners.Count == 0 && !proxy.IsRunning)
+        var chainStopped = skipProxy
+            ? state.UpstreamReachable != true
+            : daemonListeners.Count == 0 && proxyListeners.Count == 0 && !proxy.IsRunning;
+        if (chainStopped)
         {
             return new DiagnosticsSummary(ChainStopped: true, Sections: []);
         }
 
         IReadOnlyList<TcpListenerEntry> daemonSocksListeners = socks5 ? [] : tcpTable.GetListeners(daemonSocksPort);
         var guard = await guardCore(ct);
+        var healthProbeWanted = skipProxy
+            ? state.UpstreamReachable == true
+            : proxy.IsRunning || proxyListeners.Count > 0;
         var sections = new List<DiagSection>
         {
             socks5 ? EgressSection(state) : ChainSection(state, daemonListeners, daemonSocksListeners),
-            ProxySection(proxy, proxyListeners, proxyPort),
-            await HealthSectionAsync(proxy.IsRunning || proxyListeners.Count > 0, ct),
+            ProxySection(proxy, proxyListeners, proxyPort, skipProxy),
+            await HealthSectionAsync(healthProbeWanted, ct),
             GuardsSection(guard.Ban, guard.Policy),
             WatchdogSection(),
             LogsSection(),
@@ -133,8 +144,25 @@ public sealed class DiagnosticsService(
     private DiagSection ProxySection(
         IProxyStatistics proxy,
         IReadOnlyList<TcpListenerEntry> proxyListeners,
-        int proxyPort)
+        int proxyPort,
+        bool skipped)
     {
+        if (skipped)
+        {
+            // the local proxy does not exist in this shape: one honest line instead of the port picture
+            return new DiagSection("proxy",
+            [
+                new DiagLine(
+                    "forward proxy",
+                    $"skipped — the applications point at {AppProxyEndpoint.Address(config)}",
+                    DiagMark.Neutral),
+                new DiagLine("listeners", "-"),
+                new DiagLine("WSL bind", "-", DiagMark.Neutral),
+                new DiagLine("connections", "-"),
+                new DiagLine("activity", "not kept (the local proxy is skipped)"),
+            ]);
+        }
+
         var self = $"pid {Environment.ProcessId}";
         var proxyLine = proxy.IsRunning
             ? new DiagLine("forward proxy", $"running ({self})", DiagMark.Good)

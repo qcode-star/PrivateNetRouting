@@ -227,6 +227,51 @@ public class DiagnosticsTests : IDisposable
         Assert.Empty(summary.Sections);
     }
 
+    // ----- socks5 mode, the local proxy skipped (forwardProxy.skipInSocks5Mode) -----
+
+    [Fact]
+    public async Task SkippedShapeShowsTheExternalEndpointAndRunsHealth()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _,
+            mode: "socks5", upstreamReachable: true, skipProxy: true);
+        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        proxy.IsRunning = false; // no local proxy exists in this shape
+        // even a foreign listener on the forward-proxy port means nothing: nobody of ours is there
+        var forwardProxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[forwardProxyPort] = [new TcpListenerEntry(IPAddress.Loopback, forwardProxyPort, 100, "sing-box")];
+        probe.Result = HealthProbeResult.OkIn(90, "HTTP/1.1 200 Connection Established");
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.False(summary.ChainStopped); // the egress answers — the chain is up
+        Assert.Equal(["chain", "proxy", "health", "guards", "watchdog", "logs"], summary.Sections.Select(s => s.Key));
+
+        var proxySection = Section(summary, "proxy");
+        Assert.Equal(
+            "skipped — the applications point at 192.0.2.10:7080",
+            proxySection.Single(l => l.Name == "forward proxy").Value);
+        Assert.Equal("-", proxySection.Single(l => l.Name == "connections").Value);
+        Assert.Equal("not kept (the local proxy is skipped)", proxySection.Single(l => l.Name == "activity").Value);
+
+        var health = Section(summary, "health").Single(l => l.Name.StartsWith("CONNECT-roundtrip"));
+        Assert.Contains("OK in 90 ms", health.Value); // the probe runs against the external endpoint
+    }
+
+    [Fact]
+    public async Task SkippedShapeWithDeadEgressIsAStoppedChain()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out _, out _,
+            mode: "socks5", upstreamReachable: false, skipProxy: true);
+        proxy.IsRunning = false;
+        var forwardProxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[forwardProxyPort] = [new TcpListenerEntry(IPAddress.Loopback, forwardProxyPort, 100, "sing-box")];
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.True(summary.ChainStopped); // the port is foreign and the egress is down — nothing is up
+        Assert.Empty(summary.Sections);
+    }
+
     // ----- guard core for diagnostics: without settings.json and WSL -----
 
     [Fact]
@@ -247,7 +292,7 @@ public class DiagnosticsTests : IDisposable
         };
         var policy = new FakeEgressPolicyStore
         {
-            Values = new EgressPolicyValues(true, ClaudeEnvValues.WindowsProxyUrl(config.ForwardProxy), 0),
+            Values = new EgressPolicyValues(true, ClaudeEnvValues.WindowsProxyUrl(config), 0),
         };
         var log = new FileLog(Path.Combine(_tempDir, $"guard-{Guid.NewGuid():N}.log"));
         var guard = new GuardService(
@@ -339,7 +384,8 @@ public class DiagnosticsTests : IDisposable
         out FakeProbe probe,
         out FakeGuardCore guardCore,
         string? mode = null,
-        bool? upstreamReachable = null)
+        bool? upstreamReachable = null,
+        bool skipProxy = false)
     {
         config = new AppConfig();
         if (mode is not null)
@@ -348,6 +394,7 @@ public class DiagnosticsTests : IDisposable
         }
 
         config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.ForwardProxy.SkipInSocks5Mode = skipProxy;
         config.Chain.DaemonHttpListen = "127.0.0.1:18081";
         config.Chain.DaemonSocksListen = "127.0.0.1:18083";
         config.ForwardProxy.ActivityMarkerPath = Path.Combine(_tempDir, "absent-marker");
@@ -360,7 +407,9 @@ public class DiagnosticsTests : IDisposable
         var probeFixture = probe;
         var guardFixture = guardCore;
         var state = mode == "socks5"
-            ? new ChainState(false, false, false, null, proxy.IsRunning, true, upstreamReachable)
+            ? skipProxy
+                ? new ChainState(false, false, false, null, null, upstreamReachable == true, upstreamReachable)
+                : new ChainState(false, false, false, null, proxy.IsRunning, true, upstreamReachable)
             : new ChainState(true, true, true, "Running", proxy.IsRunning, true);
         return new DiagnosticsService(
             config,
