@@ -139,7 +139,9 @@ at `chain.socks5.upstream` itself, and a plain SOCKS5 upstream cannot answer HTT
   "socks5": { "upstream": "<upstream-host>:<port>" },
 },
 "forwardProxy": { "enabled": true },          // required: the apps have no SOCKS5 of their own
-"browser": { "egress": "chain" }              // recommended: the browser speaks SOCKS5 natively
+"browser": { "egress": "chain" },             // recommended: the browser speaks SOCKS5 natively
+// wsl: the distros to sync into — the name as in `wsl --list`, nothing is auto-discovered
+"wsl": { "distros": [ { "name": "<distro-name>", "user": "<distro-user>" } ] }
 ```
 
 ## Build
