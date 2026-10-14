@@ -50,10 +50,15 @@ the ones below: nothing outside the application's own processes matters.
 The upstream is reached through that tailscale, so the application's sidecar is not needed.
 The forward proxy still translates HTTP CONNECT for the applications and bridges WSL (the
 gateway bind); for the browser it depends on `browser.egress` — the proxy by default, or
-straight to the upstream's SOCKS5 with `chain`. The proxied AI path never touches the system
-resolver (names ride the CONNECT) regardless, but everything going direct — bypass zones
-included — follows that tailscale's DNS configuration (accept-dns / split DNS): one more
-reason shape 1 is preferred and more controllable.
+straight to the upstream's SOCKS5 with `chain`. Neither egress resolves a name on this
+machine: the names ride the CONNECT/SOCKS5 to the upstream, and the upstream's own
+resolution decides. When the upstream is that tailscale's own SOCKS5, a userspace-mode
+tailscale resolves with the system resolver — the verified limitation the forward proxy
+exists for in shape 1 — and the local ban blackholes the AI names exactly there: no egress
+choice helps, the proxied AI names do not open. A system-service tailscale answers as its
+own DNS configuration (accept-dns / split DNS) allows, and everything going direct — bypass
+zones included — follows it as well: one more reason shape 1 is preferred and more
+controllable (there the proxy resolves over DoH itself and dials the sidecar by IP).
 
 ```jsonc
 "chain": {
@@ -61,7 +66,9 @@ reason shape 1 is preferred and more controllable.
   "socks5": { "upstream": "<upstream-host>:<port>" }, // reached through the outer tailscale
                                                       // user/password if the upstream asks
 },
-"browser": { "egress": "forward-proxy" }      // or "chain" — both work here
+"forwardProxy": { "enabled": true },          // the default
+"browser": { "egress": "forward-proxy" }      // or "chain" — no DNS difference here: the
+                                              // upstream resolves the names in either case
 ```
 
 **3. sing-box (mixed inbound) + socks5 chain, no WSL.** The forward proxy is not needed
@@ -88,7 +95,7 @@ ready way to bridge WSL: its bind on the WSL NAT gateway keeps sing-box on loopb
   "mode": "socks5",
   "socks5": { "upstream": "127.0.0.1:2080" },
 },
-"forwardProxy": { "bindWslGateway": true },   // the default; the proxy stays: it is the WSL bridge
+"forwardProxy": { "enabled": true, "bindWslGateway": true },  // the defaults; the proxy stays: it is the WSL bridge
 "browser": { "egress": "chain" }              // or "forward-proxy" — both reach sing-box
 // wsl sync on as usual; sing-box keeps listening on loopback
 ```
