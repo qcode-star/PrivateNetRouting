@@ -28,7 +28,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     /// <summary>
     /// The proxy server itself (in-process); the console mode and the worker start it directly.
-    /// Null in the skipped socks5 shape (forwardProxy.enabled=false): there is no local proxy.
+    /// Null in the skipped shapes (the http mode, or socks5 with forwardProxy.enabled=false):
+    /// there is no local proxy.
     /// </summary>
     public ForwardProxyService? ProxyService { get; }
 
@@ -37,7 +38,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public FileLog Log { get; }
 
-    /// <summary>The DoH pool — the resolver set of the tailscale mode; null in the socks5 mode.</summary>
+    /// <summary>The DoH pool — the resolver set of the tailscale mode; null in the external-upstream modes.</summary>
     public DohEndpointPool? DohPool { get; }
 
     public ChainSupervisor Chain { get; }
@@ -135,20 +136,24 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new(Path.Combine(config.Logging.Directory, fileName), config.Logging.EffectiveLevel, config.Logging.MaxBytes, config.Logging.Keep);
         var log = NewLog(logFileName);
 
-        var socks5 = config.Chain.EffectiveMode == ChainMode.Socks5;
+        var mode = config.Chain.EffectiveMode;
+        // the external-upstream modes (socks5, http): the trusted upstream resolves the names
+        // carried by the CONNECT — nothing in this process resolves anything
+        var external = mode is ChainMode.Socks5 or ChainMode.Http;
         var (upstream, upstreamUser, upstreamPassword) = ResolveUpstream(config);
         var socks = new Socks5Client(upstream, upstreamUser, upstreamPassword);
 
         // The DoH machinery is a tailscale-mode tool: the sidecar's own resolution is poisoned by
         // the bans, so names resolve through the tailnet DoH (discovered from the netmap or taken
-        // from the seed set). In the socks5 mode the trusted upstream resolves the name carried by
-        // the CONNECT — nothing in this process resolves anything, so no pool is built and no
-        // probes run.
+        // from the seed set). In the external-upstream modes the trusted upstream resolves the
+        // name carried by the CONNECT — no pool is built and no probes run.
         DohEndpointPool? pool = null;
         CachingDnsResolver? resolver = null;
-        if (socks5)
+        if (external)
         {
-            log.Info("doh: not used in the socks5 mode: names go to the upstream with the CONNECT");
+            log.Info(mode == ChainMode.Http
+                ? "doh: not used in the http mode: names go to the HTTP upstream with the CONNECT"
+                : "doh: not used in the socks5 mode: names go to the upstream with the CONNECT");
         }
         else
         {
@@ -191,24 +196,32 @@ public sealed class ProxyRuntime : IAsyncDisposable
             fp.ActivityMarkerPath,
             TimeSpan.FromSeconds(fp.ActivityTouchIntervalSeconds));
 
-        // the skipped socks5 shape: no local proxy at all — the applications point at the
-        // upstream itself (chain.socks5.upstream, which must speak HTTP CONNECT too), the
-        // supervisor is a no-op
+        // the skipped shapes (the http mode, or socks5 with forwardProxy.enabled=false): no local
+        // proxy at all — the applications point at the external upstream itself, the supervisor is
+        // a no-op
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
         if (skipProxy)
         {
-            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {config.Chain.Socks5.Upstream}");
+            log.Info(mode == ChainMode.Http
+                ? $"forward-proxy: the http mode runs no local proxy — the applications point at {config.Chain.Http.Upstream}"
+                : $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {config.Chain.Socks5.Upstream}");
+            if (mode == ChainMode.Http && config.ForwardProxy.Enabled)
+            {
+                log.Warn("forward-proxy: forwardProxy.enabled=true is ignored in the http mode — the provided HTTP upstream is the applications endpoint");
+            }
         }
 
         ForwardProxyService? proxy = skipProxy
             ? null
-            : new ForwardProxyService(fp, resolver, socks, marker, log, passHostNameToUpstream: socks5);
+            : new ForwardProxyService(fp, resolver, socks, marker, log, passHostNameToUpstream: mode == ChainMode.Socks5);
 
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
         var tcpTable = new TcpConnectionTable();
         var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log,
-            skipped: skipProxy, skippedAppsEndpoint: skipProxy ? config.Chain.Socks5.Upstream : null);
+            skipped: skipProxy,
+            skippedAppsEndpoint: skipProxy ? AppProxyEndpoint.Address(config) : null,
+            skippedReason: skipProxy ? SkipReason(config) : null);
         var watchdogLog = NewLog("watchdog.log");
         var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");
@@ -229,7 +242,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             // a completed stop takes the idle stopper down with the chain (awaited: "chain down"
             // means no stoppers either — the GUI and `pnr chain down` return to a clean state)
             ct => watchdogControl.StopAsync(ct),
-            config.Chain.EffectiveMode == ChainMode.Socks5
+            config.Chain.EffectiveMode is ChainMode.Socks5 or ChainMode.Http
                 ? ct => EgressCheckAsync(config, socks, chainLog, ct)
                 : null,
             proxyDisabled: !config.ForwardProxy.Enabled);
@@ -268,13 +281,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
                 new WslProcessRunner());
         // The idle stopper also reads the chain's egress listener: the browser profile goes straight
         // there (mitigating the application proxy), so its live connections are what keeps the chain
-        // from being stopped under an open browser. In the socks5 mode the egress is external —
-        // stopping the chain does not cut the browser, and the port means nothing (0). The proxy
-        // port is the applications proxy endpoint: the local listener's port in the default shape,
-        // the external endpoint's in the skipped one (the clients connect there all the same).
-        var egressPort = config.Chain.EffectiveMode == ChainMode.Socks5
-            ? 0
-            : Socks5Client.ParseEndPoint(config.Chain.Tailscale.SocksListen).Port;
+        // from being stopped under an open browser. In the external-upstream modes the egress is
+        // external — stopping the chain does not cut the browser, and the port means nothing (0).
+        // The proxy port is the applications proxy endpoint: the local listener's port in the
+        // default shape, the external endpoint's in a skipped one (the clients connect there all
+        // the same).
+        var egressPort = mode == ChainMode.Tailscale
+            ? Socks5Client.ParseEndPoint(config.Chain.Tailscale.SocksListen).Port
+            : 0;
         var usage = new ClaudeUsageProbe(
             processes,
             new TcpEstablishedConnectionCounter(),
@@ -360,9 +374,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
         (await ChainProbeAsync(config, ct)).Ok;
 
     /// <summary>
-    /// The socks5 egress check: a CONNECT-dial by name straight through the upstream — the same
-    /// per-connection shape as the proxy's own path (the name rides the tunnel, the upstream
-    /// resolves on its side).
+    /// The external-upstream egress check (socks5/http): a CONNECT-dial by name straight through
+    /// the upstream — the same per-connection shape as the clients' own path (the name rides the
+    /// tunnel, the upstream resolves on its side). socks5 speaks the SOCKS5 handshake; the http
+    /// upstream answers HTTP CONNECT itself, so the roundtrip goes straight against it.
     /// </summary>
     private static async Task<bool> EgressCheckAsync(
         AppConfig config,
@@ -373,6 +388,18 @@ public sealed class ProxyRuntime : IAsyncDisposable
         try
         {
             var fp = config.ForwardProxy;
+            if (config.Chain.EffectiveMode == ChainMode.Http)
+            {
+                var endpoint = Socks5Client.ParseEndPoint(config.Chain.Http.Upstream);
+                return await ProxyHealthCheck.CheckAsync(
+                    endpoint.Address.ToString(),
+                    endpoint.Port,
+                    fp.HealthCheckHost,
+                    fp.HealthCheckPort,
+                    TimeSpan.FromSeconds(fp.SocksTimeoutSeconds),
+                    ct);
+            }
+
             using var connection = await socks.ConnectAsync(
                 fp.HealthCheckHost,
                 fp.HealthCheckPort,
@@ -386,6 +413,12 @@ public sealed class ProxyRuntime : IAsyncDisposable
             return false;
         }
     }
+
+    /// <summary>The skipped-shape log line: which mode skipped the local proxy and what stands in for it.</summary>
+    private static string SkipReason(AppConfig config) =>
+        config.Chain.EffectiveMode == ChainMode.Http
+            ? $"forward-proxy: skipped in the http mode — the applications point at {config.Chain.Http.Upstream}"
+            : $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {config.Chain.Socks5.Upstream}";
 
     private static Task<HealthProbeResult> ChainProbeAsync(AppConfig config, CancellationToken ct)
     {
@@ -429,7 +462,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
     /// trusted proxy from chain.socks5 (with its RFC 1929 credentials); in the tailscale
     /// mode — the sidecar's own listener (chain.tailscale.socksListen), which needs no
     /// authentication. Deriving it from the daemon's listener keeps the address in one place:
-    /// the proxy cannot drift from the listener it must dial.</summary>
+    /// the proxy cannot drift from the listener it must dial. The http mode never builds the
+    /// proxy (there is no dialer for an HTTP upstream and nothing needs one) — the value it
+    /// gets here is never used.</summary>
     internal static (string EndPoint, string User, string Password) ResolveUpstream(AppConfig config) =>
         config.Chain.EffectiveMode == ChainMode.Socks5
             ? (config.Chain.Socks5.Upstream,

@@ -10,14 +10,16 @@ namespace PrivateNetRouting.Core.Launcher;
 /// <summary>
 /// Where a browser profile's traffic goes — chosen by browser.egress. "forward-proxy" (default):
 /// the applications proxy endpoint (AppProxyEndpoint — the local forward proxy forwardProxy.listen,
-/// or, when the local proxy is skipped in the socks5 mode, the external endpoint), spoken over HTTP
-/// CONNECT, so the names ride the CONNECT and are resolved on the proxy side — the local ban cannot
-/// poison them; in the default shape the proxy process (the GUI in the tray or the detached worker)
-/// has to be running, in the skipped shape the external upstream does. "chain": the chain's final
-/// SOCKS5 — the sidecar's own listener (chain.daemonSocksListen) in the tailscale mode, the external
-/// upstream (forwardProxy.socks5Upstream) in the socks5 one; the profile then works on its own (its
-/// desktop shortcut needs no application process), but the tailscale sidecar resolves names with
-/// the system resolver, and names blocked from direct access do not open through it.
+/// or, when the local proxy does not run — the http mode, or the socks5 mode with
+/// forwardProxy.enabled=false — the external endpoint), spoken over HTTP CONNECT, so the names
+/// ride the CONNECT and are resolved on the proxy side — the local ban cannot poison them; in
+/// the default shape the proxy process (the GUI in the tray or the detached worker) has to be
+/// running, in a skipped shape the external upstream does. "chain": the chain's final egress —
+/// the sidecar's own SOCKS5 listener (chain.daemonSocksListen) in the tailscale mode, the
+/// external upstream (chain.socks5.upstream as SOCKS5, chain.http.upstream as HTTP CONNECT) in
+/// the external modes; the profile then works on its own (its desktop shortcut needs no
+/// application process), but the tailscale sidecar resolves names with the system resolver, and
+/// names blocked from direct access do not open through it.
 /// </summary>
 public static class BrowserEgress
 {
@@ -26,14 +28,23 @@ public static class BrowserEgress
 
     public static string Resolve(AppConfig config) =>
         config.Browser.EgressMode == BrowserEgressMode.Chain
-            ? config.Chain.EffectiveMode == ChainMode.Socks5
-                ? config.Chain.Socks5.Upstream
-                : config.Chain.Tailscale.SocksListen
+            ? config.Chain.EffectiveMode switch
+            {
+                ChainMode.Socks5 => config.Chain.Socks5.Upstream,
+                ChainMode.Http => config.Chain.Http.Upstream,
+                _ => config.Chain.Tailscale.SocksListen,
+            }
             : AppProxyEndpoint.Address(config);
 
-    /// <summary>The URL scheme the profile must speak to the egress: the application proxy is HTTP CONNECT, the chain's own is SOCKS5.</summary>
+    /// <summary>
+    /// The URL scheme the profile must speak to the egress: HTTP CONNECT everywhere but the
+    /// chain's own SOCKS5 — the sidecar's listener in the tailscale mode and the socks5 mode's
+    /// upstream; the http mode's upstream is an HTTP proxy itself, so its chain egress is http.
+    /// </summary>
     public static string Scheme(AppConfig config) =>
-        config.Browser.EgressMode == BrowserEgressMode.Chain ? Socks5Scheme : HttpScheme;
+        config.Browser.EgressMode == BrowserEgressMode.Chain
+            ? (config.Chain.EffectiveMode == ChainMode.Http ? HttpScheme : Socks5Scheme)
+            : HttpScheme;
 
     /// <summary>The egress as a proxy URL ("scheme://host:port") for command lines and logs.</summary>
     public static string ProxyUrl(AppConfig config) => $"{Scheme(config)}://{Resolve(config)}";

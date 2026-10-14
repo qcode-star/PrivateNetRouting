@@ -54,7 +54,8 @@ public sealed class DiagnosticsService(
     public async Task<DiagnosticsSummary> GetSummaryAsync(CancellationToken ct)
     {
         var chainConfig = config.Chain;
-        var socks5 = chainConfig.EffectiveMode == ChainMode.Socks5;
+        // the external-upstream modes (socks5, http): the daemon ports mean nothing there
+        var external = chainConfig.EffectiveMode is ChainMode.Socks5 or ChainMode.Http;
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
         var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.HttpListen).Port;
         var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.SocksListen).Port;
@@ -66,8 +67,8 @@ public sealed class DiagnosticsService(
         IReadOnlyList<TcpListenerEntry> proxyListeners = skipProxy
             ? []
             : tcpTable.GetListeners(Socks5Client.ParseEndPoint(config.ForwardProxy.Listen).Port);
-        // in the socks5 mode the daemon ports are foreign — they say nothing about our chain
-        IReadOnlyList<TcpListenerEntry> daemonListeners = socks5 ? [] : tcpTable.GetListeners(daemonHttpPort);
+        // in the external-upstream modes the daemon ports are foreign — they say nothing about our chain
+        IReadOnlyList<TcpListenerEntry> daemonListeners = external ? [] : tcpTable.GetListeners(daemonHttpPort);
         var chainStopped = skipProxy
             ? state.UpstreamReachable != true
             : daemonListeners.Count == 0 && proxyListeners.Count == 0 && !proxy.IsRunning;
@@ -76,14 +77,14 @@ public sealed class DiagnosticsService(
             return new DiagnosticsSummary(ChainStopped: true, Sections: []);
         }
 
-        IReadOnlyList<TcpListenerEntry> daemonSocksListeners = socks5 ? [] : tcpTable.GetListeners(daemonSocksPort);
+        IReadOnlyList<TcpListenerEntry> daemonSocksListeners = external ? [] : tcpTable.GetListeners(daemonSocksPort);
         var guard = await guardCore(ct);
         var healthProbeWanted = skipProxy
             ? state.UpstreamReachable == true
             : proxy.IsRunning || proxyListeners.Count > 0;
         var sections = new List<DiagSection>
         {
-            socks5 ? EgressSection(state) : ChainSection(state, daemonListeners, daemonSocksListeners),
+            external ? EgressSection(state) : ChainSection(state, daemonListeners, daemonSocksListeners),
             ProxySection(proxy, proxyListeners, proxyPort, skipProxy),
             await HealthSectionAsync(healthProbeWanted, ct),
             GuardsSection(guard.Ban, guard.Policy),
@@ -93,13 +94,13 @@ public sealed class DiagnosticsService(
         return new DiagnosticsSummary(ChainStopped: false, Sections: sections);
     }
 
-    /// <summary>socks5 egress: the configured external upstream (with its user, never the password) and whether it answers.</summary>
+    /// <summary>External-upstream egress (socks5/http): the configured upstream (the socks5 one with
+    /// its user, never the password) and whether it answers.</summary>
     private DiagSection EgressSection(ChainState state)
     {
-        var socks5 = config.Chain.Socks5;
-        var display = string.IsNullOrEmpty(socks5.User)
-            ? socks5.Upstream
-            : $"{socks5.User}@{socks5.Upstream}";
+        var display = config.Chain.EffectiveMode == ChainMode.Http
+            ? config.Chain.Http.Upstream
+            : WithUser(config.Chain.Socks5.Upstream, config.Chain.Socks5.User);
         var line = state.UpstreamReachable switch
         {
             true => new DiagLine($"egress ({display})", "reachable", DiagMark.Good),
@@ -108,6 +109,9 @@ public sealed class DiagnosticsService(
         };
         return new DiagSection("chain", [line]);
     }
+
+    private static string WithUser(string upstream, string user) =>
+        string.IsNullOrEmpty(user) ? upstream : $"{user}@{upstream}";
 
     private DiagSection ChainSection(
         ChainState state,

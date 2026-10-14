@@ -185,8 +185,8 @@
                             </StackPanel>
 
                             <!-- The upstream's listeners: in the tailscale mode the sidecar daemon's
-                                 HTTP and SOCKS5 ports, in the socks5 mode the external proxy with
-                                 its reachability word (the label follows the chain mode) -->
+                                 HTTP and SOCKS5 ports, in the external-upstream modes the external
+                                 proxy with its reachability word (the label follows the chain mode) -->
                             <TextBlock x:Name="UpstreamListenersLabel" Grid.Row="1" Grid.Column="0"
                                        Text="{DynamicResource Main.TailscaleListeners}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,8"/>

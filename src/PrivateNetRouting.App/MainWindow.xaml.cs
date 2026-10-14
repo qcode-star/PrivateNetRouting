@@ -38,20 +38,22 @@ public partial class MainWindow : Window
 {
     /// <summary>The chain stages in bring-up order — the order the rail draws them in; the mode picks the list.</summary>
     private static readonly string[] TailscaleComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
-    private static readonly string[] Socks5Components = ["Egress", "Proxy", "Health"];
 
-    /// <summary>The skipped socks5 shape (forwardProxy.enabled=false): no local proxy stage at all.</summary>
-    private static readonly string[] Socks5SkippedComponents = ["Egress", "Health"];
+    /// <summary>The external-upstream modes (socks5, http): the links before the proxy collapse into one egress check.</summary>
+    private static readonly string[] ExternalComponents = ["Egress", "Proxy", "Health"];
+
+    /// <summary>The skipped shape (the http mode, or socks5 + forwardProxy.enabled=false): no local proxy stage at all.</summary>
+    private static readonly string[] ExternalSkippedComponents = ["Egress", "Health"];
 
     private static readonly string[] TailscaleRailKeys =
         ["Main.Rail.Daemon", "Main.Rail.Keeper", "Main.Rail.Node", "Main.Rail.Proxy", "Main.Rail.Health"];
-    private static readonly string[] Socks5RailKeys = ["Main.Rail.Egress", "Main.Rail.Proxy", "Main.Rail.Health"];
-    private static readonly string[] Socks5SkippedRailKeys = ["Main.Rail.Egress", "Main.Rail.Health"];
+    private static readonly string[] ExternalRailKeys = ["Main.Rail.Egress", "Main.Rail.Proxy", "Main.Rail.Health"];
+    private static readonly string[] ExternalSkippedRailKeys = ["Main.Rail.Egress", "Main.Rail.Health"];
 
     private readonly ProxyRuntime _runtime;
     private readonly MainViewModel _viewModel;
     private readonly ChainRail _rail;
-    private readonly bool _socks5Mode;
+    private readonly bool _externalUpstream;
     private readonly bool _skipProxy;
     private readonly string[] _chainComponents;
     private readonly DispatcherTimer _refreshTimer;
@@ -89,17 +91,17 @@ public partial class MainWindow : Window
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
         DataContext = _viewModel;
-        _socks5Mode = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
+        _externalUpstream = runtime.Config.Chain.EffectiveMode != ChainMode.Tailscale;
         _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
-        _chainComponents = _socks5Mode
-            ? (_skipProxy ? Socks5SkippedComponents : Socks5Components)
+        _chainComponents = _externalUpstream
+            ? (_skipProxy ? ExternalSkippedComponents : ExternalComponents)
             : TailscaleComponents;
         _rail = new ChainRail(
             RailHost,
-            _socks5Mode
-                ? (_skipProxy ? Socks5SkippedRailKeys : Socks5RailKeys)
+            _externalUpstream
+                ? (_skipProxy ? ExternalSkippedRailKeys : ExternalRailKeys)
                 : TailscaleRailKeys);
-        UpstreamListenersLabel.Text = Loc.S(_socks5Mode ? "Main.EgressListeners" : "Main.TailscaleListeners");
+        UpstreamListenersLabel.Text = Loc.S(_externalUpstream ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
         SyncAutoStartBox();
@@ -215,7 +217,7 @@ public partial class MainWindow : Window
         RenderGuardSummary();
         UpdateGuardAllButton();
         ApplyCardLayout(); // the toggle tooltips and the guard-all word follow the language
-        UpstreamListenersLabel.Text = Loc.S(_socks5Mode ? "Main.EgressListeners" : "Main.TailscaleListeners");
+        UpstreamListenersLabel.Text = Loc.S(_externalUpstream ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Relabel();
         if (_lastChainState is not null)
         {
@@ -364,7 +366,7 @@ public partial class MainWindow : Window
     private void RenderRail(ChainState state)
     {
         int proxyStage, healthStage;
-        if (_socks5Mode)
+        if (_externalUpstream)
         {
             _rail.SetStage(0, state.UpstreamReachable switch
             {
@@ -950,7 +952,8 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (bringUp)
         {
             // Stop during a bring-up: cancel, then bring down whatever got raised before the
-            // cancellation (in socks5 that is normally nothing — the egress check runs first).
+            // cancellation (in the external-upstream modes that is normally nothing — the egress
+            // check runs first).
             // The quiet stop draws no rail steps; the next state poll redraws the card.
             _chainBusyCancellable = false;
             _viewModel.SetChainBusy(true, cancellable: false);
@@ -1332,9 +1335,9 @@ public partial class MainWindow : Window
         try
         {
             // The question about an egress that did not answer, asked by the launcher before the
-            // launch. When the egress is ours to raise (the forward proxy in both modes, the
-            // sidecar's listener in the tailscale one), yes raises the chain (drawn in the card,
-            // exactly like a manual bring-up) and the launch goes on. Over the external socks5
+            // launch. When the egress is ours to raise (the forward proxy while the chain runs
+            // it, the sidecar's listener in the tailscale mode), yes raises the chain (drawn in
+            // the card, exactly like a manual bring-up) and the launch goes on. Over an external
             // upstream there is nothing to raise — the question is only whether to start with an
             // upstream that is down. The launcher's callback runs off the UI thread, so the
             // question and the bring-up are marshalled back here.
@@ -1884,13 +1887,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _launchRunning;
     private string? _updateNoticeKey;
     private object?[] _updateNoticeArgs = [];
-    private readonly bool _socks5;
+    private readonly bool _externalUpstream;
     private readonly bool _skipProxy;
 
     public MainViewModel(ProxyRuntime runtime)
     {
         _runtime = runtime;
-        _socks5 = runtime.Config.Chain.EffectiveMode == ChainMode.Socks5;
+        _externalUpstream = runtime.Config.Chain.EffectiveMode != ChainMode.Tailscale;
         _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
         Loc.LanguageChanged += OnLanguageChanged;
         // until the first liveness poll — the same word the not-running state uses
@@ -1931,14 +1934,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>The upstream's listeners: in the tailscale mode the sidecar daemon's HTTP and SOCKS5
-    /// ports, in the socks5 mode the external proxy's address (with its user, never the password).</summary>
+    /// ports, in the external-upstream modes the external proxy's address (the socks5 one with its
+    /// user, never the password).</summary>
     public string UpstreamListeners
     {
         get => _upstreamListeners;
         private set => SetField(ref _upstreamListeners, value);
     }
 
-    /// <summary>State word of the upstream: tailscale — listener presence, socks5 — reachability.</summary>
+    /// <summary>State word of the upstream: tailscale — listener presence, external modes — reachability.</summary>
     public string UpstreamState
     {
         get => _upstreamState;
@@ -2196,12 +2200,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         TotalConnections = proxy.TotalConnections;
         FailedConnections = proxy.FailedConnections;
         FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
-        if (_socks5)
+        if (_externalUpstream)
         {
-            var socks5 = _runtime.Config.Chain.Socks5;
-            UpstreamListeners = string.IsNullOrEmpty(socks5.User)
-                ? socks5.Upstream
-                : $"{socks5.User}@{socks5.Upstream}";
+            UpstreamListeners = _runtime.Config.Chain.EffectiveMode == ChainMode.Http
+                ? _runtime.Config.Chain.Http.Upstream
+                : WithUser(_runtime.Config.Chain.Socks5.Upstream, _runtime.Config.Chain.Socks5.User);
             RefreshEgressState();
         }
         else
@@ -2238,7 +2241,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    /// <summary>socks5 upstream: the reachability word comes from the last chain snapshot.</summary>
+    /// <summary>External upstream: the reachability word comes from the last chain snapshot.</summary>
     private void RefreshEgressState()
     {
         (_upstreamState, _upstreamBrush) = _lastChainState?.UpstreamReachable switch
@@ -2250,6 +2253,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(UpstreamState));
         OnPropertyChanged(nameof(UpstreamBrush));
     }
+
+    private static string WithUser(string upstream, string user) =>
+        string.IsNullOrEmpty(user) ? upstream : $"{user}@{upstream}";
 
     /// <summary>Liveness word of the idle stopper, from the process list; the button word follows the state.</summary>
     public void UpdateIdleStop(bool running)

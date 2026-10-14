@@ -343,11 +343,29 @@ public sealed class ChainTailscaleConfig
 }
 
 /// <summary>
+/// The provided external HTTP proxy of the http chain mode: a CONNECT-capable HTTP proxy that
+/// resolves the names carried by the CONNECT on its side. The local forward proxy does not run
+/// in this mode at all (forwardProxy.enabled is ignored there) — this address is the
+/// applications proxy endpoint for everyone. The other modes ignore the whole section.
+/// </summary>
+public sealed class ChainHttpConfig
+{
+    /// <summary>
+    /// The upstream "host:port" (an IP, like every endpoint in the config). It is the address
+    /// written into every client (the launchers, the managed policy, the settings env, the WSL
+    /// sync, the browser profile) — it must answer HTTP CONNECT itself, and be reachable from
+    /// the WSL distros when the WSL sync is on (loopback-only is unreachable from a distro, and
+    /// the guard status warns about it).
+    /// </summary>
+    public string Upstream { get; set; } = "";
+}
+
+/// <summary>
 /// The external trusted SOCKS5 upstream of the socks5 chain mode: the target name rides the
 /// CONNECT and the upstream resolves it on its side. With the local proxy skipped
 /// (forwardProxy.enabled=false) the upstream is also the applications proxy endpoint — every
 /// client is pointed at it, so it must answer HTTP CONNECT too (a mixed HTTP+SOCKS inbound).
-/// The tailscale mode ignores the whole section.
+/// The other modes ignore the whole section.
 /// </summary>
 public sealed class ChainSocks5Config
 {
@@ -370,11 +388,12 @@ public sealed class ChainSocks5Config
 /// <summary>
 /// The chain that carries the traffic. The mode picks the shape (a change applies after a
 /// restart): "tailscale" — the userspace sidecar (the tailscale section), "socks5" — the
-/// external upstream (the socks5 section).
+/// external SOCKS5 upstream (the socks5 section), "http" — the provided plain HTTP proxy (the
+/// http section).
 /// </summary>
 public sealed class ChainConfig
 {
-    /// <summary>"tailscale" (default) or "socks5"; unknown — tailscale.</summary>
+    /// <summary>"tailscale" (default), "socks5" or "http"; unknown — tailscale.</summary>
     public string Mode { get; set; } = "tailscale";
 
     [JsonIgnore]
@@ -386,6 +405,8 @@ public sealed class ChainConfig
     public ChainTailscaleConfig Tailscale { get; set; } = new();
 
     public ChainSocks5Config Socks5 { get; set; } = new();
+
+    public ChainHttpConfig Http { get; set; } = new();
 }
 
 /// <summary>
@@ -622,7 +643,9 @@ public sealed class ForwardProxyConfig
     /// client is pointed at <see cref="ChainSocks5Config.Upstream"/> instead, so the upstream
     /// must speak both protocols (a mixed HTTP+SOCKS inbound does the translation itself); in
     /// the tailscale mode the proxy is load-bearing — a chain bring-up refuses with an explicit
-    /// error.
+    /// error. The http mode ignores the flag: the provided HTTP proxy speaks CONNECT itself,
+    /// so the local proxy never runs there and <see cref="ChainHttpConfig.Upstream"/> is the
+    /// applications endpoint for everyone.
     /// </summary>
     public bool Enabled { get; set; } = true;
 
@@ -662,6 +685,10 @@ public sealed class ForwardProxyConfig
 
     public int DohProbeTimeoutSeconds { get; set; } = 4;
 
+    /// <summary>
+    /// Timeout of one dial through the external upstream, sec: the SOCKS5 handshake in the socks5
+    /// mode, the CONNECT roundtrip in the http mode (the egress check).
+    /// </summary>
     public int SocksTimeoutSeconds { get; set; } = 12;
 
     /// <summary>Timeout for reading the request header from the client.</summary>

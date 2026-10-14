@@ -533,6 +533,92 @@ public class ChainSupervisorTests : IDisposable
         Assert.Empty(_calls);
     }
 
+    // ----- http mode: the provided HTTP upstream, the local proxy never runs -----
+
+    /// <summary>
+    /// The http mode is a skipped shape by definition — even with forwardProxy.enabled=true:
+    /// the bring-up is the egress check and health against the provided HTTP upstream, and no
+    /// proxy link exists (the HTTP upstream speaks CONNECT itself).
+    /// </summary>
+    [Fact]
+    public async Task HttpBringUpRunsEgressThenHealthWithoutTheProxy()
+    {
+        var supervisor = Create(
+            mode: "http",
+            upstream: _ => Task.FromResult(true),
+            health: _ => Task.FromResult(true),
+            proxyDisabled: false);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Empty(_calls); // no proxy start (the flag is ignored), no daemon/keeper/cli touches
+    }
+
+    [Fact]
+    public async Task HttpEgressFailureKeepsEverythingDownAndNamesTheUpstreamKind()
+    {
+        var supervisor = Create(
+            mode: "http",
+            upstream: _ => Task.FromResult(false),
+            healthWaitSeconds: 1);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        Assert.Contains("HTTP upstream", ex.Message);
+        Assert.DoesNotContain("proxy.start", _calls);
+    }
+
+    [Fact]
+    public async Task HttpStopTouchesNothingAndFiresTheHook()
+    {
+        var tokens = new List<CancellationToken>();
+        var supervisor = Create(mode: "http", chainStopped: ct =>
+        {
+            tokens.Add(ct);
+            return Task.CompletedTask;
+        });
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Empty(_calls); // the external upstream is not ours to stop
+        Assert.Equal([CancellationToken.None], tokens);
+    }
+
+    [Fact]
+    public async Task HttpStateReportsNotApplicableProxy()
+    {
+        var supervisor = Create(
+            mode: "http",
+            upstream: _ => Task.FromResult(true),
+            health: _ => Task.FromResult(true),
+            proxyDisabled: false);
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.Null(state.ProxyRunning); // "not applicable" — there is no local proxy in this mode
+        Assert.True(state.ProxyHealthy);
+        Assert.True(state.UpstreamReachable);
+        Assert.True(state.IsFullyUp);
+        Assert.False(state.IsStopped);
+    }
+
+    [Fact]
+    public async Task HttpStateWithDeadEgressIsAStoppedChain()
+    {
+        var supervisor = Create(
+            mode: "http",
+            upstream: _ => Task.FromResult(false),
+            health: _ => Task.FromResult(true));
+
+        var state = await supervisor.GetStateAsync(CancellationToken.None);
+
+        Assert.Null(state.ProxyRunning);
+        Assert.False(state.ProxyHealthy); // health never runs past a dead egress
+        Assert.False(state.UpstreamReachable);
+        Assert.True(state.IsStopped);
+    }
+
     [Fact]
     public async Task TailscaleStateLeavesUpstreamUnknown()
     {

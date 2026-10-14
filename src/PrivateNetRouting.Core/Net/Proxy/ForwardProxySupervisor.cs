@@ -16,8 +16,9 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// a busy port is never bound by a second instance (whosever it is), the shutdown kills only a
 /// worker identified by its command line, a foreign owner is not touched (warning in the log).
 /// Liveness for the chain is the port: whoever asks (GUI, pnr), the answer is the same.
-/// In the skipped socks5 shape (forwardProxy.enabled=false) there is no local proxy at all:
-/// the supervisor becomes an honest no-op — never running, nothing to start/stop/detach.
+/// In the skipped shapes (the http mode, or socks5 + forwardProxy.enabled=false) there is no
+/// local proxy at all: the supervisor becomes an honest no-op — never running, nothing to
+/// start/stop/detach.
 /// </summary>
 public sealed class ForwardProxySupervisor(
     ForwardProxyConfig config,
@@ -30,7 +31,8 @@ public sealed class ForwardProxySupervisor(
     Action<int>? killProcess = null,
     Func<string?>? currentExePath = null,
     bool skipped = false,
-    string? skippedAppsEndpoint = null) : IProxyControl, IProxyStatistics
+    string? skippedAppsEndpoint = null,
+    string? skippedReason = null) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
@@ -221,7 +223,8 @@ public sealed class ForwardProxySupervisor(
     private string DescribeOwners() => DescribeOwners(tcpTable.GetListeners(Port));
 
     private string SkippedMessage =>
-        $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {skippedAppsEndpoint ?? "chain.socks5.upstream"}";
+        skippedReason
+        ?? $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {skippedAppsEndpoint ?? "chain.socks5.upstream"}";
 
     private static string DescribeOwners(IReadOnlyList<TcpListenerEntry> owners) =>
         string.Join(", ", owners

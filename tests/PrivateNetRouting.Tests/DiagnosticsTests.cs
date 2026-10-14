@@ -227,6 +227,38 @@ public class DiagnosticsTests : IDisposable
         Assert.Empty(summary.Sections);
     }
 
+    // ----- http mode: the chain section is the provided HTTP upstream, no local proxy -----
+
+    [Fact]
+    public async Task HttpModeShowsTheUpstreamAndSkipsTheLocalProxy()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _,
+            mode: "http", upstreamReachable: true);
+        config.Chain.Http.Upstream = "192.0.2.20:3128";
+        proxy.IsRunning = false; // no local proxy exists in this mode (forwardProxy.enabled is ignored)
+        // even a foreign listener on the forward-proxy port means nothing: nobody of ours is there
+        var forwardProxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[forwardProxyPort] = [new TcpListenerEntry(IPAddress.Loopback, forwardProxyPort, 100, "httpd")];
+        probe.Result = HealthProbeResult.OkIn(70, "HTTP/1.1 200 Connection Established");
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.False(summary.ChainStopped);
+        Assert.Equal(["chain", "proxy", "health", "guards", "watchdog", "logs"], summary.Sections.Select(s => s.Key));
+
+        var egress = Section(summary, "chain").Single();
+        Assert.Equal("egress (192.0.2.20:3128)", egress.Name); // the bare upstream: no user applies here
+        Assert.Equal("reachable", egress.Value);
+
+        var proxySection = Section(summary, "proxy");
+        Assert.Equal(
+            "skipped — the applications point at 192.0.2.20:3128",
+            proxySection.Single(l => l.Name == "forward proxy").Value);
+
+        var health = Section(summary, "health").Single(l => l.Name.StartsWith("CONNECT-roundtrip"));
+        Assert.Contains("OK in 70 ms", health.Value); // the probe runs against the provided upstream
+    }
+
     // ----- socks5 mode, the local proxy skipped (forwardProxy.enabled=false) -----
 
     [Fact]
@@ -406,7 +438,7 @@ public class DiagnosticsTests : IDisposable
         guardCore = new FakeGuardCore();
         var probeFixture = probe;
         var guardFixture = guardCore;
-        var state = mode == "socks5"
+        var state = mode is "socks5" or "http"
             ? skipProxy
                 ? new ChainState(false, false, false, null, null, upstreamReachable == true, upstreamReachable)
                 : new ChainState(false, false, false, null, proxy.IsRunning, true, upstreamReachable)

@@ -26,7 +26,7 @@ internal sealed record RailStage(string Text, Brush Brush, RailMark Mark = RailM
 /// <summary>
 /// The chain rail: the stages of the chain in bring-up order, drawn as markers sitting on a link.
 /// The stage list follows the chain mode (tailscale: daemon → keeper → node → proxy → health;
-/// socks5: egress → proxy → health) and comes in through the constructor. A marker lights up when
+/// external upstream: egress → proxy → health) and comes in through the constructor. A marker lights up when
 /// its stage comes up, and a link carries the colour of the stage it leads to — so the rail shows
 /// where the flow has got to and where it stops. It runs live from the bring-up steps and, the
 /// rest of the time, from the chain snapshot. Colours are animated, so a stage lights up instead

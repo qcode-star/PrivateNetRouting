@@ -99,17 +99,19 @@ internal static class Program
         }
 
         var config = AppConfigStore.LoadOrCreate();
-        if (!config.ForwardProxy.Enabled)
+        if (AppProxyEndpoint.IsSkipped(config))
         {
-            Console.WriteLine("forward proxy is disabled in config (forwardProxy.enabled=false)");
+            Console.WriteLine(config.Chain.EffectiveMode == ChainMode.Http
+                ? "the local forward proxy does not run in the http mode — " +
+                  $"the applications point at {config.Chain.Http.Upstream}"
+                : "the local forward proxy is skipped in the socks5 mode (forwardProxy.enabled=false) — " +
+                  $"the applications point at {config.Chain.Socks5.Upstream}");
             return 0;
         }
 
-        if (AppProxyEndpoint.IsSkipped(config))
+        if (!config.ForwardProxy.Enabled)
         {
-            Console.WriteLine(
-                "the local forward proxy is skipped in the socks5 mode (forwardProxy.enabled=false) — " +
-                $"the applications point at {config.Chain.Socks5.Upstream}");
+            Console.WriteLine("forward proxy is disabled in config (forwardProxy.enabled=false)");
             return 0;
         }
 
@@ -157,12 +159,14 @@ internal static class Program
             case "status":
                 var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
                 var skipProxy = AppProxyEndpoint.IsSkipped(config);
-                if (config.Chain.EffectiveMode == ChainMode.Socks5)
+                if (config.Chain.EffectiveMode != ChainMode.Tailscale)
                 {
-                    var upstream = string.IsNullOrEmpty(config.Chain.Socks5.User)
-                        ? config.Chain.Socks5.Upstream
-                        : $"{config.Chain.Socks5.User}@{config.Chain.Socks5.Upstream}";
-                    Console.WriteLine($"upstream:  {upstream}, {(state.UpstreamReachable is true ? "reachable" : state.UpstreamReachable is false ? "no route" : "not checked")}");
+                    var external = config.Chain.EffectiveMode == ChainMode.Http
+                        ? config.Chain.Http.Upstream
+                        : string.IsNullOrEmpty(config.Chain.Socks5.User)
+                            ? config.Chain.Socks5.Upstream
+                            : $"{config.Chain.Socks5.User}@{config.Chain.Socks5.Upstream}";
+                    Console.WriteLine($"upstream:  {external}, {(state.UpstreamReachable is true ? "reachable" : state.UpstreamReachable is false ? "no route" : "not checked")}");
                 }
                 else
                 {
@@ -172,7 +176,7 @@ internal static class Program
                 }
 
                 Console.WriteLine(skipProxy
-                    ? $"proxy:     skipped (the applications point at {config.Chain.Socks5.Upstream}), health {(state.ProxyHealthy ? "alive" : "failed")}"
+                    ? $"proxy:     skipped (the applications point at {AppProxyEndpoint.Address(config)}), health {(state.ProxyHealthy ? "alive" : "failed")}"
                     : $"proxy:     {(state.ProxyRunning == true ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
                 Console.WriteLine(state.IsFullyUp ? "chain: fully up" : state.IsStopped ? "chain: stopped" : "chain: partial");
                 return 0;

@@ -186,6 +186,13 @@ public class AppConfigTests : IDisposable
 
         File.WriteAllText(_path, """
             {
+              "chain": { "mode": "http" }
+            }
+            """);
+        Assert.Equal(ChainMode.Http, AppConfigStore.LoadOrCreate(_path).Chain.EffectiveMode);
+
+        File.WriteAllText(_path, """
+            {
               "chain": { "mode": "wireguard" }
             }
             """);
@@ -256,7 +263,7 @@ public class AppConfigTests : IDisposable
         Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
 
         // the proxy off in the tailscale mode is a config error (the bring-up refuses), but the
-        // endpoint math stays honest: IsSkipped reflects only the socks5 shape
+        // endpoint math stays honest: IsSkipped stays false there
         tailscale.ForwardProxy.Enabled = false;
         Assert.False(AppProxyEndpoint.IsSkipped(tailscale));
         Assert.Equal(tailscale.ForwardProxy.Listen, AppProxyEndpoint.Address(tailscale));
@@ -275,6 +282,18 @@ public class AppConfigTests : IDisposable
         Assert.Equal("http://192.0.2.10:7080", AppProxyEndpoint.Url(socks5));
         Assert.Equal(7080, AppProxyEndpoint.Port(socks5));
         Assert.Equal(IPAddress.Parse("192.0.2.10"), AppProxyEndpoint.EndPoint(socks5).Address);
+
+        // the http mode always runs no local proxy — forwardProxy.enabled is ignored there,
+        // everything points at the provided HTTP proxy
+        var http = new AppConfig { Chain = { Mode = "http" } };
+        http.Chain.Http.Upstream = "192.0.2.20:3128";
+        Assert.True(AppProxyEndpoint.IsSkipped(http));
+        http.ForwardProxy.Enabled = true; // the flag does not bring the local proxy back
+        Assert.True(AppProxyEndpoint.IsSkipped(http));
+        Assert.Equal("192.0.2.20:3128", AppProxyEndpoint.Address(http));
+        Assert.Equal("http://192.0.2.20:3128", AppProxyEndpoint.Url(http));
+        Assert.Equal(3128, AppProxyEndpoint.Port(http));
+        Assert.Equal(IPAddress.Parse("192.0.2.20"), AppProxyEndpoint.EndPoint(http).Address);
     }
 
     [Fact]

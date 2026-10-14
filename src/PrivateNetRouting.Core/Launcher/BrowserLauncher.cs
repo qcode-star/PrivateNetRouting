@@ -94,10 +94,11 @@ public sealed record BrowserLaunchResult(BrowserLaunchOutcome Outcome, bool Egre
 /// <summary>
 /// Browser launcher for the profile created once (BrowserProfileService). There is no chain of its
 /// own in the browser's path: the profile goes through the browser egress chosen by browser.egress
-/// (BrowserEgress) — the application's forward proxy by default, the chain's final SOCKS5 as the
+/// (BrowserEgress) — the application's forward proxy by default, the chain's final egress as the
 /// self-sufficient alternative. Before a launch the egress is checked with a TCP probe; the only
 /// case the launcher touches the chain is a confirmed answer about a dead egress when the egress
-/// is ours to raise (the forward proxy in both modes, the sidecar's listener in the tailscale one).
+/// is ours to raise (the forward proxy while the chain runs it, the sidecar's listener in the
+/// tailscale mode — never an external upstream).
 /// Firefox gets its user.js rewritten on every launch through the application — the egress address
 /// and the bypass list stay fresh, and the desktop shortcut reads the same file;
 /// Chromium takes everything from the command line and keeps no proxy in the profile.
@@ -127,13 +128,14 @@ public sealed class BrowserLauncher(
 
     /// <summary>
     /// True — a dead egress is fixed by raising the chain: the forward proxy is part of the chain
-    /// bring-up in both modes, and the chain egress is ours everywhere but the external upstream
-    /// of the socks5 mode. With the local proxy skipped (forwardProxy.enabled=false) the
-    /// "forward-proxy" egress is that same upstream — not ours to raise either.
+    /// bring-up in both modes, and the chain egress is ours in the tailscale mode only — the
+    /// external upstreams of the socks5/http modes are not. With the local proxy skipped (the
+    /// http mode, or socks5 + forwardProxy.enabled=false) the "forward-proxy" egress is that same
+    /// external endpoint — not ours to raise either.
     /// </summary>
     public bool ChainOwnsEgress =>
         config.Browser.EgressMode == BrowserEgressMode.Chain
-            ? config.Chain.EffectiveMode != ChainMode.Socks5
+            ? config.Chain.EffectiveMode == ChainMode.Tailscale
             : !AppProxyEndpoint.IsSkipped(config);
 
     public string BuildChromiumBypassList() =>
@@ -262,11 +264,13 @@ public sealed class BrowserLauncher(
     /// <summary>
     /// The chain's own SOCKS5 in the tailscale mode is the sidecar's listener: it resolves names
     /// with the system resolver (tsdial never consults the netstack DNS), and the direct-access ban
-    /// blackholes exactly the AI names there — through this egress they do not open.
+    /// blackholes exactly the AI names there — through this egress they do not open. The http
+    /// mode's chain egress is an HTTP proxy: the name rides the CONNECT and is resolved on the
+    /// upstream side — no warning applies there.
     /// </summary>
     private void WarnAboutChainEgressResolution()
     {
-        if (config.Browser.EgressMode == BrowserEgressMode.Chain && config.Chain.EffectiveMode != ChainMode.Socks5)
+        if (config.Browser.EgressMode == BrowserEgressMode.Chain && config.Chain.EffectiveMode == ChainMode.Tailscale)
         {
             log.Warn(
                 "browser: the egress is the chain's own SOCKS5 — it resolves names via the system resolver, " +

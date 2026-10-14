@@ -121,7 +121,17 @@ public class BrowserLauncherTests : IDisposable
 
         config.Chain.Mode = "socks5";
         Assert.Equal(config.Chain.Socks5.Upstream, BrowserEgress.Resolve(config));
+        Assert.Equal(BrowserEgress.Socks5Scheme, BrowserEgress.Scheme(config));
         Assert.False(Create(config).ChainOwnsEgress); // external: there is nothing of ours to raise
+
+        // the http mode's upstream speaks HTTP CONNECT itself: the chain egress is http, and the
+        // names ride the CONNECT — the resolution warning of the tailscale mode does not apply
+        config.Chain.Mode = "http";
+        config.Chain.Http.Upstream = "192.0.2.20:3128";
+        Assert.Equal("192.0.2.20:3128", BrowserEgress.Resolve(config));
+        Assert.Equal(BrowserEgress.HttpScheme, BrowserEgress.Scheme(config));
+        Assert.Equal("http://192.0.2.20:3128", BrowserEgress.ProxyUrl(config));
+        Assert.False(Create(config).ChainOwnsEgress); // still external: nothing of ours to raise
     }
 
     [Fact]
@@ -137,6 +147,12 @@ public class BrowserLauncherTests : IDisposable
         config.Chain.Mode = "socks5"; // the proxy is part of that bring-up too
         Assert.Equal(config.ForwardProxy.Listen, BrowserEgress.Resolve(config));
         Assert.True(Create(config).ChainOwnsEgress);
+
+        // the http mode runs no local proxy: the egress is the provided HTTP upstream, not ours
+        config.Chain.Mode = "http";
+        config.Chain.Http.Upstream = "192.0.2.20:3128";
+        Assert.Equal("192.0.2.20:3128", BrowserEgress.Resolve(config));
+        Assert.False(Create(config).ChainOwnsEgress);
     }
 
     /// <summary>
