@@ -10,8 +10,8 @@
           * surfaces    - warm neutrals, four steps: window, band, card, code
           * text        - three weights of the warm off-white plus the accent/state colours
           * type        - Segoe UI Variable for the interface, Cascadia Mono for machine data
-          * controls    - Button (three tiers + an accent variant), CheckBox, ComboBox, TextBox,
-                          ProgressBar, ListBox, ScrollBar, ToolTip, Card
+          * controls    - Button (three tiers + an accent variant), CheckBox, RadioButton,
+                          ComboBox, TextBox, ProgressBar, ListBox, ScrollBar, ToolTip, Card
         Localized strings are always DynamicResource (the dictionary is swapped on the fly);
         tokens are StaticResource (fixed at load).
     -->
@@ -344,6 +344,53 @@
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}"/>
                                 <Setter TargetName="Box" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============================ RadioButton ========================== -->
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource Brush.Text}"/>
+            <Setter Property="FontSize" Value="{StaticResource Font.Body}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0" VerticalAlignment="Center">
+                                <Border x:Name="Ring" Margin="-3" CornerRadius="12" BorderThickness="1" BorderBrush="Transparent"/>
+                                <Border x:Name="Circle" Width="18" Height="18" CornerRadius="9" BorderThickness="1"
+                                        Background="{StaticResource Brush.Control}"
+                                        BorderBrush="{StaticResource Brush.ControlBorder}">
+                                    <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource Brush.OnAccent}"
+                                             Visibility="Collapsed"/>
+                                </Border>
+                            </Grid>
+                            <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Circle" Property="Background" Value="{StaticResource Brush.Accent}"/>
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="{StaticResource Brush.Accent}"/>
+                                <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="{StaticResource Brush.AccentEdge}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource Brush.FocusRing}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}"/>
+                                <Setter TargetName="Circle" Property="Opacity" Value="0.5"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

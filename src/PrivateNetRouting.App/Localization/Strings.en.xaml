@@ -137,8 +137,11 @@
     <s:String x:Key="BrowserProfile.ExePickTitle">Select the browser executable</s:String>
     <s:String x:Key="BrowserProfile.ExeFilter">Browser executable (*.exe)|*.exe|All files (*.*)|*.*</s:String>
     <s:String x:Key="BrowserProfile.Specify">Specify…</s:String>
-    <s:String x:Key="BrowserProfile.Shortcut">Create a desktop shortcut</s:String>
-    <s:String x:Key="BrowserProfile.ShortcutPathFmt">Shortcut: {0}</s:String>
+    <s:String x:Key="BrowserProfile.Shortcut">Create a shortcut</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutPickTitle">Select the shortcut file</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutFilter">Shortcut (*.lnk)|*.lnk|All files (*.*)|*.*</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutRequired">Specify the shortcut file</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutExtensionFmt">The shortcut must be a .lnk file: {0}</s:String>
     <s:String x:Key="BrowserProfile.ConfirmTitle">Create the profile here?</s:String>
     <s:String x:Key="BrowserProfile.Create">Create</s:String>
     <s:String x:Key="BrowserProfile.Cancel">Cancel</s:String>

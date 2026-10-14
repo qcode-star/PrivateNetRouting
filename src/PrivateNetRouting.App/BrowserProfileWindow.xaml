@@ -51,11 +51,20 @@
         <TextBlock x:Name="ExeWarning" Style="{StaticResource Text.Note}" Foreground="{StaticResource Brush.Warn}"
                    TextWrapping="Wrap" Visibility="Collapsed" Margin="0,8,0,0"/>
 
-        <!-- The shortcut leads straight to the browser with the egress baked in -->
+        <!-- The shortcut leads straight to the browser with the egress baked in; the path is
+             editable — the desktop default is only a suggestion -->
         <CheckBox x:Name="ShortcutCheck" Margin="0,20,0,0" VerticalContentAlignment="Center"
                   Checked="OnShortcutToggled" Unchecked="OnShortcutToggled"/>
-        <TextBlock x:Name="ShortcutPathText" Style="{StaticResource Text.Mono}" TextWrapping="Wrap"
-                   Visibility="Collapsed" Margin="0,8,0,0"/>
+        <Grid x:Name="ShortcutPathRow" Margin="28,8,0,0" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="ShortcutBox" Padding="8,6" VerticalContentAlignment="Center"
+                     TextChanged="OnShortcutPathChanged"/>
+            <Button x:Name="BrowseShortcutButton" Grid.Column="1" Style="{StaticResource SecondaryButton}" MinWidth="120"
+                    Margin="8,0,0,0" Click="OnBrowseShortcut"/>
+        </Grid>
 
         <TextBlock x:Name="StatusText" Style="{StaticResource Text.Note}" TextWrapping="Wrap"
                    Visibility="Collapsed" Margin="0,16,0,0"/>

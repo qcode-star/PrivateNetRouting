@@ -324,12 +324,14 @@ public static class BrowserExecutableLocator
     }
 }
 
-/// <summary>What the creation dialog asks for.</summary>
+/// <summary>What the creation dialog asks for. The shortcut path is optional: empty — the
+/// desktop default (<see cref="BrowserProfileService.ShortcutPathFor"/>).</summary>
 public sealed record BrowserProfileRequest(
     BrowserKind Kind,
     string ProfileDir,
     string ExecutablePath,
-    bool CreateDesktopShortcut);
+    bool CreateDesktopShortcut,
+    string ShortcutPath = "");
 
 public sealed record BrowserProfileResult(string ExecutablePath, string ProfileDir, string ShortcutPath);
 
@@ -372,7 +374,7 @@ public sealed class BrowserProfileService
         "browser",
         kind == BrowserKind.Firefox ? "firefox-profile" : "chrome-profile");
 
-    /// <summary>Shortcut path of the profile inside the desktop directory.</summary>
+    /// <summary>The default shortcut path of the profile inside the desktop directory; the request may name another one.</summary>
     public string ShortcutPathFor(BrowserKind kind) => Path.Combine(
         _desktopDirectory(),
         $"PrivateNetRouting {BrowserKindParser.DisplayName(kind)}.lnk");
@@ -405,7 +407,9 @@ public sealed class BrowserProfileService
         var shortcutPath = "";
         if (request.CreateDesktopShortcut)
         {
-            shortcutPath = ShortcutPathFor(request.Kind);
+            shortcutPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(
+                request.ShortcutPath.Trim().Length > 0 ? request.ShortcutPath.Trim() : ShortcutPathFor(request.Kind)));
+            Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath)!);
             var arguments = BrowserProfileCommandLine.Build(request.Kind, profileDir, $"{scheme}://{host}:{endpoint.Port}", chromiumBypass);
             _shortcuts.CreateShortcut(
                 shortcutPath,

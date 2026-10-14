@@ -338,6 +338,27 @@ public class BrowserProfileTests : IDisposable
     }
 
     [Fact]
+    public void CreateHonorsACustomShortcutPathAndCreatesItsFolder()
+    {
+        var config = NewConfig();
+        var service = CreateService(config, path => path == @"C:\fake\firefox.exe");
+        var shortcutPath = Path.Combine(_root, "launchers", "ff-proxy.lnk"); // the folder does not exist yet
+
+        var result = service.Create(new BrowserProfileRequest(
+            BrowserKind.Firefox,
+            ProfileDir("custom-shortcut"),
+            @"C:\fake\firefox.exe",
+            CreateDesktopShortcut: true,
+            ShortcutPath: shortcutPath));
+
+        var shortcut = Assert.Single(_shortcuts.Created);
+        Assert.Equal(shortcutPath, shortcut.ShortcutPath);
+        Assert.True(Directory.Exists(Path.GetDirectoryName(shortcutPath)));
+        Assert.Equal(shortcutPath, result.ShortcutPath);
+        Assert.Equal(shortcutPath, config.Browser.ShortcutPath);
+    }
+
+    [Fact]
     public void CreateRefusesAMissingExecutable()
     {
         var config = NewConfig();

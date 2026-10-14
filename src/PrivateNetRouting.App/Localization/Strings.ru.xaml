@@ -137,8 +137,11 @@
     <s:String x:Key="BrowserProfile.ExePickTitle">Выберите исполняемый файл браузера</s:String>
     <s:String x:Key="BrowserProfile.ExeFilter">Исполняемый файл браузера (*.exe)|*.exe|Все файлы (*.*)|*.*</s:String>
     <s:String x:Key="BrowserProfile.Specify">Указать…</s:String>
-    <s:String x:Key="BrowserProfile.Shortcut">Создать ярлык на рабочем столе</s:String>
-    <s:String x:Key="BrowserProfile.ShortcutPathFmt">Ярлык: {0}</s:String>
+    <s:String x:Key="BrowserProfile.Shortcut">Создать ярлык</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutPickTitle">Выберите файл ярлыка</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutFilter">Ярлык (*.lnk)|*.lnk|Все файлы (*.*)|*.*</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutRequired">Укажите файл ярлыка</s:String>
+    <s:String x:Key="BrowserProfile.ShortcutExtensionFmt">Ярлык должен быть файлом .lnk: {0}</s:String>
     <s:String x:Key="BrowserProfile.ConfirmTitle">Создать профиль здесь?</s:String>
     <s:String x:Key="BrowserProfile.Create">Создать</s:String>
     <s:String x:Key="BrowserProfile.Cancel">Отмена</s:String>

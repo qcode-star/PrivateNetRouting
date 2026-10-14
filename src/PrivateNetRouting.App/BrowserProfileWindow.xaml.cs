@@ -22,6 +22,7 @@ public partial class BrowserProfileWindow : Window
     private readonly Dictionary<BrowserKind, string> _manualExecutables = [];
     private readonly Dictionary<BrowserKind, string?> _detectedExecutables = [];
     private bool _folderTouched;
+    private bool _shortcutTouched;
     private bool _loading = true;
     private bool _refreshing;
 
@@ -70,6 +71,8 @@ public partial class BrowserProfileWindow : Window
         ExeLabel.Text = Loc.S("BrowserProfile.Executable");
         SpecifyExeButton.Content = Loc.S("BrowserProfile.Specify");
         ShortcutCheck.Content = Loc.S("BrowserProfile.Shortcut");
+        BrowseShortcutButton.Content = Loc.S("BrowserProfile.Browse");
+        System.Windows.Automation.AutomationProperties.SetName(ShortcutBox, Loc.S("BrowserProfile.Shortcut"));
         CancelButton.Content = Loc.S("BrowserProfile.Cancel");
         CreateButton.Content = Loc.S("BrowserProfile.Create");
         ExistingText.Text = _config.Browser.IsConfigured
@@ -102,7 +105,13 @@ public partial class BrowserProfileWindow : Window
 
             FolderBox.Text = _config.Browser.ProfileDir;
             ShortcutCheck.IsChecked = _config.Browser.ShortcutPath.Length > 0;
+            if (_config.Browser.ShortcutPath.Length > 0)
+            {
+                ShortcutBox.Text = _config.Browser.ShortcutPath;
+            }
+
             _folderTouched = true;
+            _shortcutTouched = ShortcutBox.Text.Length > 0;
             if (_config.Browser.ExecutablePath.Length > 0)
             {
                 _manualExecutables[configured] = _config.Browser.ExecutablePath;
@@ -125,6 +134,7 @@ public partial class BrowserProfileWindow : Window
             }
 
             FolderBox.Text = BrowserProfileService.SuggestProfileDir(kind);
+            ShortcutBox.Text = _profiles.ShortcutPathFor(kind);
             ShortcutCheck.IsChecked = true;
         }
 
@@ -136,6 +146,8 @@ public partial class BrowserProfileWindow : Window
     private void OnFolderChanged(object sender, TextChangedEventArgs e) => RefreshState(kindChanged: false);
 
     private void OnShortcutToggled(object sender, RoutedEventArgs e) => RefreshState(kindChanged: false);
+
+    private void OnShortcutPathChanged(object sender, TextChangedEventArgs e) => RefreshState(kindChanged: false);
 
     /// <summary>Everything the window shows about the future profile is recomputed here.</summary>
     private void RefreshState(bool kindChanged)
@@ -154,15 +166,26 @@ public partial class BrowserProfileWindow : Window
                 FolderBox.Text = BrowserProfileService.SuggestProfileDir(kind);
             }
 
+            if (kindChanged && !_shortcutTouched)
+            {
+                ShortcutBox.Text = _profiles.ShortcutPathFor(kind);
+            }
+
+            var shortcutOn = ShortcutCheck.IsChecked == true;
+            if (shortcutOn && !_shortcutTouched && ShortcutBox.Text.Trim().Length == 0)
+            {
+                // a configured profile without a shortcut: checking the box suggests the default
+                ShortcutBox.Text = _profiles.ShortcutPathFor(kind);
+            }
+
             var exe = ExecutableFor(kind);
             ExeText.Text = exe ?? Loc.S("BrowserProfile.ExeNone");
             SetText(ExeWarning, exe is null ? Loc.S("BrowserProfile.ExeMissing") : null);
 
-            SetText(
-                ShortcutPathText,
-                ShortcutCheck.IsChecked == true ? Loc.F("BrowserProfile.ShortcutPathFmt", _profiles.ShortcutPathFor(kind)) : null);
-
-            var (blocking, advisory) = InspectFolder(kind);
+            ShortcutPathRow.Visibility = shortcutOn ? Visibility.Visible : Visibility.Collapsed;
+            var (folderBlocking, advisory) = InspectFolder(kind);
+            var shortcutBlocking = shortcutOn ? InspectShortcut() : null;
+            var blocking = folderBlocking ?? shortcutBlocking;
             SetText(StatusText, blocking ?? advisory);
             StatusText.Foreground = (System.Windows.Media.Brush)FindResource(
                 blocking is not null ? "Brush.Bad" : "Brush.Warn");
@@ -306,6 +329,50 @@ public partial class BrowserProfileWindow : Window
         RefreshState(kindChanged: false);
     }
 
+    /// <summary>Blocking issue of the shortcut path (the caller checks the checkbox first).</summary>
+    private string? InspectShortcut()
+    {
+        var text = ShortcutBox.Text.Trim();
+        if (text.Length == 0)
+        {
+            return Loc.S("BrowserProfile.ShortcutRequired");
+        }
+
+        // the shell shortcut factory is bound to the .lnk association: any other extension
+        // would produce a file Windows cannot follow
+        if (!string.Equals(Path.GetExtension(text), ".lnk", StringComparison.OrdinalIgnoreCase))
+        {
+            return Loc.F("BrowserProfile.ShortcutExtensionFmt", text);
+        }
+
+        return null;
+    }
+
+    private void OnBrowseShortcut(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = Loc.S("BrowserProfile.ShortcutPickTitle"),
+            Filter = Loc.S("BrowserProfile.ShortcutFilter"),
+            AddExtension = true,
+            DefaultExt = ".lnk",
+        };
+        var current = ShortcutBox.Text.Trim();
+        if (current.Length > 0)
+        {
+            dialog.FileName = Path.GetFileName(current);
+            dialog.InitialDirectory = SafeFullPath(Path.GetDirectoryName(current) ?? "") ?? "";
+        }
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        ShortcutBox.Text = dialog.FileName;
+        _shortcutTouched = true;
+    }
+
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
 
     private void OnCreate(object sender, RoutedEventArgs e)
@@ -334,7 +401,8 @@ public partial class BrowserProfileWindow : Window
                 kind,
                 FolderBox.Text.Trim(),
                 exe,
-                ShortcutCheck.IsChecked == true));
+                ShortcutCheck.IsChecked == true,
+                ShortcutCheck.IsChecked == true ? ShortcutBox.Text.Trim() : ""));
             DialogResult = true;
         }
         catch (Exception ex)
