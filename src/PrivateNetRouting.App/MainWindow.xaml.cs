@@ -261,16 +261,26 @@ public partial class MainWindow : Window
     /// <summary>
     /// The launch/update buttons of an application turned off in the config (apps.claude /
     /// apps.codex) leave the row: the owner sees only what they use. The browser button is
-    /// shared and stays. Follows a config reload.
+    /// shared and stays, leaning to the freed side: without Codex it takes the right edge,
+    /// without Claude the left one, with both on or both off it keeps the centre.
+    /// Follows a config reload.
     /// </summary>
     private void ApplyAppAvailability()
     {
-        var claude = _runtime.Config.Claude.Enabled ? Visibility.Visible : Visibility.Collapsed;
-        var codex = _runtime.Config.Codex.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        var claudeOn = _runtime.Config.Claude.Enabled;
+        var codexOn = _runtime.Config.Codex.Enabled;
+        var claude = claudeOn ? Visibility.Visible : Visibility.Collapsed;
+        var codex = codexOn ? Visibility.Visible : Visibility.Collapsed;
         BtnLaunchClaude.Visibility = claude;
         BtnUpdateClaude.Visibility = claude;
         BtnUpdateCodex.Visibility = codex;
         BtnLaunchCodex.Visibility = codex;
+        Grid.SetColumn(BtnLaunchBrowser, (claudeOn, codexOn) switch
+        {
+            (true, false) => 6,
+            (false, true) => 0,
+            _ => 3,
+        });
     }
 
     private void OnToggleGuardsCard(object sender, RoutedEventArgs e)

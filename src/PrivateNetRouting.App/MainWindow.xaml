@@ -363,7 +363,10 @@
 
                 <!-- Launch actions, one row: the Claude pair pinned left, the shared browser
                      button centred, the Codex pair pinned right. An app turned off in the config
-                     (apps.claude / apps.codex) takes its pair out of the row; the browser stays.
+                     (apps.claude / apps.codex) takes its pair out of the row; the browser stays
+                     and leans to the freed side (ApplyAppAvailability moves its column): without
+                     Codex it takes the right edge, without Claude the left one, with both on or
+                     both off it keeps the centre.
                      The buttons size to their labels
                      (no minimum width — no empty space around the text) and the two star columns
                      are pure spacers: they carry the spread on a wide window and give way (down to
@@ -394,7 +397,7 @@
                                      Visibility="{Binding UpdateBadgeVisibility}"/>
                         </StackPanel>
                     </Button>
-                    <Button Grid.Column="3" Content="{DynamicResource Main.Button.LaunchBrowser}" Padding="12,0"
+                    <Button x:Name="BtnLaunchBrowser" Grid.Column="3" Content="{DynamicResource Main.Button.LaunchBrowser}" Padding="12,0"
                             Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
                     <Button x:Name="BtnUpdateCodex" Grid.Column="5" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateCodex" IsEnabled="{Binding CanLaunch}"
                             Margin="0,0,8,0"

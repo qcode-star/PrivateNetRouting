@@ -225,7 +225,9 @@ src/
                              # --launch-browser shortcut mode (the profile created once by the
                              # dialog, egress probe before the start, "already running" note),
                              # the launch actions in one row — the Claude pair pinned
-                             # left, the shared "Browser" button centred, the Codex pair pinned
+                             # left, the shared "Browser" button centred (it leans to the freed
+                             # side: without Codex — the right edge, without Claude — the left),
+                             # the Codex pair pinned
                              # right (Launch Codex in the OpenAI green, CodexButton; an app off
                              # in the config — claude.enabled/codex.enabled — takes its pair out, its
                              # tray launch item and its startup update check with it), each
