@@ -256,10 +256,10 @@ public class GuardTests : IDisposable
         Assert.Null(ClaudeEnvValues.WslProxyUrl(null, config));
         Assert.Equal("http://192.0.2.1:18082", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
 
-        // the skipped socks5 shape: the guard files carry the external endpoint instead
+        // the skipped socks5 shape: the guard files carry chain.socks5.upstream instead
         config.Chain.Mode = "socks5";
         config.ForwardProxy.Enabled = false;
-        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Chain.Socks5.Upstream = "192.0.2.10:7080";
         Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WindowsProxyUrl(config));
         Assert.Equal(7080, ClaudeEnvValues.Port(config));
         Assert.Equal("http://192.0.2.1:7080", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
@@ -276,13 +276,13 @@ public class GuardTests : IDisposable
         config.ForwardProxy.Enabled = false;
         Assert.Null(WslConfigGuard.ReachabilityWarning(config));
 
-        // a skipped shape with a public/LAN endpoint is reachable in principle — no warning
+        // a skipped shape with a public/LAN upstream is reachable in principle — no warning
         config.Chain.Mode = "socks5";
-        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Chain.Socks5.Upstream = "192.0.2.10:7080";
         Assert.Null(WslConfigGuard.ReachabilityWarning(config));
 
-        // loopback-only endpoint: unreachable from the distros — the read-only warning fires
-        config.ForwardProxy.ExternalAppsEndpoint = "127.0.0.1:7080";
+        // loopback-only upstream: unreachable from the distros — the read-only warning fires
+        config.Chain.Socks5.Upstream = "127.0.0.1:7080";
         var warning = WslConfigGuard.ReachabilityWarning(config);
         Assert.NotNull(warning);
         Assert.Contains("127.0.0.1:7080", warning);
@@ -348,14 +348,14 @@ public class GuardTests : IDisposable
         Assert.Null(again.BackupPath);
     }
 
-    /// <summary>The skipped socks5 shape: the synced env carries the external endpoint, not the local listener.</summary>
+    /// <summary>The skipped socks5 shape: the synced env carries chain.socks5.upstream, not the local listener.</summary>
     [Fact]
-    public void SettingsSyncPointsAtTheExternalEndpointWhenSkipped()
+    public void SettingsSyncPointsAtTheUpstreamWhenSkipped()
     {
         var config = SettingsConfig();
         config.Chain.Mode = "socks5";
         config.ForwardProxy.Enabled = false;
-        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Chain.Socks5.Upstream = "192.0.2.10:7080";
         config.Codex.EnvPath = Path.Combine(_tempDir, "codex.env");
 
         var guard = new ClaudeSettingsGuard(config);

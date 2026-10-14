@@ -140,18 +140,18 @@ public class BrowserLauncherTests : IDisposable
     }
 
     /// <summary>
-    /// The skipped socks5 shape: the "forward-proxy" egress resolves to the external mixed
-    /// inbound — still HTTP CONNECT, but not ours to raise (the dead-egress question is then
-    /// "start anyway", like over the external upstream).
+    /// The skipped socks5 shape: the "forward-proxy" egress resolves to chain.socks5.upstream —
+    /// still HTTP CONNECT, but not ours to raise (the dead-egress question is then "start
+    /// anyway", like over the external upstream).
     /// </summary>
     [Fact]
-    public void SkippedShapePointsTheForwardProxyEgressAtTheExternalEndpoint()
+    public void SkippedShapePointsTheForwardProxyEgressAtTheUpstream()
     {
         var config = ConfiguredConfig();
         config.Browser.Egress = "forward-proxy";
         config.Chain.Mode = "socks5";
         config.ForwardProxy.Enabled = false;
-        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Chain.Socks5.Upstream = "192.0.2.10:7080";
 
         Assert.Equal("192.0.2.10:7080", BrowserEgress.Resolve(config));
         Assert.Equal(BrowserEgress.HttpScheme, BrowserEgress.Scheme(config)); // the mixed inbound speaks CONNECT

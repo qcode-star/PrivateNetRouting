@@ -102,18 +102,21 @@ public class LauncherTests : IDisposable
         Assert.Single(_started);
     }
 
-    /// <summary>The skipped socks5 shape: the flags point Claude at the external mixed inbound.</summary>
+    /// <summary>The skipped socks5 shape: the flags point Claude at chain.socks5.upstream.</summary>
     [Fact]
-    public async Task SkippedShapeLaunchCarriesTheExternalEndpoint()
+    public async Task SkippedShapeLaunchCarriesTheUpstreamEndpoint()
     {
         var config = new AppConfig
         {
-            Chain = new ChainConfig { Mode = "socks5" },
+            Chain = new ChainConfig
+            {
+                Mode = "socks5",
+                Socks5 = new ChainSocks5Config { Upstream = "192.0.2.10:7080" },
+            },
             ForwardProxy = new ForwardProxyConfig
             {
                 Listen = "127.0.0.1:18082",
                 Enabled = false,
-                ExternalAppsEndpoint = "192.0.2.10:7080",
             },
             Claude = new ClaudeConfig
             {

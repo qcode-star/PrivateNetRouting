@@ -40,7 +40,7 @@ public partial class MainWindow : Window
     private static readonly string[] TailscaleComponents = ["Daemon", "Keeper", "Node", "Proxy", "Health"];
     private static readonly string[] Socks5Components = ["Egress", "Proxy", "Health"];
 
-    /// <summary>The skipped socks5 shape (forwardProxy.skipInSocks5Mode): no local proxy stage at all.</summary>
+    /// <summary>The skipped socks5 shape (forwardProxy.enabled=false): no local proxy stage at all.</summary>
     private static readonly string[] Socks5SkippedComponents = ["Egress", "Health"];
 
     private static readonly string[] TailscaleRailKeys =

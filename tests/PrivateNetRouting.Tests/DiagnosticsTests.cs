@@ -227,14 +227,14 @@ public class DiagnosticsTests : IDisposable
         Assert.Empty(summary.Sections);
     }
 
-    // ----- socks5 mode, the local proxy skipped (forwardProxy.skipInSocks5Mode) -----
+    // ----- socks5 mode, the local proxy skipped (forwardProxy.enabled=false) -----
 
     [Fact]
     public async Task SkippedShapeShowsTheExternalEndpointAndRunsHealth()
     {
         var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _,
             mode: "socks5", upstreamReachable: true, skipProxy: true);
-        config.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        config.Chain.Socks5.Upstream = "192.0.2.10:7080";
         proxy.IsRunning = false; // no local proxy exists in this shape
         // even a foreign listener on the forward-proxy port means nothing: nobody of ours is there
         var forwardProxyPort = ParsePort(config.ForwardProxy.Listen);

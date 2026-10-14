@@ -211,24 +211,21 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
-    public void ForwardProxyEnabledDefaultsTrueAndExternalEndpointRoundTrips()
+    public void ForwardProxyEnabledDefaultsTrue()
     {
         var config = AppConfigStore.LoadOrCreate(_path);
         Assert.True(config.ForwardProxy.Enabled); // the local proxy runs by default
-        Assert.Equal("127.0.0.1:2080", config.ForwardProxy.ExternalAppsEndpoint);
 
         File.WriteAllText(_path, """
             {
               "forwardProxy": {
-                "enabled": false,
-                "externalAppsEndpoint": "127.0.0.1:7080"
+                "enabled": false
               }
             }
             """);
 
         var loaded = AppConfigStore.LoadOrCreate(_path);
         Assert.False(loaded.ForwardProxy.Enabled);
-        Assert.Equal("127.0.0.1:7080", loaded.ForwardProxy.ExternalAppsEndpoint);
     }
 
     [Fact]
@@ -269,10 +266,10 @@ public class AppConfigTests : IDisposable
         Assert.False(AppProxyEndpoint.IsSkipped(socks5));
         Assert.Equal(socks5.ForwardProxy.Listen, AppProxyEndpoint.Address(socks5));
 
-        // the skipped shape (socks5 + forwardProxy.enabled=false): everything points at the
-        // external mixed inbound
+        // the skipped shape (socks5 + forwardProxy.enabled=false): everything points at
+        // chain.socks5.upstream itself — the mixed inbound
         socks5.ForwardProxy.Enabled = false;
-        socks5.ForwardProxy.ExternalAppsEndpoint = "192.0.2.10:7080";
+        socks5.Chain.Socks5.Upstream = "192.0.2.10:7080";
         Assert.True(AppProxyEndpoint.IsSkipped(socks5));
         Assert.Equal("192.0.2.10:7080", AppProxyEndpoint.Address(socks5));
         Assert.Equal("http://192.0.2.10:7080", AppProxyEndpoint.Url(socks5));

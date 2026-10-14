@@ -29,7 +29,8 @@ public sealed class ForwardProxySupervisor(
     Func<string, string?, string, int?>? spawnWorker = null,
     Action<int>? killProcess = null,
     Func<string?>? currentExePath = null,
-    bool skipped = false) : IProxyControl, IProxyStatistics
+    bool skipped = false,
+    string? skippedAppsEndpoint = null) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
@@ -220,7 +221,7 @@ public sealed class ForwardProxySupervisor(
     private string DescribeOwners() => DescribeOwners(tcpTable.GetListeners(Port));
 
     private string SkippedMessage =>
-        $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {config.ExternalAppsEndpoint}";
+        $"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {skippedAppsEndpoint ?? "chain.socks5.upstream"}";
 
     private static string DescribeOwners(IReadOnlyList<TcpListenerEntry> owners) =>
         string.Join(", ", owners

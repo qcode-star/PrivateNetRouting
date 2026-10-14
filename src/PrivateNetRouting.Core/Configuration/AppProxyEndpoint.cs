@@ -9,12 +9,12 @@ namespace PrivateNetRouting.Core.Configuration;
 /// with forwardProxy.enabled=false the local proxy is not run at all, and every client (the
 /// launchers, the managed policy and the settings env, the Codex .env, the WSL sync, the updater
 /// downloads, the health checks, the browser profile with browser.egress=forward-proxy) is
-/// pointed straight at forwardProxy.externalAppsEndpoint — the mixed HTTP+SOCKS inbound of the
-/// external upstream (e.g. sing-box), which does the same CONNECT-to-SOCKS translation the
-/// local proxy would. The tailscale mode cannot work without the local proxy (DoH resolution +
-/// dialing by IP through the sidecar; the sidecar's own proxies resolve names with the system
-/// resolver) — a chain bring-up refuses with an explicit error. Both shapes speak HTTP CONNECT,
-/// so the scheme is always http.
+/// pointed straight at chain.socks5.upstream — which must then answer HTTP CONNECT as well as
+/// SOCKS5 (a mixed inbound, e.g. sing-box, does the CONNECT-to-SOCKS translation itself). The
+/// tailscale mode cannot work without the local proxy (DoH resolution + dialing by IP through
+/// the sidecar; the sidecar's own proxies resolve names with the system resolver) — a chain
+/// bring-up refuses with an explicit error. Both shapes speak HTTP CONNECT, so the scheme is
+/// always http.
 /// </summary>
 public static class AppProxyEndpoint
 {
@@ -24,7 +24,7 @@ public static class AppProxyEndpoint
 
     /// <summary>The endpoint ("host:port") every client is pointed at.</summary>
     public static string Address(AppConfig config) =>
-        IsSkipped(config) ? config.ForwardProxy.ExternalAppsEndpoint : config.ForwardProxy.Listen;
+        IsSkipped(config) ? config.Chain.Socks5.Upstream : config.ForwardProxy.Listen;
 
     /// <summary>The proxy URL for the clients ("http://host:port").</summary>
     public static string Url(AppConfig config) => "http://" + Address(config);

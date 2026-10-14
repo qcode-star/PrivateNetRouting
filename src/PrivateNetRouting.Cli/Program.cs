@@ -108,8 +108,8 @@ internal static class Program
         if (AppProxyEndpoint.IsSkipped(config))
         {
             Console.WriteLine(
-                "the local forward proxy is skipped in the socks5 mode (forwardProxy.skipInSocks5Mode) — " +
-                $"the applications point at {config.ForwardProxy.ExternalAppsEndpoint}");
+                "the local forward proxy is skipped in the socks5 mode (forwardProxy.enabled=false) — " +
+                $"the applications point at {config.Chain.Socks5.Upstream}");
             return 0;
         }
 
@@ -172,7 +172,7 @@ internal static class Program
                 }
 
                 Console.WriteLine(skipProxy
-                    ? $"proxy:     skipped (the applications point at {config.ForwardProxy.ExternalAppsEndpoint}), health {(state.ProxyHealthy ? "alive" : "failed")}"
+                    ? $"proxy:     skipped (the applications point at {config.Chain.Socks5.Upstream}), health {(state.ProxyHealthy ? "alive" : "failed")}"
                     : $"proxy:     {(state.ProxyRunning == true ? $"running ({string.Join(", ", runtime.ProxyControl.ListenerEndpoints)})" : "stopped")}, health {(state.ProxyHealthy ? "alive" : "failed")}");
                 Console.WriteLine(state.IsFullyUp ? "chain: fully up" : state.IsStopped ? "chain: stopped" : "chain: partial");
                 return 0;
@@ -1059,7 +1059,7 @@ internal static class Program
                                  socks5 mode: upstream/proxy/health (chain.mode)
             pnr chain up         bring the chain up (tailscale: daemon -> keeper -> node -> proxy;
                                  socks5: egress check -> proxy, or straight to the health check
-                                 when forwardProxy.skipInSocks5Mode; UAC only in the tailscale mode)
+                                 when forwardProxy.enabled=false; UAC only in the tailscale mode)
             pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC; in the
                                  socks5 mode only the proxy stops, in the skipped shape nothing
                                  of ours is running)

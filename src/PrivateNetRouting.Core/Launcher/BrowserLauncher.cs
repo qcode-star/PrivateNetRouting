@@ -128,8 +128,8 @@ public sealed class BrowserLauncher(
     /// <summary>
     /// True — a dead egress is fixed by raising the chain: the forward proxy is part of the chain
     /// bring-up in both modes, and the chain egress is ours everywhere but the external upstream
-    /// of the socks5 mode. With the local proxy skipped (forwardProxy.skipInSocks5Mode) the
-    /// "forward-proxy" egress is that same external endpoint — not ours to raise either.
+    /// of the socks5 mode. With the local proxy skipped (forwardProxy.enabled=false) the
+    /// "forward-proxy" egress is that same upstream — not ours to raise either.
     /// </summary>
     public bool ChainOwnsEgress =>
         config.Browser.EgressMode == BrowserEgressMode.Chain

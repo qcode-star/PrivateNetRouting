@@ -344,11 +344,20 @@ public sealed class ChainTailscaleConfig
 
 /// <summary>
 /// The external trusted SOCKS5 upstream of the socks5 chain mode: the target name rides the
-/// CONNECT and the upstream resolves it on its side. The tailscale mode ignores the whole section.
+/// CONNECT and the upstream resolves it on its side. With the local proxy skipped
+/// (forwardProxy.enabled=false) the upstream is also the applications proxy endpoint — every
+/// client is pointed at it, so it must answer HTTP CONNECT too (a mixed HTTP+SOCKS inbound).
+/// The tailscale mode ignores the whole section.
 /// </summary>
 public sealed class ChainSocks5Config
 {
-    /// <summary>The upstream "host:port".</summary>
+    /// <summary>
+    /// The upstream "host:port". In the skipped shape (forwardProxy.enabled=false, socks5 mode)
+    /// this is also the address written into every client (the launchers, the managed policy,
+    /// the settings env, the WSL sync, the browser profile) — it must speak HTTP CONNECT as
+    /// well as SOCKS5, and be reachable from the WSL distros when the WSL sync is on
+    /// (loopback-only is unreachable from a distro, and the guard status warns about it).
+    /// </summary>
     public string Upstream { get; set; } = "127.0.0.1:18083";
 
     /// <summary>Username of the upstream (RFC 1929); both empty — no authentication.</summary>
@@ -610,22 +619,15 @@ public sealed class ForwardProxyConfig
     /// THE switch of the local proxy. true — the proxy runs as part of the chain (the GUI does
     /// not raise it on open; chain up and the launches do), and `pnr proxy` may start it
     /// standalone. false — the local proxy does not exist at all: in the socks5 mode every
-    /// client is pointed at <see cref="ExternalAppsEndpoint"/> instead (the upstream's own mixed
-    /// HTTP+SOCKS inbound does the translation itself); in the tailscale mode the proxy is
-    /// load-bearing — a chain bring-up refuses with an explicit error.
+    /// client is pointed at <see cref="ChainSocks5Config.Upstream"/> instead, so the upstream
+    /// must speak both protocols (a mixed HTTP+SOCKS inbound does the translation itself); in
+    /// the tailscale mode the proxy is load-bearing — a chain bring-up refuses with an explicit
+    /// error.
     /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>Main listener "host:port" (clients connect here).</summary>
     public string Listen { get; set; } = "127.0.0.1:18081";
-
-    /// <summary>
-    /// The HTTP CONNECT endpoint written for the applications when the local proxy is off
-    /// (socks5 mode). Must be reachable from the WSL distros when the WSL sync is on: the
-    /// upstream has to listen on the WSL-facing address then (loopback-only is unreachable from
-    /// a distro, and the guard status warns about it).
-    /// </summary>
-    public string ExternalAppsEndpoint { get; set; } = "127.0.0.1:2080";
 
     /// <summary>One-time bind on the WSL NAT gateway (the adapter address is looked up at start with retries).</summary>
     public bool BindWslGateway { get; set; } = true;

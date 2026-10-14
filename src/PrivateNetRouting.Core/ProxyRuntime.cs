@@ -28,7 +28,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     /// <summary>
     /// The proxy server itself (in-process); the console mode and the worker start it directly.
-    /// Null in the skipped socks5 shape (forwardProxy.skipInSocks5Mode): there is no local proxy.
+    /// Null in the skipped socks5 shape (forwardProxy.enabled=false): there is no local proxy.
     /// </summary>
     public ForwardProxyService? ProxyService { get; }
 
@@ -192,11 +192,12 @@ public sealed class ProxyRuntime : IAsyncDisposable
             TimeSpan.FromSeconds(fp.ActivityTouchIntervalSeconds));
 
         // the skipped socks5 shape: no local proxy at all — the applications point at the
-        // external endpoint (forwardProxy.externalAppsEndpoint), the supervisor is a no-op
+        // upstream itself (chain.socks5.upstream, which must speak HTTP CONNECT too), the
+        // supervisor is a no-op
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
         if (skipProxy)
         {
-            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {fp.ExternalAppsEndpoint}");
+            log.Info($"forward-proxy: skipped in the socks5 mode (forwardProxy.enabled=false) — the applications point at {config.Chain.Socks5.Upstream}");
         }
 
         ForwardProxyService? proxy = skipProxy
@@ -206,7 +207,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var ports = new TcpPortProbe();
         var processes = new WmiProcessFinder();
         var tcpTable = new TcpConnectionTable();
-        var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log, skipped: skipProxy);
+        var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log,
+            skipped: skipProxy, skippedAppsEndpoint: skipProxy ? config.Chain.Socks5.Upstream : null);
         var watchdogLog = NewLog("watchdog.log");
         var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");
