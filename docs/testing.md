@@ -12,7 +12,7 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
 - **What does not work**: real input — `SendInput`, cursor moves, clicks (they go to the
   secure desktop of the lock screen); UAC cannot be confirmed, so every elevated path
   (guard ban/policy, the elevated daemon stop) is out of reach and must not be triggered:
-  a prompt would sit for `chain.uacWaitSeconds` and fail. Tray-menu interaction needs a
+  a prompt would sit for `chain.tailscale.uacWaitSeconds` and fail. Tray-menu interaction needs a
   real click on the overflow icon — verify the tray indirectly (hide-to-tray, second-instance
   activation, balloon wiring) instead.
 - **WPF first frame**: an application started on a locked session may never paint —
@@ -133,7 +133,7 @@ Two working setups to get tailscale "started from the side":
 
 1. **Recommended**: raise the app's own tailscale chain first (`pnr chain up` in the
    tailscale mode), then switch the config to socks5 with
-   `socks5Upstream = 127.0.0.1:18083` (the sidecar's listener) and restart the GUI. The
+   `chain.socks5.upstream = 127.0.0.1:18083` (the sidecar's listener) and restart the GUI. The
    app in socks5 mode never touches tailscale processes — to it the listener is just an
    external upstream. The daemon/keeper keep running as ordinary detached processes.
 2. **Standalone daemon** for full independence: spawn `tailscaled --tun=userspace-networking
