@@ -66,6 +66,7 @@ public partial class MainWindow : Window
     private bool _guardBusy;
     private bool _chainBusy;
     private bool _chainBusyCancellable; // the running chain operation is a bring-up — Stop cancels it
+    private bool _chainBusyBringingUp; // the busy operation raises the chain — the rail speaks "starting", a stop speaks "stopping"
     private bool _launchBusy;
     private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
     private bool _fillingLanguages;
@@ -358,12 +359,24 @@ public partial class MainWindow : Window
         try
         {
             var state = await _runtime.Chain.GetStateAsync(CancellationToken.None);
+            if (_chainBusy || _launchBusy)
+            {
+                // an operation started while the snapshot was in flight — it owns the rail now,
+                // and the snapshot (taken before it) is stale
+                return;
+            }
+
             _lastChainState = state;
             _viewModel.UpdateChain(state);
             RenderRail(state);
         }
         catch (Exception ex)
         {
+            if (_chainBusy || _launchBusy)
+            {
+                return;
+            }
+
             _viewModel.SetChainStateError(ex.Message);
         }
     }
@@ -432,16 +445,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// A bring-up step from the orchestrator: the rail runs live instead of waiting for the next
-    /// poll, the current step's detail sits under it, and the UAC hint appears with the daemon
-    /// only when the start actually goes through elevation (chain.daemonElevation).
+    /// A step from the orchestrator — a bring-up (the card's or a launch's) or the card's stop:
+    /// the rail runs live instead of waiting for the next poll, the current step's detail sits
+    /// under it, and the UAC hint appears with the daemon only when the start actually goes
+    /// through elevation (chain.daemonElevation). A stop speaks its own vocabulary and paints its
+    /// finished stages neutral: a grey "stopped" must not read as the green of a running stage.
     /// </summary>
     private void OnChainStep(ChainStep step)
     {
+        var bringingUp = !_chainBusy || _chainBusyBringingUp; // a launch draws while the card is idle — it only ever brings up
         var stage = step.Status switch
         {
-            ChainStepStatus.Active => new RailStage(Loc.S("Main.Rail.Starting"), Theme.Accent),
-            ChainStepStatus.Done => new RailStage(Loc.S("Main.Rail.Ready"), Theme.Ok, RailMark.Check),
+            ChainStepStatus.Active => new RailStage(
+                Loc.S(bringingUp ? "Main.Rail.Starting" : "Main.Rail.Stopping"), Theme.Accent),
+            ChainStepStatus.Done => bringingUp
+                ? new RailStage(Loc.S("Main.Rail.Ready"), Theme.Ok, RailMark.Check)
+                : new RailStage(Loc.S("Main.Rail.Stopped"), Theme.Idle, RailMark.Check),
             ChainStepStatus.Skipped => new RailStage(Loc.S("Main.Chain.Skipped"), Theme.Ok, RailMark.Check),
             ChainStepStatus.Failed => new RailStage(Loc.S("Main.Rail.Failed"), Theme.Bad, RailMark.Cross),
             _ => new RailStage(Loc.S("Main.Rail.Waiting"), Theme.Idle),
@@ -897,12 +916,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!await RunChainBusy(bringUp: true, ct => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct)))
+        if (await RunChainBusy(bringUp: true, ct => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct)))
         {
-            return;
+            _viewModel.SetCheckResult("Main.Chain.UpDone");
         }
 
-        _viewModel.SetCheckResult("Main.Chain.UpDone");
+        // a cancelled or failed operation leaves the rail mid-picture — redraw from the real state
         await RefreshChainAsync();
     }
 
@@ -930,12 +949,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!await RunChainBusy(bringUp: false, ct => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), ct)))
+        if (await RunChainBusy(bringUp: false, ct => _runtime.Chain.StopAsync(new Progress<ChainStep>(OnChainStep), ct)))
         {
-            return;
+            _viewModel.SetCheckResult("Main.Chain.DownDone");
         }
 
-        _viewModel.SetCheckResult("Main.Chain.DownDone");
+        // a cancelled or failed operation leaves the rail mid-picture — redraw from the real state
         await RefreshChainAsync();
     }
 
@@ -948,6 +967,7 @@ public partial class MainWindow : Window
 
         _chainBusy = true;
         _chainBusyCancellable = bringUp;
+        _chainBusyBringingUp = bringUp;
         _viewModel.SetChainBusy(true, bringUp);
         BeginOperation();
         var success = false;
@@ -990,6 +1010,7 @@ public partial class MainWindow : Window
             cts.Dispose();
             _chainBusy = false;
             _chainBusyCancellable = false;
+            _chainBusyBringingUp = false;
             _viewModel.SetChainBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
@@ -1577,7 +1598,13 @@ public partial class MainWindow : Window
 
         _updateWindow = new UpdateWindow(_runtime) { Owner = this };
         _updateWindow.VersionStateResolved += OnVersionStateResolved;
-        _updateWindow.Closed += (_, _) => _updateWindow = null;
+        _updateWindow.Closed += (_, _) =>
+        {
+            _updateWindow = null;
+            // the chain the window raised went up under its own progress — the card must not
+            // wait for the next poll to see it
+            _ = RefreshChainAsync();
+        };
         _updateWindow.Show();
     }
 

@@ -38,10 +38,12 @@
     <s:String x:Key="Main.Rail.Egress">Egress</s:String>
     <s:String x:Key="Main.Rail.Proxy">Forward proxy</s:String>
     <s:String x:Key="Main.Rail.Health">CONNECT check</s:String>
-    <!-- Stage words while a bring-up runs in the chain card -->
+    <!-- Stage words while a chain operation runs in the chain card -->
     <s:String x:Key="Main.Rail.Waiting">waiting</s:String>
     <s:String x:Key="Main.Rail.Starting">starting</s:String>
     <s:String x:Key="Main.Rail.Ready">ready</s:String>
+    <s:String x:Key="Main.Rail.Stopping">stopping</s:String>
+    <s:String x:Key="Main.Rail.Stopped">stopped</s:String>
     <s:String x:Key="Main.Rail.Failed">failed</s:String>
     <s:String x:Key="Main.Chain.Skipped">already up</s:String>
     <s:String x:Key="Main.Chain.Hint.Uac">Confirm the UAC prompt: tailscaled starts with administrator rights.</s:String>

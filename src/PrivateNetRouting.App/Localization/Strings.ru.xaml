@@ -38,10 +38,12 @@
     <s:String x:Key="Main.Rail.Egress">Выход</s:String>
     <s:String x:Key="Main.Rail.Proxy">Локальный прокси</s:String>
     <s:String x:Key="Main.Rail.Health">Проверка CONNECT</s:String>
-    <!-- Stage words while a bring-up runs in the chain card -->
+    <!-- Stage words while a chain operation runs in the chain card -->
     <s:String x:Key="Main.Rail.Waiting">ждёт</s:String>
     <s:String x:Key="Main.Rail.Starting">запуск</s:String>
     <s:String x:Key="Main.Rail.Ready">готово</s:String>
+    <s:String x:Key="Main.Rail.Stopping">остановка</s:String>
+    <s:String x:Key="Main.Rail.Stopped">остановлено</s:String>
     <s:String x:Key="Main.Rail.Failed">ошибка</s:String>
     <s:String x:Key="Main.Chain.Skipped">уже работает</s:String>
     <s:String x:Key="Main.Chain.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
