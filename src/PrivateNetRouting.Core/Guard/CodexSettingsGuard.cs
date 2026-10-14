@@ -4,9 +4,10 @@ namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
 /// The persistent guard layer of Codex (ChatGPT desktop and the CLI), two files of CODEX_HOME:
-/// the flag `[features] respect_system_proxy = true` in `~/.codex/config.toml` — Codex then
-/// honours the host system proxy, which the guard's WinINET layer points at the local forward
-/// proxy — and the proxy env (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY) in `~/.codex/.env`.
+/// the flag `[features] respect_system_proxy = true` in `~/.codex/config.toml` — a belt-and-braces
+/// for the guard's WinINET system-proxy layer (upstream the flag is not reliably honoured:
+/// openai/codex#39237, #29958 — connectivity never rests on it) — and the proxy env
+/// (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY) in `~/.codex/.env`.
 /// The embedded CLI core loads .env after its own start: the desktop app strips the inherited
 /// proxy env variables from the processes it spawns, so this file is what actually carries the
 /// proxy to the core (the launcher's env reaches only the Chromium part, via the flags).

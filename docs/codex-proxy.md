@@ -46,9 +46,13 @@ absent until added):
 respect_system_proxy = true
 ```
 
-The flag makes Codex honour the host's system proxy (WinINET), so it works together with a
-system-proxy layer; with the system proxy off it is inert belt-and-braces. The app rewrites the
-file on its own, so the edit must be surgical: every other line survives byte for byte, the
+The flag is belt-and-braces for a system-proxy layer, never a transport of its own: upstream it
+is not reliably honoured — on macOS CLI and Desktop keep connecting directly
+([openai/codex#39237](https://github.com/openai/codex/issues/39237)), on Windows there are open
+reports of the WebSocket transport timing out with it
+([openai/codex#29958](https://github.com/openai/codex/issues/29958)) — so connectivity must rest
+on the `.env` below in every setup; with the system proxy off the flag changes nothing. The app
+rewrites the file on its own, so the edit must be surgical: every other line survives byte for byte, the
 newline style is kept, the key is inserted into an existing `[features]` section (or one is
 appended), and the top-level dotted spelling `features.respect_system_proxy = true` is an
 equivalent form.
