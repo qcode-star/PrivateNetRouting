@@ -368,11 +368,11 @@ public sealed class WslConfigGuard(
             root["env"] = env;
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
-            var settingsScript = $$"""
+            var settingsScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 SETTINGS="$HOME/.claude/settings.json"
                 NEW="/tmp/.pnr-settings-{{stamp}}"
-                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(json))}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(json)}}' | base64 -d > "$NEW"
                 if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
                     echo SETTINGS=unchanged
                 else
@@ -384,17 +384,17 @@ public sealed class WslConfigGuard(
                 ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
                 find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
                 echo PNR=ok
-                """;
+                """);
             settingsOutput = await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], settingsScript, Encoding.UTF8, ct);
             RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
             // startup script: refreshes the proxy address on every distro start
             var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config));
-            var rootScript = $$"""
+            var rootScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 SCRIPT="{{scriptPath}}"
                 NEW="/tmp/.pnr-startup-{{stamp}}"
-                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(scriptContent))}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(scriptContent)}}' | base64 -d > "$NEW"
                 mkdir -p "$(dirname "$SCRIPT")"
                 if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
                     echo SCRIPT=unchanged
@@ -408,7 +408,7 @@ public sealed class WslConfigGuard(
                 ls -1t {{scriptPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
                 find "$(dirname "{{scriptPath}}")" -maxdepth 1 -name '{{Path.GetFileName(scriptPath)}}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
                 echo PNR=ok
-                """;
+                """);
             scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
             RequireCompleted(scriptOutput, $"startup script sync in '{distro.Name}'");
         }
@@ -424,11 +424,11 @@ public sealed class WslConfigGuard(
             var envContent = BuildCodexProxyEnvScript(
                 ClaudeEnvValues.Port(config),
                 ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
-            var envScript = $$"""
+            var envScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 ENVFILE="{{envPath}}"
                 NEW="/tmp/.pnr-codexenv-{{stamp}}"
-                echo '{{Convert.ToBase64String(Encoding.UTF8.GetBytes(envContent))}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(envContent)}}' | base64 -d > "$NEW"
                 mkdir -p "$(dirname "$ENVFILE")"
                 if [ -f "$ENVFILE" ] && cmp -s "$NEW" "$ENVFILE"; then
                     echo ENVFILE=unchanged
@@ -441,7 +441,7 @@ public sealed class WslConfigGuard(
                 rm -f "$NEW"
                 ls -1t {{envPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
                 echo PNR=ok
-                """;
+                """);
             var envOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], envScript, Encoding.UTF8, ct);
             RequireCompleted(envOutput, $"codex proxy env sync in '{distro.Name}'");
             envWritten = envOutput.Contains("ENVFILE=written", StringComparison.Ordinal);
@@ -464,6 +464,20 @@ public sealed class WslConfigGuard(
             WslConfWritten: wslConfWritten,
             BootBackups: bootBackups);
     }
+
+    /// <summary>
+    /// Everything this guard sends into a distro rides bash — piped to `bash -s` or embedded as
+    /// a base64 payload written to a file — and a single CR breaks it (a syntax error on the
+    /// first line, a "bad interpreter", a payload that never matches its file again) while
+    /// wsl.exe still exits 0. Raw multiline string literals take the line endings of the source
+    /// checkout, so every script and payload is normalized to LF at the boundary: the checkout's
+    /// line endings must not reach the distros.
+    /// </summary>
+    internal static string NormalizeLf(string text) => text.Replace("\r\n", "\n").Replace("\r", "\n");
+
+    /// <summary>The base64 payload of a file destined for inside a distro, LF-normalized.</summary>
+    internal static string DistroPayload(string content) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(NormalizeLf(content)));
 
     /// <summary>
     /// bash failures inside the distro are invisible to wsl.exe exit codes (a CRLF checkout once
@@ -521,7 +535,7 @@ public sealed class WslConfigGuard(
         var envPath = config.Wsl.ProxyEnvPath;
         var settingsPath = $"/home/{distro.User}/.claude/settings.json";
         var runnerPath = BootRunnerPath(scriptPath);
-        var probe = $"""
+        var probe = NormalizeLf($"""
             if [ -f {scriptPath} ]; then
                 echo SCRIPT=present
                 grep -E '^PORT=' {scriptPath} 2>/dev/null || true
@@ -561,7 +575,7 @@ public sealed class WslConfigGuard(
                 echo SETTINGS=missing
             fi
             echo PNR=ok
-            """;
+            """);
         var output = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], probe, Encoding.UTF8, ct);
         RequireCompleted(output, $"state read of '{distro.Name}'");
         return ParseRead(output);
@@ -667,7 +681,7 @@ public sealed class WslConfigGuard(
     /// by the loopback form the Windows side keeps there. The Windows launcher refreshes the file
     /// back before every launch.
     /// </summary>
-    internal static string BuildCodexProxyEnvScript(int port, string noProxy) => $$"""
+    internal static string BuildCodexProxyEnvScript(int port, string noProxy) => NormalizeLf($$"""
         # Managed by PrivateNetRouting (guard.wsl.proxyEnvPath) — do not edit by hand.
         # Exports the application's forward proxy to the Codex CLI running inside this distro:
         # the desktop app passes CODEX_HOME into the distro for its own processes (the marker),
@@ -711,7 +725,7 @@ public sealed class WslConfigGuard(
             unset _pnr_host_ip
         fi
         unset _pnr_codex_shell
-        """;
+        """);
 
     /// <summary>Marker line inside the boot runner by which the sync recognizes its own file.</summary>
     internal const string BootRunnerMarker = "PNR-BOOT-RUNNER";
@@ -861,7 +875,7 @@ public sealed class WslConfigGuard(
     /// log, one failing script does not stop the rest. The marker line is what the sync
     /// recognizes its own file by.
     /// </summary>
-    internal static string BuildBootRunner(string startupDir) => $$"""
+    internal static string BuildBootRunner(string startupDir) => NormalizeLf($$"""
         #!/bin/bash
         # {{BootRunnerMarker}}: managed by PrivateNetRouting (guard.wsl) — do not edit by hand.
         # Runs at WSL start (the [boot] command of /etc/wsl.conf points here) and executes
@@ -909,16 +923,16 @@ public sealed class WslConfigGuard(
         done
 
         log "=== [DONE] WSL boot sequence ==="
-        """;
+        """);
 
     /// <summary>The foreign [boot] command preserved as a script (the 00- name keeps it first).</summary>
-    internal static string BuildUserCommandScript(string command) => $$"""
+    internal static string BuildUserCommandScript(string command) => NormalizeLf($$"""
         #!/bin/bash
         # The [boot] command previously written in /etc/wsl.conf, preserved by
         # PrivateNetRouting when its boot runner took over the wsl.conf entry.
         # The 00- name keeps it ahead of the other startup scripts.
         {{command}}
-        """;
+        """);
 
     /// <summary>
     /// One root pass for the whole boot layer: the runner (all plans), the preserved
@@ -934,14 +948,12 @@ public sealed class WslConfigGuard(
         string wslConfText,
         string stamp)
     {
-        static string Payload(string content) => Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
-
         var sb = new StringBuilder();
         sb.Append($$"""
             {{PnrBakFn}}
             RUNNER="{{runnerPath}}"
             NEW="/tmp/.pnr-runner-{{stamp}}"
-            echo '{{Payload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW"
+            echo '{{DistroPayload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW"
             mkdir -p "$(dirname "$RUNNER")"
             if [ -f "$RUNNER" ] && cmp -s "$NEW" "$RUNNER"; then
                 echo RUNNER=unchanged
@@ -961,7 +973,7 @@ public sealed class WslConfigGuard(
             sb.Append($$"""
                 USERCMD="{{userCommandPath}}"
                 NEW="/tmp/.pnr-usercmd-{{stamp}}"
-                echo '{{Payload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW"
                 mkdir -p "$(dirname "$USERCMD")"
                 if [ -f "$USERCMD" ] && cmp -s "$NEW" "$USERCMD"; then
                     echo USERCMD=unchanged
@@ -982,7 +994,7 @@ public sealed class WslConfigGuard(
             sb.Append($$"""
                 WSLCONF="/etc/wsl.conf"
                 NEW="/tmp/.pnr-wslconf-{{stamp}}"
-                echo '{{Payload(wslConfText)}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(wslConfText)}}' | base64 -d > "$NEW"
                 if [ -f "$WSLCONF" ] && cmp -s "$NEW" "$WSLCONF"; then
                     echo WSLCONF=unchanged
                 else
@@ -998,11 +1010,11 @@ public sealed class WslConfigGuard(
         }
 
         sb.Append("echo PNR=ok\n");
-        return sb.ToString();
+        return NormalizeLf(sb.ToString());
     }
 
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
-    internal static string BuildStartupScript(string user, int port) => $$"""
+    internal static string BuildStartupScript(string user, int port) => NormalizeLf($$"""
         #!/bin/bash
         # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy
         # env pointing at the Windows side of the WSL NAT gateway, where the application's
@@ -1056,7 +1068,7 @@ public sealed class WslConfigGuard(
 
         chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
         echo "$TAG proxy $PROXY written to $SETTINGS"
-        """;
+        """);
 
     private static GuardState Aggregate(IReadOnlyList<WslDistroStatus> distros)
     {

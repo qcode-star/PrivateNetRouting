@@ -1174,6 +1174,65 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void WslBuildersEmitLfOnlyScripts()
+    {
+        // Raw multiline literals take the line endings of the checkout; the builders must
+        // normalize at the boundary (a CRLF checkout once put \r into every distro script,
+        // and bash dies on the first line while wsl.exe still exits 0).
+        Assert.DoesNotContain("\r", WslConfigGuard.BuildBootRunner("/etc/wsl.d/startup"));
+        Assert.DoesNotContain("\r", WslConfigGuard.BuildUserCommandScript("docker start things"));
+        Assert.DoesNotContain("\r", WslConfigGuard.BuildStartupScript("u1", 18081));
+        Assert.DoesNotContain("\r", WslConfigGuard.BuildCodexProxyEnvScript(18081, "localhost,.corp.example.com"));
+    }
+
+    [Fact]
+    public void WslLfBoundaryStripsCarriageReturnsFromAnyInput()
+    {
+        // The \r here are escapes: the mechanism itself is checked independently of the checkout.
+        Assert.Equal("a\nb\nc", WslConfigGuard.NormalizeLf("a\r\nb\rc"));
+        Assert.Equal("a\nb", Decode(WslConfigGuard.DistroPayload("a\r\nb")));
+        Assert.Equal("a\nb", Decode(WslConfigGuard.DistroPayload("a\nb"))); // LF passes through unchanged
+    }
+
+    [Fact]
+    public async Task WslSyncSendsLfOnlyScriptsAndPayloads()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nWSLCONF=written\nSETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1")),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.SyncAsync(CancellationToken.None);
+
+        // every script piped to bash -s (boot, settings, startup, codex env), and every base64
+        // payload it embeds, is LF only — whatever the checkout the sources were compiled from
+        Assert.Equal(4, runner.Scripts.Count);
+        foreach (var (_, _, script) in runner.Scripts)
+        {
+            Assert.DoesNotContain("\r", script);
+            foreach (var line in script.Split('\n'))
+            {
+                if (!line.Contains("base64 -d", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var quote = line.IndexOf('\'');
+                Assert.DoesNotContain("\r", Decode(line[(quote + 1)..line.IndexOf('\'', quote + 1)]));
+            }
+        }
+    }
+
+    private static string Decode(string base64) => Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+
+    [Fact]
     public async Task WslSyncPreservesForeignBootCommandAsTheFirstStartupScript()
     {
         var conf = "[boot]\nsystemd=true\ncommand=\"docker start things\"\n\n[user]\ndefault=u1\n";
