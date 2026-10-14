@@ -432,6 +432,13 @@ focus"). Branching: `main` is the buildable state; features go in short branches
   in real author metadata.
 - Core's only external package is `System.Management` (WMI process lookup). Prefer the BCL and
   `SystemOps` wrappers; adding a dependency needs a reason.
+- Line endings: the repository is pinned to LF by `.gitattributes` (`* text=auto eol=lf`); keep it
+  that way. Raw multiline C# string literals (`"""`) take their line endings from the checkout — a
+  CRLF checkout (a Windows CI runner, a clone with `autocrlf=true`) silently puts `\r` into every
+  script built from them, and bash inside a WSL distro dies on the first line while `wsl.exe`
+  still exits 0. Everything a Core builder sends into bash or embeds into a distro file must be
+  LF-normalized at the boundary (`WslConfigGuard.NormalizeLf`/`DistroPayload`; the guard test
+  asserts LF-only scripts and payloads) — same rule for any new WSL-bound script.
 - Naming and style follow `dotnet format` (`.editorconfig` is in place).
 - Interaction with the system (processes, registry, AppX, WSL, firewall) is only behind interfaces in
   Core; implementations are marked with documenting comments about the required privileges
