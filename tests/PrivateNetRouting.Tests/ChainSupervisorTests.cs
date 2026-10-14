@@ -23,12 +23,19 @@ public class ChainSupervisorTests : IDisposable
         string? mode = null,
         Func<CancellationToken, Task>? chainStopped = null,
         Func<CancellationToken, Task<bool>>? upstream = null,
+        Func<CancellationToken, Task<string?>>? systemControlUrl = null,
+        string? loginServer = null,
         bool proxyDisabled = false)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
         return new ChainSupervisor(
-            new ChainConfig { HealthWaitSeconds = healthWaitSeconds, Mode = mode ?? "tailscale" },
+            new ChainConfig
+            {
+                HealthWaitSeconds = healthWaitSeconds,
+                Mode = mode ?? "tailscale",
+                Tailscale = new ChainTailscaleConfig { LoginServer = loginServer ?? "" },
+            },
             proxy ?? new FakeProxy(_calls),
             daemon ?? new FakeDaemon(_calls),
             keeper ?? new FakeKeeper(_calls),
@@ -38,6 +45,7 @@ public class ChainSupervisorTests : IDisposable
             chainRaised,
             chainStopped,
             upstream,
+            systemControlUrl,
             proxyDisabled);
     }
 
@@ -107,9 +115,108 @@ public class ChainSupervisorTests : IDisposable
         await supervisor.EnsureRunningAsync(null, CancellationToken.None);
 
         Assert.Equal(
-            ["daemon.ensure", "keeper.ensure", "cli.up", "proxy.start"],
+            ["daemon.ensure", "keeper.ensure", "cli.login", "cli.up", "proxy.start"],
             _calls);
         Assert.Equal("Running", cli.BackendState); // after up the node must become Running
+    }
+
+    [Fact]
+    public async Task NeedsLoginRunsInteractiveLoginBeforeUp()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin", AuthUrl = "https://login.example/a/0123456789abcdef" };
+        var collector = new StepCollector();
+        var supervisor = Create(cli: cli);
+
+        await supervisor.EnsureRunningAsync(collector, CancellationToken.None);
+
+        Assert.Equal(
+            ["daemon.ensure", "keeper.ensure", "cli.login", "cli.up", "proxy.start"],
+            _calls);
+        var loginStep = collector.Steps.Single(s => s.Component == "Node" && s.AuthUrl is not null);
+        Assert.Equal(ChainStepStatus.Active, loginStep.Status);
+        Assert.Contains("https://login.example/a/0123456789abcdef", loginStep.Detail);
+    }
+
+    [Fact]
+    public async Task FreshNodeWithoutStateLogsInToo()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NoState" };
+        var supervisor = Create(cli: cli);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Contains("cli.login", _calls);
+        Assert.Contains("cli.up", _calls);
+    }
+
+    [Fact]
+    public async Task DownedNodeWithAKeySkipsTheLogin()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "Stopped" }; // downed earlier, the key is intact
+        var supervisor = Create(cli: cli);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.DoesNotContain("cli.login", _calls);
+        Assert.Contains("cli.up", _calls);
+    }
+
+    [Fact]
+    public async Task ConfiguredLoginServerWinsOverTheSystemOne()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin" };
+        var supervisor = Create(
+            cli: cli,
+            systemControlUrl: _ => Task.FromResult<string?>("https://system.example/control"),
+            loginServer: "https://config.example/control");
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Contains("cli.login:https://config.example/control", _calls);
+        Assert.Equal("https://config.example/control", cli.LastLoginServer);
+    }
+
+    [Fact]
+    public async Task LoginServerIsStolenFromTheSystemTailscale()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin" };
+        var lookups = 0;
+        var supervisor = Create(
+            cli: cli,
+            systemControlUrl: _ =>
+            {
+                lookups++;
+                return Task.FromResult<string?>("https://system.example/control");
+            });
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Equal(1, lookups); // only the login needs it — up takes the server from the node state
+        Assert.Contains("cli.login:https://system.example/control", _calls);
+    }
+
+    [Fact]
+    public async Task SilentSystemTailscaleLeavesTheDefaultControlServer()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin" };
+        var supervisor = Create(cli: cli, systemControlUrl: _ => Task.FromResult<string?>(null));
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Contains("cli.login", _calls); // no server suffix — the default control server
+    }
+
+    [Fact]
+    public async Task LoginFailureFailsTheNodeStepBeforeUp()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "NeedsLogin", LoginThrows = new IOException("login timed out") };
+        var supervisor = Create(cli: cli);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, CancellationToken.None));
+
+        Assert.Contains("node", ex.Message);
+        Assert.DoesNotContain("cli.up", _calls);
     }
 
     [Fact]
@@ -741,6 +848,14 @@ public class ChainSupervisorTests : IDisposable
 
         public string? BackendStateAfterUp { get; set; }
 
+        /// <summary>The authentication URL the login reports (null — none).</summary>
+        public string? AuthUrl { get; init; }
+
+        /// <summary>The login-server argument of the last login; null — the default control server.</summary>
+        public string? LastLoginServer { get; private set; }
+
+        public IOException? LoginThrows { get; init; }
+
         public Task<CliResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken ct) =>
             Task.FromResult(new CliResult(0, string.Join(' ', arguments)));
 
@@ -759,6 +874,23 @@ public class ChainSupervisorTests : IDisposable
             calls.Add("cli.down");
             BackendState = "Stopped";
             return Task.FromResult(new CliResult(0, "down"));
+        }
+
+        public Task<CliResult> LoginAsync(string? loginServer, Action<string>? onAuthUrl, CancellationToken ct)
+        {
+            calls.Add(loginServer is null ? "cli.login" : $"cli.login:{loginServer}");
+            LastLoginServer = loginServer;
+            if (LoginThrows is not null)
+            {
+                throw LoginThrows;
+            }
+
+            if (AuthUrl is not null)
+            {
+                onAuthUrl?.Invoke(AuthUrl);
+            }
+
+            return Task.FromResult(new CliResult(0, "login", AuthUrl));
         }
     }
 

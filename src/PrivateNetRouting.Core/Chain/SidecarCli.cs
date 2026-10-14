@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.Core.Chain;
 
-public sealed record CliResult(int ExitCode, string Output)
+/// <param name="AuthUrl">The tailnet authentication URL parsed out of the login output; null — none.</param>
+public sealed record CliResult(int ExitCode, string Output, string? AuthUrl = null)
 {
     public bool Ok => ExitCode == 0;
 }
@@ -19,6 +21,13 @@ public interface ISidecarCli
     Task<CliResult> UpAsync(CancellationToken ct);
 
     Task<CliResult> DownAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Interactive node login: runs `tailscale login`, hands the authentication URL to
+    /// <paramref name="onAuthUrl"/> as soon as it appears in the output, and returns when the
+    /// user finishes the authentication in the browser (or the loginWaitSeconds limit fires).
+    /// </summary>
+    Task<CliResult> LoginAsync(string? loginServer, Action<string>? onAuthUrl, CancellationToken ct);
 }
 
 /// <summary>
@@ -121,4 +130,115 @@ public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCl
     }
 
     public Task<CliResult> DownAsync(CancellationToken ct) => RunAsync(["down"], ct);
+
+    public async Task<CliResult> LoginAsync(string? loginServer, Action<string>? onAuthUrl, CancellationToken ct)
+    {
+        // the wait covers the browser roundtrip (open the page, SSO, device approval); the
+        // caller's cancellation (the GUI Stop, Ctrl+C) aborts it at any moment. The CLI has no
+        // --timeout of its own here — the wrapper limit is the real one.
+        var timeout = TimeSpan.FromSeconds(config.LoginWaitSeconds);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+
+        var info = new ProcessStartInfo(config.CliPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        info.ArgumentList.Add("--socket");
+        info.ArgumentList.Add(config.Socket);
+        info.ArgumentList.Add("login");
+        if (!string.IsNullOrWhiteSpace(loginServer))
+        {
+            info.ArgumentList.Add($"--login-server={loginServer}");
+        }
+
+        using var process = Process.Start(info)
+            ?? throw new IOException($"failed to start {config.CliPath}");
+        var output = new StringBuilder();
+        var extractor = new AuthUrlExtractor();
+        string? authUrl = null;
+        var gate = new object();
+        try
+        {
+            async Task Pump(StreamReader reader)
+            {
+                while (await reader.ReadLineAsync(timeoutCts.Token) is { } line)
+                {
+                    lock (gate)
+                    {
+                        output.AppendLine(line);
+                    }
+
+                    if (authUrl is null && extractor.Feed(line) is { } found)
+                    {
+                        authUrl = found;
+                        onAuthUrl?.Invoke(found);
+                    }
+                }
+            }
+
+            var pumps = Task.WhenAll(Pump(process.StandardOutput), Pump(process.StandardError));
+            await process.WaitForExitAsync(timeoutCts.Token);
+            await pumps;
+            return new CliResult(process.ExitCode, output.ToString().Trim(), authUrl);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // our own limit fired, not the caller's cancellation
+            throw new IOException(
+                $"tailscale login did not complete within {(int)timeout.TotalSeconds} s — the authentication was not finished in the browser (or the daemon pipe is unresponsive)");
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    // lost the race with the process exiting on its own — nothing to kill
+                }
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Pulls the tailnet authentication URL out of the tailscale login output: the URL follows the
+/// "To authenticate, visit" hint (usually on the next line); any URL before the hint (an echoed
+/// control server and the like) is ignored. Reports once.
+/// </summary>
+internal sealed partial class AuthUrlExtractor
+{
+    private bool _hintSeen;
+
+    public string? Feed(string line)
+    {
+        if (line.Contains("To authenticate", StringComparison.OrdinalIgnoreCase))
+        {
+            _hintSeen = true;
+        }
+
+        if (!_hintSeen)
+        {
+            return null;
+        }
+
+        var match = UrlRegex().Match(line);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        _hintSeen = false;
+        return match.Value;
+    }
+
+    [GeneratedRegex(@"https?://\S+")]
+    private static partial Regex UrlRegex();
 }

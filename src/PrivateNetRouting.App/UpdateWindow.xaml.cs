@@ -35,6 +35,7 @@ public partial class UpdateWindow : Window
     private readonly string _logPath;
     private readonly StepRailRow[] _rows;
     private readonly ChainStepStatus[] _states;
+    private string? _openedAuthUrl; // the browser opens the login page once per URL
     private readonly DispatcherTimer _clock;
     private readonly DispatcherTimer _autoClose;
     private readonly Stopwatch _watch = new();
@@ -343,6 +344,27 @@ public partial class UpdateWindow : Window
             if (step.Status == ChainStepStatus.Active && step.NeedsUac)
             {
                 SetHintKey("Update.Hint.Uac");
+            }
+            else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
+            {
+                SetHintDirect("");
+            }
+        }
+
+        if (step.Component == "Node")
+        {
+            if (!string.IsNullOrEmpty(step.AuthUrl) && step.AuthUrl != _openedAuthUrl)
+            {
+                _openedAuthUrl = step.AuthUrl;
+                SetHintKey("Update.Hint.Login");
+                try
+                {
+                    Process.Start(new ProcessStartInfo(step.AuthUrl) { UseShellExecute = true });
+                }
+                catch (Exception)
+                {
+                    // the URL stays in the step line above — the login is possible without the auto-open
+                }
             }
             else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
             {

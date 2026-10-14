@@ -245,6 +245,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             config.Chain.EffectiveMode is ChainMode.Socks5 or ChainMode.Http
                 ? ct => EgressCheckAsync(config, socks, chainLog, ct)
                 : null,
+            // the first node login picks up the control server of the machine's system tailscale
+            // when the config names none
+            new SystemControlUrlFinder(config.Chain.Tailscale, chainLog).FindAsync,
             proxyDisabled: !config.ForwardProxy.Enabled);
 
         var launcherLog = NewLog("launcher.log");

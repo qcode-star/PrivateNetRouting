@@ -13,8 +13,17 @@ public enum ChainStepStatus
     Failed,
 }
 
-/// <summary>Bring-up/shutdown step for UI and CLI: component, status, detail; NeedsUac — the step goes through the elevated helper, a UAC prompt is possible.</summary>
-public sealed record ChainStep(string Component, ChainStepStatus Status, string Detail, bool NeedsUac = false);
+/// <summary>
+/// Bring-up/shutdown step for UI and CLI: component, status, detail; NeedsUac — the step goes
+/// through the elevated helper, a UAC prompt is possible; AuthUrl — the tailnet authentication
+/// URL of the interactive node login (the GUI opens it in the browser, the CLI prints it).
+/// </summary>
+public sealed record ChainStep(
+    string Component,
+    ChainStepStatus Status,
+    string Detail,
+    bool NeedsUac = false,
+    string? AuthUrl = null);
 
 /// <summary>
 /// Snapshot of all chain links (read-only). In the external-upstream modes (socks5, http) the
@@ -99,6 +108,7 @@ public sealed class ChainSupervisor(
     Action? chainRaised = null,
     Func<CancellationToken, Task>? chainStopped = null,
     Func<CancellationToken, Task<bool>>? upstreamCheck = null,
+    Func<CancellationToken, Task<string?>>? systemControlUrl = null,
     bool proxyDisabled = false) : IChainSupervisor
 {
     /// <summary>The external-upstream modes (socks5, http): no daemon/keeper/node links exist there.</summary>
@@ -115,6 +125,11 @@ public sealed class ChainSupervisor(
     // the external modes need the check; without it everything honestly reports "not reachable"
     private readonly Func<CancellationToken, Task<bool>> _upstreamCheck =
         upstreamCheck ?? (_ => Task.FromResult(false));
+
+    // the first node login picks the control server from it (the machine's own tailnet); without
+    // a finder (tests) the login goes to the default control server
+    private readonly Func<CancellationToken, Task<string?>> _systemControlUrl =
+        systemControlUrl ?? (_ => Task.FromResult<string?>(null));
 
     public async Task<ChainState> GetStateAsync(CancellationToken ct)
     {
@@ -217,7 +232,9 @@ public sealed class ChainSupervisor(
                 }
             }
 
-            // 3. node (silent login by key from statedir)
+            // 3. node (silent when the statedir holds a logged-in key; a node without one goes
+            // through the interactive login first — the auth URL rides the progress, the GUI
+            // opens it in the browser, the CLI prints it)
             var state = await cli.GetBackendStateAsync(ct);
             if (state == "Running")
             {
@@ -228,6 +245,11 @@ public sealed class ChainSupervisor(
                 Report(progress, "Node", ChainStepStatus.Active, "tailscale up");
                 try
                 {
+                    if (state is "NoState" or "NeedsLogin")
+                    {
+                        await LoginNodeAsync(progress, ct);
+                    }
+
                     var up = await cli.UpAsync(ct);
                     state = await cli.GetBackendStateAsync(ct);
                     if (state != "Running")
@@ -376,11 +398,42 @@ public sealed class ChainSupervisor(
         }
     }
 
+    /// <summary>
+    /// The interactive login of a node that has none: `tailscale login` waits while the user
+    /// finishes the authentication in the browser; the auth URL rides the progress as soon as it
+    /// appears. The control server: chain.tailscale.loginServer, or — when empty — the one the
+    /// machine's system-wide tailscale uses (read from its prefs; a silent system daemon leaves
+    /// the default). The node key lands in the statedir — the login is one-time.
+    /// </summary>
+    private async Task LoginNodeAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    {
+        var loginServer = !string.IsNullOrWhiteSpace(config.Tailscale.LoginServer)
+            ? config.Tailscale.LoginServer
+            : await _systemControlUrl(ct);
+
+        Report(progress, "Node", ChainStepStatus.Active, "node is not logged in — waiting for authentication");
+        var login = await cli.LoginAsync(loginServer, url => Report(
+            progress, "Node", ChainStepStatus.Active,
+            $"open this address to authenticate: {url}",
+            authUrl: url), ct);
+        if (!login.Ok)
+        {
+            throw new IOException($"login failed: {login.Output}");
+        }
+
+        var state = await cli.GetBackendStateAsync(ct);
+        if (state == "NeedsMachineAuth")
+        {
+            Report(progress, "Node", ChainStepStatus.Active,
+                "authenticated — waiting for the tailnet's device approval");
+        }
+    }
+
     /// <summary>A step into the UI/CLI progress; also a Debug line to the log (the full bring-up picture).</summary>
-    private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail, bool needsUac = false)
+    private void Report(IProgress<ChainStep>? progress, string component, ChainStepStatus status, string detail, bool needsUac = false, string? authUrl = null)
     {
         log.Debug($"chain: {component}: {status.ToString().ToLowerInvariant()}: {detail}");
-        progress?.Report(new ChainStep(component, status, detail, needsUac));
+        progress?.Report(new ChainStep(component, status, detail, needsUac, authUrl));
     }
 }
 

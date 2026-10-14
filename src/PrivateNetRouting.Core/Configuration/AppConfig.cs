@@ -333,6 +333,12 @@ public sealed class ChainTailscaleConfig
     public int UpTimeoutSeconds { get; set; } = 60;
 
     /// <summary>
+    /// Hard limit of the interactive node login — the phase that waits for the user to finish
+    /// the tailnet authentication in the browser, sec.
+    /// </summary>
+    public int LoginWaitSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Hard limit of one tailscale CLI call (status, down): a daemon that stopped answering its
     /// pipe must not hang the whole operation. "up" is bounded by upTimeoutSeconds plus a margin.
     /// </summary>

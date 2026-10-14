@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private bool _chainBusy;
     private bool _chainBusyCancellable; // the running chain operation is a bring-up — Stop cancels it
     private bool _chainBusyBringingUp; // the busy operation raises the chain — the rail speaks "starting", a stop speaks "stopping"
+    private string? _openedAuthUrl; // the browser opens the login page once per URL
     private bool _launchBusy;
     private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
     private bool _fillingLanguages;
@@ -473,6 +474,29 @@ public partial class MainWindow : Window
             {
                 ChainHint.Text = Loc.S("Main.Chain.Hint.Uac");
                 ChainHint.Visibility = Visibility.Visible;
+            }
+            else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
+            {
+                ChainHint.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        if (step.Component == "Node")
+        {
+            if (!string.IsNullOrEmpty(step.AuthUrl) && step.AuthUrl != _openedAuthUrl)
+            {
+                _openedAuthUrl = step.AuthUrl;
+                ChainHint.Text = Loc.S("Main.Chain.Hint.Login");
+                ChainHint.Visibility = Visibility.Visible;
+                try
+                {
+                    Process.Start(new ProcessStartInfo(step.AuthUrl) { UseShellExecute = true });
+                    _runtime.Log.Info($"node login: the authentication page opened in the browser ({step.AuthUrl})");
+                }
+                catch (Exception ex)
+                {
+                    _runtime.Log.Warn($"node login: failed to open the browser: {ex.Message}");
+                }
             }
             else if (step.Status is ChainStepStatus.Done or ChainStepStatus.Skipped)
             {

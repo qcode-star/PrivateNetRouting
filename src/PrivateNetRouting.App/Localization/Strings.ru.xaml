@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Rail.Failed">ошибка</s:String>
     <s:String x:Key="Main.Chain.Skipped">уже работает</s:String>
     <s:String x:Key="Main.Chain.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
+    <s:String x:Key="Main.Chain.Hint.Login">Заверши вход в tailnet на открывшейся странице браузера — дальше цепочка поднимется сама.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">слушает</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">без слушателя</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">нет</s:String>
@@ -248,6 +249,7 @@
     <s:String x:Key="Update.Check.InvalidUrl">По этому адресу нет .msix-пакета — вставь другой.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop не установлен как MSIX-пакет — обновлять нечего.</s:String>
     <s:String x:Key="Update.Hint.Uac">Подтверди окно UAC: tailscaled запускается с правами администратора.</s:String>
+    <s:String x:Key="Update.Hint.Login">Заверши вход в tailnet на открывшейся странице браузера — дальше обновление продолжится само.</s:String>
     <s:String x:Key="Update.Download.RunningFmt">{0} из {1} · {2}/с · осталось {3}</s:String>
     <s:String x:Key="Update.Download.StalledFmt">Нет прогресса {0} мин — докачка продолжит попытки сама.</s:String>
     <s:String x:Key="Update.Verify.OkFmt">Пакет проверен: {0}; Publisher совпадает ({1}).</s:String>

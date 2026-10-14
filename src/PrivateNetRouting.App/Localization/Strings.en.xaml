@@ -47,6 +47,7 @@
     <s:String x:Key="Main.Rail.Failed">failed</s:String>
     <s:String x:Key="Main.Chain.Skipped">already up</s:String>
     <s:String x:Key="Main.Chain.Hint.Uac">Confirm the UAC prompt: tailscaled starts with administrator rights.</s:String>
+    <s:String x:Key="Main.Chain.Hint.Login">Finish the tailnet login in the browser page that has opened — the chain continues on its own afterwards.</s:String>
     <s:String x:Key="Main.Chain.Daemon.Listening">listening</s:String>
     <s:String x:Key="Main.Chain.Daemon.NoListener">no listener</s:String>
     <s:String x:Key="Main.Chain.Daemon.Down">down</s:String>
@@ -248,6 +249,7 @@
     <s:String x:Key="Update.Check.InvalidUrl">This address does not point to an .msix package — paste another one.</s:String>
     <s:String x:Key="Update.Check.NotInstalled">Claude Desktop is not installed as an MSIX package — there is nothing to update.</s:String>
     <s:String x:Key="Update.Hint.Uac">Confirm the UAC prompt: tailscaled starts with administrator rights.</s:String>
+    <s:String x:Key="Update.Hint.Login">Finish the tailnet login in the browser page that has opened — the update continues on its own afterwards.</s:String>
     <s:String x:Key="Update.Download.RunningFmt">{0} of {1} · {2}/s · {3} left</s:String>
     <s:String x:Key="Update.Download.StalledFmt">No progress for {0} min — the downloader keeps retrying on its own.</s:String>
     <s:String x:Key="Update.Verify.OkFmt">Package verified: {0}; the publisher matches ({1}).</s:String>
