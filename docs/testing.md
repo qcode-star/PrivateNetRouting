@@ -125,7 +125,7 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
 ## socks5 mode against tailscale
 
 The mode's contract: `chain.mode=socks5` skips every tailscale step; the forward proxy
-dials `forwardProxy.socks5Upstream` (CONNECT carries the target name; the upstream resolves
+dials `chain.socks5.upstream` (CONNECT carries the target name; the upstream resolves
 it; RFC 1929 auth optional), the bring-up is a single egress check → proxy → health, and
 chain down stops only the proxy. A mode change applies after an application restart.
 

@@ -43,7 +43,7 @@ the ones below: nothing outside the application's own processes matters.
 ```jsonc
 "chain": { "mode": "tailscale" },            // the default
 "browser": { "egress": "forward-proxy" },    // the default
-"forwardProxy": { "skipInSocks5Mode": false } // the default
+"forwardProxy": { "enabled": true } // the default
 ```
 
 **2. A tailscale outside the application (system service or user-run) + the socks5 chain.**
@@ -56,26 +56,28 @@ included — follows that tailscale's DNS configuration (accept-dns / split DNS)
 reason shape 1 is preferred and more controllable.
 
 ```jsonc
-"chain": { "mode": "socks5" },
-"forwardProxy": {
-  "socks5Upstream": "<upstream-host>:<port>"   // reached through the outer tailscale
-  // socks5UpstreamUser/Password if the upstream asks
+"chain": {
+  "mode": "socks5",
+  "socks5": { "upstream": "<upstream-host>:<port>" }, // reached through the outer tailscale
+                                                      // user/password if the upstream asks
 },
 "browser": { "egress": "forward-proxy" }      // or "chain" — both work here
 ```
 
 **3. sing-box (mixed inbound) + socks5 chain, no WSL.** The forward proxy is not needed:
-every client is pointed at sing-box directly (`forwardProxy.skipInSocks5Mode`).
+every client is pointed at sing-box directly (`forwardProxy.enabled=false`).
 
 ```jsonc
-"chain": { "mode": "socks5" },
-"forwardProxy": {
-  "socks5Upstream": "127.0.0.1:2080",         // the sing-box mixed inbound
-  "skipInSocks5Mode": true,
-  "externalAppsEndpoint": "127.0.0.1:2080"    // the same port, HTTP CONNECT side
+"chain": {
+  "mode": "socks5",
+  "socks5": { "upstream": "127.0.0.1:2080" },  // the sing-box mixed inbound
 },
-"browser": { "egress": "chain" }              // straight to the mixed inbound (SOCKS5)
-// guard.wsl stays off — there is nothing to bridge
+"forwardProxy": {
+  "enabled": false,
+  "externalAppsEndpoint": "127.0.0.1:2080"     // the same port, HTTP CONNECT side
+},
+"browser": { "egress": "chain" }               // straight to the mixed inbound (SOCKS5)
+// wsl stays off — there is nothing to bridge
 ```
 
 **4. sing-box (mixed inbound) + socks5 chain + WSL.** The forward proxy is the simple,
@@ -83,14 +85,13 @@ ready way to bridge WSL: its bind on the WSL NAT gateway keeps sing-box on loopb
 `0.0.0.0` exposure, no firewall work of the owner's own.
 
 ```jsonc
-"chain": { "mode": "socks5" },
-"forwardProxy": {
-  "socks5Upstream": "127.0.0.1:2080",
-  "skipInSocks5Mode": false,                  // the proxy stays: it is the WSL bridge
-  "bindWslGateway": true                      // the default
+"chain": {
+  "mode": "socks5",
+  "socks5": { "upstream": "127.0.0.1:2080" },
 },
+"forwardProxy": { "bindWslGateway": true },   // the default; the proxy stays: it is the WSL bridge
 "browser": { "egress": "forward-proxy" }      // or "chain" — both reach sing-box
-// guard.wsl sync on as usual; sing-box keeps listening on loopback
+// wsl sync on as usual; sing-box keeps listening on loopback
 ```
 
 **5. A plain SOCKS5 upstream (no HTTP inbound) + socks5 chain.** The forward proxy is the
@@ -100,11 +101,11 @@ families speak SOCKS5 natively (with remote DNS), so `browser.egress=chain` reac
 upstream directly — riding the translator is the default setting, not a necessity.
 
 ```jsonc
-"chain": { "mode": "socks5" },
-"forwardProxy": {
-  "socks5Upstream": "<upstream-host>:<port>",
-  "skipInSocks5Mode": false                   // required: the apps have no SOCKS5 of their own
+"chain": {
+  "mode": "socks5",
+  "socks5": { "upstream": "<upstream-host>:<port>" },
 },
+"forwardProxy": { "enabled": true },          // required: the apps have no SOCKS5 of their own
 "browser": { "egress": "chain" }              // recommended: the browser speaks SOCKS5 natively
 ```
 
@@ -158,20 +159,20 @@ pnr config path|init           # user config path / create from defaults
 Everything environment-specific (endpoint addresses, ports, bypass domain lists, paths, timeouts)
 lives in the application's user config and never reaches git. The repository holds only templates
 with placeholders in `config/*.example.json`. An installation that uses only one of the two apps
-turns the other off in the config (`apps.claude` / `apps.codex`): its launch/update buttons, its
-tray item and its startup update check disappear, and its `pnr` commands refuse with a note — the
-guards, the chain and the idle stopper keep working. The repository is public and anonymous: no real
-addresses, domains, names, or secrets (rule #2 in AGENTS.md).
+turns the other off in the config (`claude.enabled` / `codex.enabled`): its launch/update buttons,
+its tray item and its startup update check disappear, and its `pnr` commands refuse with a note —
+the guards, the chain and the idle stopper keep working. The repository is public and anonymous: no
+real addresses, domains, names, or secrets (rule #2 in AGENTS.md).
 
 ## Modules
 
 | Module | What it does |
 |---|---|
-| Forward proxy | Local CONNECT proxy. Why it exists: the tailscale sidecar's own proxies (SOCKS5 and HTTP) resolve names with the system resolver — their dialer never consults the netstack DNS — and the direct-access ban blackholes exactly the AI names there, so this proxy does the resolution itself and dials by IP; besides that, applications speak HTTP CONNECT (the managed policy of Claude, `HTTPS_PROXY` of Claude Code and Codex), which a plain SOCKS5 upstream does not answer. In the tailscale mode it resolves names over DoH (the resolvers are picked up from the tailnet netmap — http and https, by IP or by name; the optional `dohSeed` adds extras) and dials by IP through the SOCKS5 upstream — the sidecar's own listener (`chain.daemonSocksListen`), so the address cannot drift from the daemon. In the socks5 mode the trusted external upstream from `forwardProxy.socks5Upstream` (optionally with username/password, RFC 1929) resolves on its side: the target name rides the CONNECT, no DoH involved. An upstream with a mixed HTTP+SOCKS inbound (e.g. sing-box) makes the local proxy redundant in the socks5 mode: `forwardProxy.skipInSocks5Mode` runs no local proxy at all and every client is pointed at `forwardProxy.externalAppsEndpoint` instead — the mixed inbound itself, which does the CONNECT-to-SOCKS translation (the tailscale mode ignores the flag: there the proxy is load-bearing). Listens on localhost and the WSL gateway, keeps an activity marker for the watchdog. Runs in-process or as a detached worker that outlives the GUI/command; a stopped proxy starts again cleanly in the same process. |
-| Chain supervisor | Two modes by `chain.mode` (a change applies after a restart). "tailscale" (default): idempotent bring-up/stop of the userspace tailscaled daemon → keeper → node → forward proxy; on tailscale 1.104.1+ the daemon runs without elevation (`chain.daemonElevation`, default auto), older builds start it through a one-shot elevated copy (UAC). "socks5": the chain is one check of the external SOCKS5 upstream from `forwardProxy.socks5Upstream` (a CONNECT-by-name roundtrip through it — the upstream resolves the name on its side) plus the forward proxy itself — no tailscale processes and no UAC; stopping takes down only the proxy. With `forwardProxy.skipInSocks5Mode` there is no proxy link in that shape at all: egress check → health against the external endpoint, and stopping has nothing local to stop. The chain card draws the mode's steps: three tailscale stages become one "Egress" stage (two stages — "Egress", "CONNECT check" — in the skipped shape). While a bring-up is running (its own, or the one inside a launch), the card's Stop cancels it: what got raised is stopped, a chain raised before the launch keeps working. |
+| Forward proxy | Local CONNECT proxy. Why it exists: the tailscale sidecar's own proxies (SOCKS5 and HTTP) resolve names with the system resolver — their dialer never consults the netstack DNS — and the direct-access ban blackholes exactly the AI names there, so this proxy does the resolution itself and dials by IP; besides that, applications speak HTTP CONNECT (the managed policy of Claude, `HTTPS_PROXY` of Claude Code and Codex), which a plain SOCKS5 upstream does not answer. In the tailscale mode it resolves names over DoH (the resolvers are picked up from the tailnet netmap — http and https, by IP or by name; the optional `dohSeed` adds extras) and dials by IP through the SOCKS5 upstream — the sidecar's own listener (`chain.tailscale.socksListen`), so the address cannot drift from the daemon. In the socks5 mode the trusted external upstream from `chain.socks5.upstream` (optionally with username/password, RFC 1929) resolves on its side: the target name rides the CONNECT, no DoH involved. An upstream with a mixed HTTP+SOCKS inbound (e.g. sing-box) makes the local proxy redundant in the socks5 mode: `forwardProxy.enabled=false` runs no local proxy at all and every client is pointed at `forwardProxy.externalAppsEndpoint` instead — the mixed inbound itself, which does the CONNECT-to-SOCKS translation (the tailscale mode ignores the flag: there the proxy is load-bearing). Listens on localhost and the WSL gateway, keeps an activity marker for the watchdog. Runs in-process or as a detached worker that outlives the GUI/command; a stopped proxy starts again cleanly in the same process. |
+| Chain supervisor | Two modes by `chain.mode` (a change applies after a restart). "tailscale" (default): idempotent bring-up/stop of the userspace tailscaled daemon → keeper → node → forward proxy; on tailscale 1.104.1+ the daemon runs without elevation (`chain.tailscale.elevation`, default auto), older builds start it through a one-shot elevated copy (UAC). "socks5": the chain is one check of the external SOCKS5 upstream from `chain.socks5.upstream` (a CONNECT-by-name roundtrip through it — the upstream resolves the name on its side) plus the forward proxy itself — no tailscale processes and no UAC; stopping takes down only the proxy. With `forwardProxy.enabled=false` there is no proxy link in that shape at all: egress check → health against the external endpoint, and stopping has nothing local to stop. The chain card draws the mode's steps: three tailscale stages become one "Egress" stage (two stages — "Egress", "CONNECT check" — in the skipped shape). While a bring-up is running (its own, or the one inside a launch), the card's Stop cancels it: what got raised is stopped, a chain raised before the launch keeps working. |
 | Launchers | Claude Desktop with `--proxy-server`/`--proxy-bypass-list`; the Codex desktop app (OpenAI, Microsoft Store MSIX) with the same flags plus a refresh of the proxy env in `CODEX_HOME/.env` — the file its embedded CLI core loads itself (the app strips the inherited proxy env from its child processes; a package-context launch). Both bring the chain up when needed; the bring-up runs live in the chain card of the main window. Both desktop apps are single-instance, so a copy already running without our proxy would swallow a new start: the window shows a dialog and the CLI asks (or takes `--restart`) before closing that copy gracefully (a forced tree kill only for what survives the wait) and starting it again through the proxy. |
-| Browser profile | Created once through the dialog ("?" help menu → "Create browser profile…"): the family (Firefox or Chrome), the profile folder, the browser executable (the standard places are probed first, any file can be pointed at by hand) and an optional desktop shortcut. The traffic goes through the egress chosen by `browser.egress`. "forward-proxy" (default): the applications proxy endpoint over HTTP CONNECT — Firefox gets http/ssl prefs in its `user.js`, Chromium `--proxy-server=http://…` — the names ride the CONNECT and are resolved on the proxy side over DoH, so the local ban cannot poison them; the proxy process (the GUI in the tray or the detached worker) has to be running, or — with the local proxy skipped in the socks5 mode (`forwardProxy.skipInSocks5Mode`) — the external endpoint stands in for it and nothing of ours has to run. "chain": the chain's final SOCKS5 (`chain.daemonSocksListen`, or `forwardProxy.socks5Upstream` in the socks5 mode) — the browser then needs no PNR process (the chain itself still has to be up), but the tailscale sidecar resolves names with the system resolver, so the names blocked from direct access do not open through it (such a launch warns in the log). Inside the profile WebRTC is off (Firefox fully — `media.peerconnection.enabled`/`media.navigator.enabled`; Chromium through `webrtc.ip_handling_policy`, the only lever that family has — its command-line switch is gone from current builds, and the policy alone was verified to zero out ICE candidates), the tabs of the last session come back on start, the startup offers are off — the fresh profile's welcome/terms page included (a one-time `prefs.js` seed) — and the configured local zones stay on the direct route. The "Browser" button, `--launch-browser` and `pnr browser` only probe the egress (a TCP check, `browser.probeTimeoutSeconds`) and start the browser; a dead egress that our chain brings up is offered a chain raise right there (over an external endpoint — the socks5 upstream, or the skipped-shape egress — the question is only whether to start anyway). Firefox's `user.js` is refreshed on every launch from the application — the button and the shortcut read the same file; Chrome carries the proxy on the command line. |
-| Watchdog | Idle auto-stop: watches Claude and Codex processes, connections to the applications proxy endpoint and to the chain's egress listener (a browser pointed there by `browser.egress=chain` goes straight there, so browsing keeps the chain up; the default forward-proxy egress is covered by the proxy-connection check), and the activity marker — the marker signal is skipped when the local proxy does not run (the skipped socks5 shape: nobody touches the marker, the connections remain); on idle it stops the WSL Claude host and then the chain. Lives only over a live chain: every completed chain stop takes the stopper down with it, and it cannot be armed over a stopped chain (the GUI Start is disabled, `pnr watchdog` refuses). Started explicitly (the toggle in the chain card spawns a detached background worker that keeps working after the application is closed and switches itself off after firing, or run `pnr watchdog` in a terminal). The auto-start flag (on by default) re-arms the stopper after every chain bring-up. |
+| Browser profile | Created once through the dialog ("?" help menu → "Create browser profile…"): the family (Firefox or Chrome), the profile folder, the browser executable (the standard places are probed first, any file can be pointed at by hand) and an optional desktop shortcut. The traffic goes through the egress chosen by `browser.egress`. "forward-proxy" (default): the applications proxy endpoint over HTTP CONNECT — Firefox gets http/ssl prefs in its `user.js`, Chromium `--proxy-server=http://…` — the names ride the CONNECT and are resolved on the proxy side over DoH, so the local ban cannot poison them; the proxy process (the GUI in the tray or the detached worker) has to be running, or — with the local proxy skipped in the socks5 mode (`forwardProxy.enabled=false`) — the external endpoint stands in for it and nothing of ours has to run. "chain": the chain's final SOCKS5 (`chain.tailscale.socksListen`, or `chain.socks5.upstream` in the socks5 mode) — the browser then needs no PNR process (the chain itself still has to be up), but the tailscale sidecar resolves names with the system resolver, so the names blocked from direct access do not open through it (such a launch warns in the log). Inside the profile WebRTC is off (Firefox fully — `media.peerconnection.enabled`/`media.navigator.enabled`; Chromium through `webrtc.ip_handling_policy`, the only lever that family has — its command-line switch is gone from current builds, and the policy alone was verified to zero out ICE candidates), the tabs of the last session come back on start, the startup offers are off — the fresh profile's welcome/terms page included (a one-time `prefs.js` seed) — and the configured local zones stay on the direct route. The "Browser" button, `--launch-browser` and `pnr browser` only probe the egress (a TCP check, `browser.probeTimeoutSeconds`) and start the browser; a dead egress that our chain brings up is offered a chain raise right there (over an external endpoint — the socks5 upstream, or the skipped-shape egress — the question is only whether to start anyway). Firefox's `user.js` is refreshed on every launch from the application — the button and the shortcut read the same file; Chrome carries the proxy on the command line. |
+| Watchdog | Idle auto-stop: watches Claude and Codex processes, connections to the applications proxy endpoint and to the chain's egress listener (a browser pointed there by `browser.egress=chain` goes straight there, so browsing keeps the chain up; the default forward-proxy egress is covered by the proxy-connection check), and the activity marker — the marker signal is skipped when the local proxy does not run (the skipped socks5 shape: nobody touches the marker, the connections remain); on idle it stops the app hosts inside the RUNNING configured WSL distros (`wsl.distros` — no distro is booted just for the check; Claude's remote host is shut down by RPC, leftover Codex processes are recognized by `CODEX_HOME` in their environment) and then the chain. Lives only over a live chain: every completed chain stop takes the stopper down with it, and it cannot be armed over a stopped chain (the GUI Start is disabled, `pnr watchdog` refuses). Started explicitly (the toggle in the chain card spawns a detached background worker that keeps working after the application is closed and switches itself off after firing, or run `pnr watchdog` in a terminal). The auto-start flag (on by default) re-arms the stopper after every chain bring-up. |
 | Updater | Manual MSIX update of Claude Desktop: version check before bring-up, package URL from Claude's own update feed (asked through the already-live proxy) with the AppX journal as the fallback, multi-threaded chunked download through the proxy, Publisher verification, `Add-AppxPackage`. When no source has a package address, the update window offers to raise the chain and asks the sources again over the live chain. A startup check announces an update only with a concrete offered version and lights an accent dot on the update button (the versions in its tooltip), which the update window's own check or a finished installation clears; the window closes itself 30 s after a successful installation, with a visible countdown. The Codex desktop app updates through the Microsoft Store instead: the Store catalog is asked by the product id (no chain, no UAC), OpenAI's version manifest names the offered version (through the live proxy), the update hands the package to the Store and follows its progress, closing a running Codex first. |
 | Guards | Direct-access control: the managed `egressProxyUrl` policy, a local ban (hosts + one NRPT rule + firewall subnet block), the application settings — one sync writes the Claude Code env and the Codex layer — the `[features] respect_system_proxy = true` flag into config.toml plus the proxy env into the `.env` of the same CODEX_HOME, the file the embedded CLI core loads itself (surgical edits: every other line of the files Codex owns survives, backups are kept) — plus Claude Code env in WSL and, for the Codex CLI inside a distro, the proxy env layer — a profile snippet that exports the application proxy only to the shells Codex itself starts (the desktop app passes `CODEX_HOME` there for its own processes, the codex command name is the fallback) and rewrites that CODEX_HOME `.env` to the current gateway address, recomputing the WSL NAT gateway address on every shell start, while ordinary shells, apt, pip and git stay direct — plus the distro boot layer: the sync points the `[boot]` command of `/etc/wsl.conf` at a marked runner that executes the startup directory in order, preserving a foreign command as its first script — and the WinINET system proxy. Every synced address is the applications proxy endpoint — the local forward proxy's, or the external one when the local proxy is skipped (the WSL status then warns when that endpoint is loopback-only, hence unreachable from the distros: the upstream must listen on the WSL-facing address itself). Status is read-only; changes go through an elevated helper. |
 | Diagnostics | Read-only state summary (port owners, chain processes — or the socks5 egress line, WSL bind, counters, marker, CONNECT roundtrip, guards) in a window of its own; the log list/tail/rotation live in the CLI, the window has an "Open logs" button. |
