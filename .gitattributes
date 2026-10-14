@@ -1,0 +1,6 @@
+# The whole repository is pinned to LF on checkout (see AGENTS.md, "Code conventions"):
+# raw multiline C# string literals take the line endings of the source file, and the WSL-bound
+# scripts built from them must stay LF — a CRLF checkout once put \r into every script the
+# guard sends into the distros (bash dies on the first line while wsl.exe still exits 0).
+# Binary files are auto-detected and left alone.
+* text=auto eol=lf
