@@ -43,7 +43,9 @@ the ones below: nothing outside the application's own processes matters.
 ```jsonc
 "chain": { "mode": "tailscale" },            // the default
 "browser": { "egress": "forward-proxy" },    // the default
-"forwardProxy": { "enabled": true } // the default
+"forwardProxy": { "enabled": true },         // the default
+// wsl: the distros to sync into — the name as in `wsl --list`, nothing is auto-discovered
+"wsl": { "distros": [ { "name": "<distro-name>", "user": "<distro-user>" } ] }
 ```
 
 **2. A tailscale outside the application (system service or user-run) + the socks5 chain.**
@@ -67,8 +69,10 @@ controllable (there the proxy resolves over DoH itself and dials the sidecar by 
                                                       // user/password if the upstream asks
 },
 "forwardProxy": { "enabled": true },          // the default
-"browser": { "egress": "forward-proxy" }      // or "chain" — no DNS difference here: the
+"browser": { "egress": "forward-proxy" },     // or "chain" — no DNS difference here: the
                                               // upstream resolves the names in either case
+// wsl: the distros to sync into — the name as in `wsl --list`, nothing is auto-discovered
+"wsl": { "distros": [ { "name": "<distro-name>", "user": "<distro-user>" } ] }
 ```
 
 **3. sing-box (mixed inbound) + socks5 chain, no WSL.** The forward proxy is not needed
@@ -100,7 +104,9 @@ roundtrip against the upstream itself.
   "http": { "upstream": "<proxy-host>:<port>" },  // the provided HTTP proxy (CONNECT)
 },
 "forwardProxy": { "enabled": false },            // irrelevant in this mode — the proxy never runs
-"browser": { "egress": "forward-proxy" }         // or "chain" — both resolve to the same upstream
+"browser": { "egress": "forward-proxy" },        // or "chain" — both resolve to the same upstream
+// wsl: the distros to sync into — the name as in `wsl --list`, nothing is auto-discovered
+"wsl": { "distros": [ { "name": "<distro-name>", "user": "<distro-user>" } ] }
 ```
 
 **5. sing-box (mixed inbound) + socks5 chain + WSL.** The forward proxy is the simple,
@@ -113,8 +119,10 @@ ready way to bridge WSL: its bind on the WSL NAT gateway keeps sing-box on loopb
   "socks5": { "upstream": "127.0.0.1:2080" },
 },
 "forwardProxy": { "enabled": true, "bindWslGateway": true },  // the defaults; the proxy stays: it is the WSL bridge
-"browser": { "egress": "chain" }              // or "forward-proxy" — both reach sing-box
-// wsl sync on as usual; sing-box keeps listening on loopback
+"browser": { "egress": "chain" },             // or "forward-proxy" — both reach sing-box
+// wsl: the distros to sync into — the name as in `wsl --list`, nothing is auto-discovered
+"wsl": { "distros": [ { "name": "<distro-name>", "user": "<distro-user>" } ] }
+// sing-box keeps listening on loopback
 ```
 
 **6. A plain SOCKS5 upstream (no HTTP inbound) + socks5 chain.** The forward proxy is the
@@ -188,6 +196,11 @@ turns the other off in the config (`claude.enabled` / `codex.enabled`): its laun
 its tray item and its startup update check disappear, and its `pnr` commands refuse with a note —
 the guards, the chain and the idle stopper keep working. The repository is public and anonymous: no
 real addresses, domains, names, or secrets (rule #2 in AGENTS.md).
+
+The WSL layer (the guard sync into the distros and the idle-stop WSL step) works only over the
+distros listed in `wsl.distros` in the user config — nothing is discovered automatically, the name
+must match `wsl --list` exactly. With the default `wsl.mode=auto` the layer turns on when at least
+one configured distro is installed; an empty list keeps it off.
 
 ## Modules
 
