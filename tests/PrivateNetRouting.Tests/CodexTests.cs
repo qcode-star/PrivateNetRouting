@@ -348,6 +348,21 @@ public class CodexTests : IDisposable
     }
 
     [Fact]
+    public async Task CancellingTheRunCancelsTheQueuedStoreItem()
+    {
+        var (updater, store, appx, _, _) = CreateUpdater();
+        appx.Installed = Package("26.1007.2314.0", "OpenAI.Codex_2p2nqsd0c76g0");
+        store.Handle.StatusSequence = [new StoreInstallStatus(StoreInstallPhase.Downloading, 100, 30, 30, null)];
+        using var cts = new CancellationTokenSource();
+
+        var run = updater.UpdateAsync(null, cts.Token);
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        Assert.True(store.Handle.CancelCalled);
+    }
+
+    [Fact]
     public async Task StoreErrorFailsTheUpdate()
     {
         var (updater, store, appx, _, _) = CreateUpdater();

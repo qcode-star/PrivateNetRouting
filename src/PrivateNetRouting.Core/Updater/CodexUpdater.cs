@@ -125,7 +125,23 @@ public sealed class CodexUpdater(
                 }
             }
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // the caller gave up (Stop, or the window closed): the Store item is queued in the
+            // system and would keep downloading and installing without anyone watching
+            try
+            {
+                handle.Cancel();
+                log.Info("codex-updater: the Store update was canceled");
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"codex-updater: cannot cancel the Store item: {ex.Message}");
+            }
+
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             throw new IOException(
                 $"the Store update did not finish within {config.Codex.Update.UpdateTimeoutSeconds} s — check the Store app");
