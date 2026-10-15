@@ -401,6 +401,36 @@ public class BrowserLauncherTests : IDisposable
     }
 
     [Fact]
+    public async Task EgressThatAnswersAfterTheRaiseIsReportedAsResponding()
+    {
+        var listener = StartListener(out var port);
+        listener.Stop();
+        var config = ConfiguredConfig(egressPort: port);
+        TcpListener? revived = null;
+        _chain.OnEnsure = () =>
+        {
+            revived = new TcpListener(IPAddress.Loopback, port);
+            revived.Start();
+        };
+
+        try
+        {
+            var result = await Create(config).LaunchAsync(
+                BrowserLauncherOptions.Default with { ConfirmDeadEgress = _ => Task.FromResult(true) },
+                null,
+                CancellationToken.None);
+
+            Assert.Equal(1, _chain.EnsureCalls); // the raise happens once, in the launcher only
+            Assert.True(result.EgressResponded); // the verdict is re-taken after the raise
+            Assert.Single(_started);
+        }
+        finally
+        {
+            revived?.Stop();
+        }
+    }
+
+    [Fact]
     public async Task DeadEgressOverAnExternalUpstreamOnlyAsksAndLaunchesAnyway()
     {
         var listener = StartListener(out var port);
@@ -627,6 +657,9 @@ public class BrowserLauncherTests : IDisposable
 
         public ChainException? Failure { get; set; }
 
+        /// <summary>Runs inside the bring-up - a test brings the egress listener up here.</summary>
+        public Action? OnEnsure { get; set; }
+
         public Task<ChainState> GetStateAsync(CancellationToken ct) => Task.FromResult(new ChainState(
             DaemonHttpListening: true, DaemonProcessAlive: true, KeeperRunning: true,
             BackendState: "Running", ProxyRunning: true, ProxyHealthy: true));
@@ -634,6 +667,7 @@ public class BrowserLauncherTests : IDisposable
         public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
         {
             EnsureCalls++;
+            OnEnsure?.Invoke();
             return Failure is null ? Task.CompletedTask : Task.FromException(Failure);
         }
 

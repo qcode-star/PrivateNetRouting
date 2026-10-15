@@ -1438,12 +1438,13 @@ public partial class MainWindow : Window
         {
             // The question about an egress that did not answer, asked by the launcher before the
             // launch. When the egress is ours to raise (the forward proxy while the chain runs
-            // it, the sidecar's listener in the tailscale mode), yes raises the chain (drawn in
-            // the card, exactly like a manual bring-up) and the launch goes on. Over an external
-            // upstream there is nothing to raise — the question is only whether to start with an
-            // upstream that is down. The launcher's callback runs off the UI thread, so the
-            // question and the bring-up are marshalled back here.
-            var confirmDeadEgress = (CancellationToken ct) => Dispatcher.InvokeAsync(async () =>
+            // it, the sidecar's listener in the tailscale mode), yes makes the launcher raise the
+            // chain right after this answer (drawn in the card, exactly like a manual bring-up —
+            // the card is prepared here, the bring-up itself runs in the launcher only) and the
+            // launch goes on. Over an external upstream there is nothing to raise — the question
+            // is only whether to start with an upstream that is down. The launcher's callback runs
+            // off the UI thread, so the question is marshalled back here.
+            var confirmDeadEgress = (CancellationToken _) => Dispatcher.InvokeAsync(async () =>
             {
                 var egress = _runtime.Browser.EgressUrl;
                 if (!_runtime.Browser.ChainOwnsEgress)
@@ -1469,7 +1470,6 @@ public partial class MainWindow : Window
                 chainBefore = await SnapshotChainAsync();
                 BeginOperation();
                 chainWasDown = true;
-                await _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct);
                 return true;
             }).Task.Unwrap();
 

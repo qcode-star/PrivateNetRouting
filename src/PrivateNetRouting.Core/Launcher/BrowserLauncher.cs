@@ -223,6 +223,12 @@ public sealed class BrowserLauncher(
             {
                 log.Info("browser: raising the chain (confirmed by the owner)");
                 await chain.EnsureRunningAsync(progress, ct).ConfigureAwait(false);
+
+                // the answer is taken before the raise: report what the egress does now, not what it did
+                reachable = await IsEgressReachableAsync(ct).ConfigureAwait(false);
+                log.Info(reachable
+                    ? $"browser: egress {EgressUrl} responds after the raise"
+                    : $"browser: egress {EgressUrl} still does not respond after the raise");
             }
             else
             {
