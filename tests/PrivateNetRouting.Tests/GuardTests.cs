@@ -1069,6 +1069,13 @@ public class GuardTests : IDisposable
         Assert.Contains("os.replace(tmp, real)", script);
         Assert.DoesNotContain("data = {}\n            except", script);
 
+        // the script runs as root: ~/.claude is created for the user with the primary group
+        // looked up, not assumed to be named like the user
+        Assert.Contains("USER_GROUP=$(id -gn \"$USER_NAME\"", script);
+        Assert.Contains("install -d -o \"$USER_NAME\" -g \"$USER_GROUP\"", script);
+        Assert.Contains("chown \"$USER_NAME:$USER_GROUP\" \"$SETTINGS\"", script);
+        Assert.DoesNotContain("mkdir -p \"$USER_HOME/.claude\"", script);
+
         // codex proxy env contents: the marker, the port and the bypass zones of the config
         var envPass = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("ENVFILE="));
         Assert.Contains("pnr_bak \"$ENVFILE\" BACKUP", envPass.Script);

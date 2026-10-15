@@ -1115,7 +1115,11 @@ public sealed class WslConfigGuard(
             echo "$TAG proxy $PROXY not responding yet (host chain coming up?) - writing the config anyway"
         fi
 
-        mkdir -p "$USER_HOME/.claude"
+        # The script runs as root: a directory created here must belong to the user (Claude
+        # Code, running as the user, creates projects/, todos/ and credentials inside it), and
+        # the primary group is looked up — it is not always named like the user.
+        USER_GROUP=$(id -gn "$USER_NAME" 2>/dev/null || echo "$USER_NAME")
+        [ -d "$USER_HOME/.claude" ] || install -d -o "$USER_NAME" -g "$USER_GROUP" -m 755 "$USER_HOME/.claude"
         # An existing settings.json that cannot be parsed is never rewritten: it holds the
         # owner's permissions, hooks and model, and a boot-time writer has no way to ask.
         # The file is replaced through a temp file, so a failure never leaves it half written.
@@ -1149,7 +1153,7 @@ public sealed class WslConfigGuard(
         os.replace(tmp, real)
         PYEOF
         then
-            chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
+            chown "$USER_NAME:$USER_GROUP" "$SETTINGS" 2>/dev/null
             echo "$TAG proxy $PROXY written to $SETTINGS"
         else
             echo "$TAG $SETTINGS left untouched - fix it by hand, the next WSL start retries"
