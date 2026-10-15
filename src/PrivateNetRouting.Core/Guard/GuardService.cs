@@ -6,11 +6,16 @@ using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Guard;
 
-/// <summary>Live ban checks: read-only, requires no rights.</summary>
+/// <summary>
+/// Live ban checks: read-only, requires no rights. A verdict is true (blocked), false (open) or
+/// null - not established: no probe names configured, the network could not be judged (the DNS
+/// server itself was unreachable), or the direct probe never got past the name (a name the ban
+/// already blocks says nothing about the firewall layer).
+/// </summary>
 public sealed record BanLiveChecks(
-    bool DnsBlocked,
+    bool? DnsBlocked,
     string DnsDetail,
-    bool DirectBlocked,
+    bool? DirectBlocked,
     string DirectDetail,
     bool? ProxiedAlive,
     string ProxiedDetail);
@@ -364,16 +369,23 @@ public sealed class GuardService(
         var probes = config.Guard.BanProbes;
         var dnsDetails = new List<string>();
         var directDetails = new List<string>();
-        var dnsBlocked = true;
-        var directBlocked = true;
+        var dnsVerdicts = new List<bool?>();
+        var directVerdicts = new List<bool?>();
         foreach (var probe in probes)
         {
             var (dns, dnsDetail) = await ProbeDnsAsync(probe, ct);
-            var (direct, directDetail) = await ProbeDirectAsync(probe, ct);
-            dnsBlocked &= dns;
-            directBlocked &= direct;
+            var (direct, directDetail) = await ProbeDirectAsync(probe, dns, ct);
+            dnsVerdicts.Add(dns);
+            directVerdicts.Add(direct);
             dnsDetails.Add(dnsDetail);
             directDetails.Add(directDetail);
+        }
+
+        if (probes.Count == 0)
+        {
+            // an empty list used to read as a vacuous "blocked"
+            dnsDetails.Add("DNS: no probe names configured (guard.banProbes) - not checked");
+            directDetails.Add("direct: no probe names configured (guard.banProbes) - not checked");
         }
 
         bool? proxiedAlive = null;
@@ -391,25 +403,65 @@ public sealed class GuardService(
             proxiedDetail = $"proxied check failed: {ex.Message}";
         }
 
-        return new BanLiveChecks(dnsBlocked, string.Join(" | ", dnsDetails), directBlocked, string.Join(" | ", directDetails), proxiedAlive, proxiedDetail);
+        return new BanLiveChecks(
+            CombineVerdicts(dnsVerdicts), string.Join(" | ", dnsDetails),
+            CombineVerdicts(directVerdicts), string.Join(" | ", directDetails),
+            proxiedAlive, proxiedDetail);
     }
 
-    private static async Task<(bool Blocked, string Detail)> ProbeDnsAsync(string probe, CancellationToken ct)
+    /// <summary>
+    /// One verdict over the probes: any open probe makes it open, otherwise any undecided one
+    /// leaves it undecided, and only a list of blocked probes is blocked. No probes - no verdict.
+    /// </summary>
+    internal static bool? CombineVerdicts(IReadOnlyList<bool?> verdicts)
+    {
+        if (verdicts.Count == 0)
+        {
+            return null;
+        }
+
+        if (verdicts.Any(v => v == false))
+        {
+            return false;
+        }
+
+        return verdicts.Any(v => v is null) ? null : true;
+    }
+
+    /// <summary>
+    /// The name is blocked only when the resolver answers "no such host / no data"; a resolver
+    /// that cannot be reached (offline, DNS down) proves nothing about the ban.
+    /// </summary>
+    private static async Task<(bool? Blocked, string Detail)> ProbeDnsAsync(string probe, CancellationToken ct)
     {
         try
         {
             var addresses = await Dns.GetHostAddressesAsync(probe, ct);
             return (false, $"DNS {probe}: resolves to {string.Join(",", addresses.Select(a => a.ToString()))}");
         }
-        catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.HostNotFound or SocketError.NoData)
         {
             return (true, $"DNS {probe}: does not resolve");
         }
+        catch (SocketException ex)
+        {
+            return (null, $"DNS {probe}: inconclusive - the resolver failed ({ex.SocketErrorCode}), not a block");
+        }
     }
 
-    private static async Task<(bool Blocked, string Detail)> ProbeDirectAsync(string probe, CancellationToken ct)
+    /// <summary>
+    /// Direct connection to the probe, no proxy. Blocked means the TCP connection itself failed
+    /// or timed out; an answer, or a TLS error after connecting, means the path is open. When the
+    /// name does not even resolve, the firewall layer was never exercised - no verdict.
+    /// </summary>
+    private static async Task<(bool? Blocked, string Detail)> ProbeDirectAsync(string probe, bool? dnsBlocked, CancellationToken ct)
     {
-        // without the system proxy: SocketsHttpHandler reads WinINET by default — disable that
+        if (dnsBlocked != false)
+        {
+            return (null, $"direct https://{probe}: not exercised - the name does not resolve here, so the firewall layer was not reached");
+        }
+
+        // without the system proxy: SocketsHttpHandler reads WinINET by default - disable that
         using var http = new HttpClient(new SocketsHttpHandler
         {
             UseProxy = false,
@@ -421,11 +473,24 @@ public sealed class GuardService(
         try
         {
             using var response = await http.GetAsync($"https://{probe}/", ct);
-            return (false, $"direct https://{probe}: HTTP {(int)response.StatusCode} — direct access is OPEN");
+            return (false, $"direct https://{probe}: HTTP {(int)response.StatusCode} - direct access is OPEN");
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or SocketException)
+        catch (HttpRequestException ex) when (ex.HttpRequestError == HttpRequestError.ConnectionError)
         {
             return (true, $"direct https://{probe}: blocked ({ex.InnerException?.Message ?? ex.Message})");
+        }
+        catch (HttpRequestException ex) when (ex.HttpRequestError == HttpRequestError.NameResolutionError)
+        {
+            return (null, $"direct https://{probe}: not exercised - name resolution failed ({ex.InnerException?.Message ?? ex.Message})");
+        }
+        catch (HttpRequestException ex)
+        {
+            // the TCP connection was made (TLS, protocol, a reset after connect): the path is open
+            return (false, $"direct https://{probe}: connected, then {ex.HttpRequestError} - direct access is OPEN");
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (true, $"direct https://{probe}: blocked (no connection within the timeout)");
         }
     }
 }

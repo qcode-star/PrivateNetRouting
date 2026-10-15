@@ -697,8 +697,8 @@ public partial class MainWindow : Window
         await RunGuardAsync(async () =>
         {
             var all = await _runtime.Guard.AllAsync(!disable, CancellationToken.None);
-            var dns = Loc.S(all.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
-            var direct = Loc.S(all.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open");
+            var dns = LiveWord(all.Live.DnsBlocked);
+            var direct = LiveWord(all.Live.DirectBlocked);
             if (disable)
             {
                 _viewModel.SetCheckResult("Main.Guard.All.DisabledFmt", dns, direct);
@@ -791,14 +791,22 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>A live ban verdict as a word: blocked / OPEN / not checked (no verdict).</summary>
+    private static string LiveWord(bool? blocked) => Loc.S(blocked switch
+    {
+        true => "Main.Guard.Live.Blocked",
+        false => "Main.Guard.Live.Open",
+        null => "Main.Guard.Live.NotChecked",
+    });
+
     /// <summary>Ban and policy go through the elevated helper (UAC); live checks — right after.</summary>
     private async void OnGuardBanOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.BanAsync(enable: true, CancellationToken.None);
         _viewModel.SetCheckResult(
             "Main.Guard.Ban.LiveFmt",
-            Loc.S(result.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"),
-            Loc.S(result.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"));
+            LiveWord(result.Live.DnsBlocked),
+            LiveWord(result.Live.DirectBlocked));
     });
 
     private async void OnGuardBanOff(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
@@ -806,8 +814,8 @@ public partial class MainWindow : Window
         var result = await _runtime.Guard.BanAsync(enable: false, CancellationToken.None);
         _viewModel.SetCheckResult(
             "Main.Guard.Ban.LiveFmt",
-            Loc.S(result.Live.DnsBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"),
-            Loc.S(result.Live.DirectBlocked ? "Main.Guard.Live.Blocked" : "Main.Guard.Live.Open"));
+            LiveWord(result.Live.DnsBlocked),
+            LiveWord(result.Live.DirectBlocked));
     });
 
     private async void OnGuardPolicyOn(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>

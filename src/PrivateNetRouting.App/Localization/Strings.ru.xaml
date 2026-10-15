@@ -189,6 +189,7 @@
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Локальный бан применён. Проба DNS: {0}; прямое соединение: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">закрыто</s:String>
     <s:String x:Key="Main.Guard.Live.Open">ОТКРЫТ</s:String>
+    <s:String x:Key="Main.Guard.Live.NotChecked">не проверено</s:String>
     <s:String x:Key="Main.Guard.Policy">Egress-политика</s:String>
     <s:String x:Key="Main.Guard.Policy.DetailFmt">egressProxyUrl = {0}</s:String>
     <s:String x:Key="Main.Guard.Policy.Off">политика не задана (Claude может пойти напрямую)</s:String>

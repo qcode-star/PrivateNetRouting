@@ -189,6 +189,7 @@
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Local ban applied. DNS probe: {0}; direct connection: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">blocked</s:String>
     <s:String x:Key="Main.Guard.Live.Open">OPEN</s:String>
+    <s:String x:Key="Main.Guard.Live.NotChecked">not checked</s:String>
     <s:String x:Key="Main.Guard.Policy">Egress policy</s:String>
     <s:String x:Key="Main.Guard.Policy.DetailFmt">egressProxyUrl = {0}</s:String>
     <s:String x:Key="Main.Guard.Policy.Off">policy is not set (Claude may go direct)</s:String>

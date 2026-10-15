@@ -895,7 +895,9 @@ internal static class Program
                 Console.WriteLine(checks.DnsDetail);
                 Console.WriteLine(checks.DirectDetail);
                 Console.WriteLine(checks.ProxiedDetail);
-                return checks.DnsBlocked && checks.DirectBlocked ? 0 : 1;
+                // 0 only when the DNS layer is proven blocked and the direct probe did not find an open
+                // path; an unestablished verdict (offline, no probes) is not "blocked"
+                return checks.DnsBlocked == true && checks.DirectBlocked != false ? 0 : 1;
 
             case "ban":
                 bool? banOn = rest.FirstOrDefault() switch

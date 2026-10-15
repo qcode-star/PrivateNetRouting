@@ -1366,6 +1366,32 @@ public class GuardTests : IDisposable
     /// payload, a failed backup or a failed replacement stops them with a FAILED line instead of
     /// truncating a settings file and reporting success.
     /// </summary>
+    // ----- live ban verdicts -----
+
+    [Fact]
+    public async Task LiveChecksWithoutProbeNamesAreNotChecked()
+    {
+        var config = new AppConfig();
+        config.Guard.BanProbes = [];
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), new FakeElevatedRunner(), out _);
+
+        var live = await service.LiveChecksAsync(CancellationToken.None);
+
+        Assert.Null(live.DnsBlocked); // not a vacuous "blocked"
+        Assert.Null(live.DirectBlocked);
+        Assert.Contains("not checked", live.DnsDetail);
+    }
+
+    [Fact]
+    public void ProbeVerdictsCombineAnyOpenProbeMakesItOpen()
+    {
+        Assert.True(GuardService.CombineVerdicts([true, true]));
+        Assert.False(GuardService.CombineVerdicts([true, false]));
+        Assert.Null(GuardService.CombineVerdicts([true, null]));
+        Assert.False(GuardService.CombineVerdicts([null, false]));
+        Assert.Null(GuardService.CombineVerdicts([]));
+    }
+
     // ----- the collapsed Guards card: summary state and "all on" -----
 
     private static GuardSnapshot Snapshot(
@@ -1835,7 +1861,8 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardElevatedCommands.BanOn, Assert.Single(elevated.Commands));
         Assert.Equal(1, healthCalls); // live check after applying (rule #6)
         Assert.True(result.Live.DnsBlocked);
-        Assert.True(result.Live.DirectBlocked);
+        Assert.Null(result.Live.DirectBlocked); // the name is already blocked at DNS: the firewall layer was not exercised
+        Assert.Contains("not exercised", result.Live.DirectDetail);
         Assert.Contains("skipped", result.Live.ProxiedDetail); // the chain does not answer, so skipped
     }
 
