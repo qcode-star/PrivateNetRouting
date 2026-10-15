@@ -48,8 +48,11 @@ public sealed class ClaudeUsageProbe(
 {
     public string? GetInUseReason(TimeSpan idleWindow)
     {
+        // a source that fails proves nothing: an idle verdict needs every source to have answered,
+        // otherwise the chain is kept (the probe is retried on the next tick)
+        var failures = new List<string>();
         var processParts = new List<string>();
-        var claudeCount = CountSafe(() => processes.FindByNameContains("claude").Count);
+        var claudeCount = Count("claude processes", () => processes.FindByNameContains("claude").Count, failures);
         if (claudeCount > 0)
         {
             processParts.Add($"claude processes: {claudeCount}");
@@ -57,7 +60,7 @@ public sealed class ClaudeUsageProbe(
 
         if (codexProcessName.Length > 0)
         {
-            var codexCount = CountSafe(() => processes.FindByNameContains(codexProcessName).Count);
+            var codexCount = Count("codex processes", () => processes.FindByNameContains(codexProcessName).Count, failures);
             if (codexCount > 0)
             {
                 processParts.Add($"codex processes: {codexCount}");
@@ -69,16 +72,7 @@ public sealed class ClaudeUsageProbe(
             return string.Join("; ", processParts);
         }
 
-        int connectionCount;
-        try
-        {
-            connectionCount = connections.CountOnLocalPort(proxyPort);
-        }
-        catch (Exception)
-        {
-            connectionCount = 0;
-        }
-
+        var connectionCount = Count("proxy connections", () => connections.CountOnLocalPort(proxyPort), failures);
         if (connectionCount > 0)
         {
             return $"established connections to {proxyPort}: {connectionCount}";
@@ -86,7 +80,7 @@ public sealed class ClaudeUsageProbe(
 
         if (egressPort > 0)
         {
-            var egressConnections = CountSafe(() => connections.CountOnLocalPort(egressPort));
+            var egressConnections = Count("egress connections", () => connections.CountOnLocalPort(egressPort), failures);
             if (egressConnections > 0)
             {
                 return $"established connections to the egress {egressPort}: {egressConnections}";
@@ -112,10 +106,12 @@ public sealed class ClaudeUsageProbe(
             }
         }
 
-        return null;
+        return failures.Count > 0
+            ? $"probe failed ({string.Join(", ", failures)}), assuming in use"
+            : null;
     }
 
-    private int CountSafe(Func<int> count)
+    private static int Count(string source, Func<int> count, List<string> failures)
     {
         try
         {
@@ -123,6 +119,7 @@ public sealed class ClaudeUsageProbe(
         }
         catch (Exception)
         {
+            failures.Add(source);
             return 0;
         }
     }

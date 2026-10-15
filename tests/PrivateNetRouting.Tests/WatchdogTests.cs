@@ -213,7 +213,7 @@ public class WatchdogTests : IDisposable
     }
 
     [Fact]
-    public void UsageProbeToleratesFailingSources()
+    public void UsageProbeFailsClosedWhenASourceFails()
     {
         var probe = new ClaudeUsageProbe(
             new ThrowingFinder(),
@@ -223,8 +223,9 @@ public class WatchdogTests : IDisposable
 
         Assert.Equal("established connections to 18082: 1", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
 
+        // a failed source with nothing positive elsewhere is not an idle verdict: the chain stays up
         probe = new ClaudeUsageProbe(new ThrowingFinder(), new FakeCounter(0), 18082, "Z:\\definitely\\missing");
-        Assert.Null(probe.GetInUseReason(TimeSpan.FromMinutes(10)));
+        Assert.StartsWith("probe failed", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
     }
 
     [Fact]
