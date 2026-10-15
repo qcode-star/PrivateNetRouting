@@ -571,6 +571,34 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.On, guard.Read().State);
     }
 
+    [Theory]
+    // a trailing comment on the table header
+    [InlineData("[features] # tweaks\nother = 1\n", "[features] # tweaks\nrespect_system_proxy = true\nother = 1\n")]
+    [InlineData("[features]# tweaks\nrespect_system_proxy = false\n", "[features]# tweaks\nrespect_system_proxy = true\n")]
+    // the table as an inline table
+    [InlineData("features = { other = 1 }\n", "features = { respect_system_proxy = true, other = 1 }\n")]
+    [InlineData("features = {}\n", "features = { respect_system_proxy = true }\n")]
+    [InlineData("features = { respect_system_proxy = false, other = 1 }\n", "features = { respect_system_proxy = true, other = 1 }\n")]
+    // the table defined by top-level dotted keys
+    [InlineData("features.other = true\n[desktop]\nx = 1\n", "features.other = true\nfeatures.respect_system_proxy = true\n[desktop]\nx = 1\n")]
+    // a """ inside a comment opens no string, so the real header after it is still seen
+    [InlineData("# a \"\"\" b\n[features]\nother = 1\n", "# a \"\"\" b\n[features]\nrespect_system_proxy = true\nother = 1\n")]
+    public void CodexSettingsApplyRecognizesEveryFormOfTheFeaturesTable(string existing, string expected)
+    {
+        var applied = CodexSettingsGuard.Apply(existing);
+
+        Assert.Equal(expected, applied);
+        Assert.Equal(true, CodexSettingsGuard.FindValue(applied));
+        Assert.Equal(applied, CodexSettingsGuard.Apply(applied)); // idempotent
+    }
+
+    [Fact]
+    public void CodexSettingsReadSeesTheFlagInsideAnInlineTable()
+    {
+        Assert.Equal(false, CodexSettingsGuard.FindValue("features = { respect_system_proxy = false }\n"));
+        Assert.Null(CodexSettingsGuard.FindValue("features = { other = 1 }\n"));
+    }
+
     [Fact]
     public void CodexSettingsSyncCreatesTheFileAndStatusDetectsStates()
     {

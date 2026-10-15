@@ -131,9 +131,20 @@ public sealed class CodexSettingsGuard(AppConfig config)
         {
             lines[location.KeyIndex] = ReplaceValue(lines[location.KeyIndex]);
         }
+        else if (location.InlineIndex >= 0)
+        {
+            // features = { ... } is the table already: a second [features] would be invalid TOML
+            lines[location.InlineIndex] = SetInlineFlag(lines[location.InlineIndex]);
+        }
         else if (location.SectionStart >= 0)
         {
             lines.Insert(location.SectionStart + 1, flagLine);
+        }
+        else if (location.DottedSiblingIndex >= 0)
+        {
+            // features.other = ... already defines the table by dotted keys; the flag joins them
+            // (the line is at the top level, so the new one right after it is too)
+            lines.Insert(location.DottedSiblingIndex + 1, $"{DottedKey} = true");
         }
         else
         {
@@ -167,7 +178,17 @@ public sealed class CodexSettingsGuard(AppConfig config)
     }
 
     /// <summary>Where the flag lives: the key line (if any) and the bounds of the [features] table.</summary>
-    private readonly record struct FlagLocation(int KeyIndex, bool Dotted, bool? Value, int SectionStart, int SectionEnd);
+    private readonly record struct FlagLocation(
+        int KeyIndex,
+        bool Dotted,
+        bool? Value,
+        int SectionStart,
+        int SectionEnd,
+        int InlineIndex = -1,
+        int DottedSiblingIndex = -1);
+
+    private static readonly System.Text.RegularExpressions.Regex InlineFlag =
+        new($@"{KeyName}\s*=\s*(true|false)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static FlagLocation Locate(IReadOnlyList<string> lines)
     {
@@ -176,6 +197,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
         var sectionStart = -1;
         var sectionEnd = -1;
         var current = "";
+        var inlineIndex = -1;
+        bool? inlineValue = null;
+        var siblingIndex = -1;
         for (var i = 0; i < lines.Count; i++)
         {
             if (inString[i])
@@ -212,9 +236,20 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 return new FlagLocation(i, dotted, ParseBool(ValueOf(trimmed)), sectionStart, sectionEnd < 0 ? lines.Count : sectionEnd);
             }
+
+            if (current.Length == 0 && inlineIndex < 0 && key == SectionName && ValueOf(trimmed).StartsWith('{'))
+            {
+                inlineIndex = i;
+                var match = InlineFlag.Match(ValueOf(trimmed));
+                inlineValue = match.Success ? ParseBool(match.Groups[1].Value) : null;
+            }
+            else if (current.Length == 0 && siblingIndex < 0 && key.StartsWith(SectionName + ".", StringComparison.Ordinal))
+            {
+                siblingIndex = i;
+            }
         }
 
-        return new FlagLocation(-1, false, null, sectionStart, sectionEnd < 0 ? lines.Count : sectionEnd);
+        return new FlagLocation(-1, false, inlineValue, sectionStart, sectionEnd < 0 ? lines.Count : sectionEnd, inlineIndex, siblingIndex);
     }
 
     /// <summary>Marks the lines that are inside a multi-line basic (""") or literal (''') string.</summary>
@@ -226,12 +261,14 @@ public sealed class CodexSettingsGuard(AppConfig config)
         {
             if (open.Length == 0)
             {
-                if (CountOf(lines[i], "\"\"\"") % 2 == 1)
+                // a """ in a # comment opens nothing
+                var code = StripComment(lines[i]);
+                if (CountOf(code, "\"\"\"") % 2 == 1)
                 {
                     open = "\"\"\"";
                     flags[i] = true;
                 }
-                else if (CountOf(lines[i], "'''") % 2 == 1)
+                else if (CountOf(code, "'''") % 2 == 1)
                 {
                     open = "'''";
                     flags[i] = true;
@@ -266,7 +303,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
     /// <summary>"[features]" → "features"; "[[x]]" → "x"; dotted and quoted parts are normalized.</summary>
     private static string HeaderName(string trimmed)
     {
-        var name = trimmed.TrimStart('[').TrimEnd(']').Trim();
+        var name = StripComment(trimmed).TrimStart('[').TrimEnd(']').Trim();
         return NormalizeKey(name);
     }
 
@@ -281,6 +318,45 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
         var key = trimmed[..eq].Trim();
         return key.Length == 0 ? null : NormalizeKey(key);
+    }
+
+    /// <summary>The line without its trailing # comment (a # inside a quoted string stays).</summary>
+    private static string StripComment(string line)
+    {
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '#')
+            {
+                return line[..i].TrimEnd();
+            }
+
+            if (line[i] is '"' or '\'')
+            {
+                var end = line.IndexOf(line[i], i + 1);
+                if (end < 0)
+                {
+                    break;
+                }
+
+                i = end;
+            }
+        }
+
+        return line;
+    }
+
+    /// <summary>`features = { ... }` with the flag set to true: an existing value is rewritten, otherwise the key leads the table.</summary>
+    private static string SetInlineFlag(string line)
+    {
+        if (InlineFlag.IsMatch(line))
+        {
+            return InlineFlag.Replace(line, $"{KeyName} = true", 1);
+        }
+
+        var brace = line.IndexOf('{', line.IndexOf('=') + 1);
+        var rest = line[(brace + 1)..].TrimStart();
+        var insertion = rest.StartsWith('}') ? $" {KeyName} = true " : $" {KeyName} = true, ";
+        return line[..(brace + 1)] + insertion + line[(brace + 1)..].TrimStart();
     }
 
     private static string NormalizeKey(string key) =>
