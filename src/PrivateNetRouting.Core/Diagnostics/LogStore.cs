@@ -1,3 +1,4 @@
+using System.Text;
 using PrivateNetRouting.Core.Logging;
 
 namespace PrivateNetRouting.Core.Diagnostics;
@@ -9,8 +10,6 @@ public sealed record LogTail(IReadOnlyList<string> Lines, long TotalBytes);
 public sealed record LogRotationResult(string Name, bool Ok, string Detail)
 {
     public static LogRotationResult Done(string name) => new(name, true, "rotated");
-
-    public static LogRotationResult NothingToDo(string name) => new(name, true, "file does not exist");
 }
 
 /// <summary>
@@ -54,18 +53,48 @@ public sealed class LogStore(string directory)
         }
 
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var tailBytes = Math.Min(stream.Length, 256 * 1024);
-        stream.Seek(-tailBytes, SeekOrigin.End);
-        using var reader = new StreamReader(stream);
-        var all = reader.ReadToEnd().Replace("\r\n", "\n").Split('\n');
+        var total = stream.Length;
+
+        // read backwards in chunks until the wanted number of lines is in hand (the line that ends
+        // the file counts too) or the file begins; the bytes are decoded only after they are cut at
+        // a line boundary, so a chunk edge never splits a multi-byte character
+        var buffer = Array.Empty<byte>();
+        var position = total;
+        var newlines = 0;
+        while (position > 0 && newlines <= lines && buffer.Length < MaxTailBytes)
+        {
+            var chunk = (int)Math.Min(TailChunkBytes, position);
+            position -= chunk;
+            var next = new byte[chunk + buffer.Length];
+            stream.Seek(position, SeekOrigin.Begin);
+            stream.ReadExactly(next.AsSpan(0, chunk));
+            buffer.CopyTo(next, chunk);
+            buffer = next;
+            newlines += next.AsSpan(0, chunk).Count((byte)'\n');
+        }
+
+        var start = 0;
+        if (position > 0)
+        {
+            // the first line is cut by the chunk edge: drop it
+            var firstNewline = Array.IndexOf(buffer, (byte)'\n');
+            start = firstNewline < 0 ? buffer.Length : firstNewline + 1;
+        }
+
+        var all = Encoding.UTF8.GetString(buffer, start, buffer.Length - start).Replace("\r\n", "\n").Split('\n');
         if (all.Length > 0 && all[^1].Length == 0)
         {
             all = all[..^1]; // the file ends with a newline
         }
 
         var take = Math.Clamp(lines, 0, all.Length);
-        return new LogTail(all.Skip(all.Length - take).ToList(), stream.Length);
+        return new LogTail(all.Skip(all.Length - take).ToList(), total);
     }
+
+    private const int TailChunkBytes = 64 * 1024;
+
+    /// <summary>Upper bound of what one tail read pulls into memory (a log of very long lines).</summary>
+    private const int MaxTailBytes = 64 * 1024 * 1024;
 
     /// <summary>
     /// External rotation of one log: shifting the age chain (current -> .1 -> ... -> drop past keep).
@@ -81,7 +110,8 @@ public sealed class LogStore(string directory)
 
         if (!File.Exists(path))
         {
-            return LogRotationResult.NothingToDo(name);
+            // a typed name that matches nothing is a typo, not "nothing to rotate"
+            return new LogRotationResult(name, false, "no such log file (see pnr logs list)");
         }
 
         try

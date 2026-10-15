@@ -298,7 +298,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
             AppProxyEndpoint.Port(config),
             skipProxy ? null : fp.ActivityMarkerPath,
             config.Codex.ProcessName,
-            egressPort);
+            egressPort,
+            RunningApp.PackageInstallMarker(config.Codex.PackageName),
+            // an external endpoint is told apart by its address too (the port alone would match
+            // any connection to the same port number elsewhere); a loopback one is ours by port
+            skipProxy && !IPAddress.IsLoopback(AppProxyEndpoint.EndPoint(config).Address)
+                ? AppProxyEndpoint.EndPoint(config).Address
+                : null);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");

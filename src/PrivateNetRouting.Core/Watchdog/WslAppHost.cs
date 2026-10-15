@@ -56,6 +56,10 @@ public sealed class WslProcessRunner : IWslProcessRunner
             info.ArgumentList.Add(argument);
         }
 
+        // WSL_UTF8=1 switches the management output (`--list`) from UTF-16LE to UTF-8; the callers
+        // decode as UTF-16 (the script output of a distro is not affected), so the switch is dropped
+        info.Environment.Remove("WSL_UTF8");
+
         using var process = Process.Start(info)
             ?? throw new IOException("failed to start wsl.exe");
 

@@ -11,9 +11,20 @@ internal sealed class ManualTimeProvider : TimeProvider
 {
     private DateTimeOffset _utcNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+    private long _ticks;
+
     public override DateTimeOffset GetUtcNow() => _utcNow;
 
-    public void Advance(TimeSpan span) => _utcNow += span;
+    // the monotonic clock advances with the manual one (the marker throttle runs on it)
+    public override long GetTimestamp() => _ticks;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public void Advance(TimeSpan span)
+    {
+        _utcNow += span;
+        _ticks += span.Ticks;
+    }
 }
 
 /// <summary>Process lookup by name: canned answers, filtered by the command-line substring like WMI does.</summary>

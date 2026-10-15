@@ -59,11 +59,27 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
-    public void RotateMissingFileIsNothingToDo()
+    public void RotateMissingFileIsReportedAsUnknown()
     {
         var result = new LogStore(_tempDir).Rotate("absent.log", keep: 2);
-        Assert.True(result.Ok);
-        Assert.Contains("does not exist", result.Detail);
+        Assert.False(result.Ok);
+        Assert.Contains("no such log", result.Detail);
+    }
+
+    [Fact]
+    public void TailOfALargeFileKeepsTheLastLinesWholeAndTheTextIntact()
+    {
+        var path = Path.Combine(_tempDir, "big.log");
+        // 5000 lines of ~100 bytes with multi-byte characters: well past one read chunk
+        File.WriteAllLines(path, Enumerable.Range(1, 5000).Select(i => $"line-{i} — {new string('я', 40)}"));
+
+        var tail = new LogStore(_tempDir).ReadTail("big", 3000);
+
+        Assert.NotNull(tail);
+        Assert.Equal(3000, tail!.Lines.Count);
+        Assert.Equal($"line-2001 — {new string('я', 40)}", tail.Lines[0]);
+        Assert.Equal($"line-5000 — {new string('я', 40)}", tail.Lines[^1]);
+        Assert.DoesNotContain(tail.Lines, line => line.Contains('\uFFFD'));
     }
 
     [Fact]

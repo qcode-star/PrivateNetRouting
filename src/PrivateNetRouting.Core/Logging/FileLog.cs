@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+
 namespace PrivateNetRouting.Core.Logging;
 
 /// <summary>
@@ -143,7 +145,16 @@ public sealed class FileLog : IDisposable
     /// another process rename it for rotation while it is open.
     /// </summary>
     private static FileStream OpenForAppend(string path) =>
-        new(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        // AppendData without WriteData: the kernel positions every write at the current end of file
+        // atomically, so records of concurrent processes never overwrite or interleave each other
+        // (FileMode.Append only seeks to the end once at open, and another writer may move it after)
+        new FileInfo(path).Create(
+            FileMode.OpenOrCreate,
+            FileSystemRights.AppendData,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4096,
+            FileOptions.None,
+            fileSecurity: null);
 
     private void Write(LogLevel level, string message)
     {

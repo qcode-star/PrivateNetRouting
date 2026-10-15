@@ -54,7 +54,28 @@ public sealed class DiagnosticsService(
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Func<IPAddress?> _wslGateway = wslGateway ?? WslGateway.FindIpv4;
 
+    /// <summary>
+    /// The whole summary runs under one deadline: the state poll and the detailed probe are two live
+    /// CONNECT roundtrips (each up to 15 s), and the callers (the GUI window, `pnr status`) pass no
+    /// timeout of their own.
+    /// </summary>
+    private static readonly TimeSpan SummaryTimeout = TimeSpan.FromSeconds(45);
+
     public async Task<DiagnosticsSummary> GetSummaryAsync(CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(SummaryTimeout);
+        try
+        {
+            return await GetSummaryCoreAsync(deadline.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"the diagnostics did not finish within {SummaryTimeout.TotalSeconds:0} s");
+        }
+    }
+
+    private async Task<DiagnosticsSummary> GetSummaryCoreAsync(CancellationToken ct)
     {
         var chainConfig = config.Chain;
         // the external-upstream modes (socks5, http): the daemon ports mean nothing there

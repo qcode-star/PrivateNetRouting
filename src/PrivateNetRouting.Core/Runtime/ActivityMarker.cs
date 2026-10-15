@@ -9,7 +9,11 @@ public sealed class ActivityMarker(string path, TimeSpan minInterval, TimeProvid
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
-    private DateTimeOffset _lastTouch = DateTimeOffset.MinValue;
+
+    // the throttle runs on the monotonic clock: a wall-clock step (NTP, resume from sleep) must
+    // neither suppress touches nor let a burst through
+    private long _lastTouchTimestamp;
+    private bool _touched;
 
     public string Path { get; } = path;
 
@@ -17,13 +21,14 @@ public sealed class ActivityMarker(string path, TimeSpan minInterval, TimeProvid
     {
         lock (_gate)
         {
-            var now = _time.GetUtcNow();
-            if (now - _lastTouch < minInterval)
+            var now = _time.GetTimestamp();
+            if (_touched && _time.GetElapsedTime(_lastTouchTimestamp, now) < minInterval)
             {
                 return;
             }
 
-            _lastTouch = now;
+            _lastTouchTimestamp = now;
+            _touched = true;
         }
 
         try

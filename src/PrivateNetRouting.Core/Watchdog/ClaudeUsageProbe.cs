@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.NetworkInformation;
 using PrivateNetRouting.Core.SystemOps;
 
@@ -7,6 +8,13 @@ namespace PrivateNetRouting.Core.Watchdog;
 public interface IEstablishedConnectionCounter
 {
     int CountOnLocalPort(int port);
+
+    /// <summary>
+    /// Established connections whose remote end is exactly this endpoint: the clients of an external
+    /// (non-local) proxy, where the port alone would also match unrelated traffic to the same port
+    /// number elsewhere. The default falls back to the port match.
+    /// </summary>
+    int CountToRemote(IPAddress address, int port) => CountOnLocalPort(port);
 }
 
 public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCounter
@@ -16,6 +24,13 @@ public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCoun
             .GetActiveTcpConnections()
             .Count(connection => connection.State == TcpState.Established
                 && (connection.LocalEndPoint.Port == port || connection.RemoteEndPoint.Port == port));
+
+    public int CountToRemote(IPAddress address, int port) =>
+        IPGlobalProperties.GetIPGlobalProperties()
+            .GetActiveTcpConnections()
+            .Count(connection => connection.State == TcpState.Established
+                && connection.RemoteEndPoint.Port == port
+                && connection.RemoteEndPoint.Address.Equals(address));
 }
 
 /// <summary>
@@ -37,6 +52,8 @@ public interface IClaudeUsageProbe
 
 /// <param name="proxyPort">Port of the applications proxy endpoint (its clients are counted here).</param>
 /// <param name="activityMarkerPath">Activity marker file; null — the shape has no local proxy to touch it (skipped socks5).</param>
+/// <param name="codexCommandLineMarker">Fragment of the Codex image path (its MSIX install folder): the process name alone is shared with unrelated applications (the ChatGPT desktop app); empty — the name decides.</param>
+/// <param name="externalProxyAddress">Address of the external applications proxy (the skipped shapes): its clients are counted by the remote end; null — the proxy is local and the port decides.</param>
 /// <param name="egressPort">Local port of the chain's own egress listener (chain.tailscale.socksListen); 0 — the mode has no local egress to guard (socks5).</param>
 public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
@@ -44,8 +61,12 @@ public sealed class ClaudeUsageProbe(
     int proxyPort,
     string? activityMarkerPath,
     string codexProcessName = "",
-    int egressPort = 0) : IClaudeUsageProbe
+    int egressPort = 0,
+    string codexCommandLineMarker = "",
+    IPAddress? externalProxyAddress = null) : IClaudeUsageProbe
 {
+    private static readonly TimeSpan FutureMarkerTolerance = TimeSpan.FromMinutes(5);
+
     public string? GetInUseReason(TimeSpan idleWindow)
     {
         // a source that fails proves nothing: an idle verdict needs every source to have answered,
@@ -60,7 +81,7 @@ public sealed class ClaudeUsageProbe(
 
         if (codexProcessName.Length > 0)
         {
-            var codexCount = Count("codex processes", () => processes.FindByNameContains(codexProcessName).Count, failures);
+            var codexCount = Count("codex processes", () => CodexProcesses().Count, failures);
             if (codexCount > 0)
             {
                 processParts.Add($"codex processes: {codexCount}");
@@ -72,7 +93,12 @@ public sealed class ClaudeUsageProbe(
             return string.Join("; ", processParts);
         }
 
-        var connectionCount = Count("proxy connections", () => connections.CountOnLocalPort(proxyPort), failures);
+        var connectionCount = Count(
+            "proxy connections",
+            () => externalProxyAddress is null
+                ? connections.CountOnLocalPort(proxyPort)
+                : connections.CountToRemote(externalProxyAddress, proxyPort),
+            failures);
         if (connectionCount > 0)
         {
             return $"established connections to {proxyPort}: {connectionCount}";
@@ -94,13 +120,15 @@ public sealed class ClaudeUsageProbe(
                 if (File.Exists(activityMarkerPath))
                 {
                     var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(activityMarkerPath);
-                    if (age < idleWindow)
+                    // a marker stamped in the future (the wall clock was stepped back) is no proof of
+                    // activity: the next Touch rewrites it; a small skew still counts
+                    if (age < idleWindow && age > -FutureMarkerTolerance)
                     {
                         return $"proxy activity {(int)age.TotalSeconds}s ago";
                     }
                 }
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // marker unavailable — simply no signal
             }
@@ -109,6 +137,14 @@ public sealed class ClaudeUsageProbe(
         return failures.Count > 0
             ? $"probe failed ({string.Join(", ", failures)}), assuming in use"
             : null;
+    }
+
+    private IReadOnlyList<FoundProcess> CodexProcesses()
+    {
+        var found = processes.FindByNameContains(codexProcessName);
+        return codexCommandLineMarker.Length == 0
+            ? found
+            : found.Where(p => p.CommandLine.Contains(codexCommandLineMarker, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     private static int Count(string source, Func<int> count, List<string> failures)
