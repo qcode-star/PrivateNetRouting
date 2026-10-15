@@ -53,6 +53,48 @@ public interface IRunningAppCloser
 }
 
 /// <summary>
+/// WM_CLOSE to the top-level windows of a process. Unlike Process.CloseMainWindow, which only
+/// finds a visible, unowned main window, this reaches every window of the process — an
+/// Electron app hidden to the tray still has its (hidden) main window, and is asked to close too.
+/// </summary>
+internal static class WindowCloser
+{
+    private const uint WmClose = 0x0010;
+
+    private delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+
+    /// <summary>Posts WM_CLOSE to every top-level window of the process, hidden ones included; returns how many.</summary>
+    public static int PostClose(int processId)
+    {
+        var posted = 0;
+        EnumWindows(
+            (hwnd, lParam) =>
+            {
+                GetWindowThreadProcessId(hwnd, out var owner);
+                if (owner == (uint)processId && PostMessage(hwnd, WmClose, 0, 0))
+                {
+                    posted++;
+                }
+
+                return true;
+            },
+            0);
+        return posted;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc callback, nint lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
+}
+
+/// <summary>
 /// Closer over real processes; no special rights the applications do not have themselves.
 /// <see cref="Track"/> opens a handle per process of the scan and keeps it: the handle keeps
 /// identifying the original process after its PID has been reused, so a late kill can never hit
@@ -90,7 +132,7 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
         try
         {
             var process = Handle(processId);
-            return process is not null && !process.HasExited && process.CloseMainWindow();
+            return process is not null && !process.HasExited && WindowCloser.PostClose(process.Id) > 0;
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
