@@ -52,7 +52,7 @@ public partial class App : Application
         // single instance — lives until the chain shutdown kills it
         if (e.Args.Contains(ForwardProxySupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
         {
-            Shutdown(ProxyWorker.RunAsync(CancellationToken.None).GetAwaiter().GetResult());
+            Shutdown(ProxyWorker.RunAsync(CancellationToken.None, e.Args).GetAwaiter().GetResult());
             return;
         }
 

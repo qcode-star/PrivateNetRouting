@@ -1,4 +1,5 @@
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Net.Socks;
 
 namespace PrivateNetRouting.Core.Net.Proxy;
 
@@ -11,9 +12,21 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 /// </summary>
 public static class ProxyWorker
 {
-    public static async Task<int> RunAsync(CancellationToken stop)
+    /// <summary>
+    /// "--listen host:port" after the marker: the address the spawning process waits on, which
+    /// overrides forwardProxy.listen of the config read from disk (it may have changed since).
+    /// </summary>
+    public const string ListenOption = "--listen";
+
+    public static async Task<int> RunAsync(CancellationToken stop, IReadOnlyList<string>? args = null)
     {
         var config = AppConfigStore.LoadOrCreate();
+        var listenOverride = ParseListenOverride(args);
+        if (listenOverride is not null)
+        {
+            config.ForwardProxy.Listen = listenOverride;
+        }
+
         if (!config.ForwardProxy.Enabled)
         {
             return 0; // the proxy is disabled by config — the worker has nothing to do
@@ -54,5 +67,33 @@ public static class ProxyWorker
         await runtime.ProxyService!.StopAsync().ConfigureAwait(false);
         runtime.Log.Info("proxy worker: stopped");
         return 0;
+    }
+
+    /// <summary>The value after --listen, or null when absent or not a valid endpoint (the config's own value then stands).</summary>
+    internal static string? ParseListenOverride(IReadOnlyList<string>? args)
+    {
+        if (args is null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < args.Count - 1; i++)
+        {
+            if (!string.Equals(args[i], ListenOption, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                return Socks5Client.ParseEndPoint(args[i + 1]).ToString();
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 }

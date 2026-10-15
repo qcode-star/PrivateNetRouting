@@ -137,7 +137,10 @@ public sealed class ForwardProxySupervisor(
             Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
             "forward-proxy.err.log");
         // (command line, stdout -> NUL, stderr)
-        var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker}", null, workerErrorLog);
+        // the worker listens where this supervisor waits (and where the clients were pointed):
+        // its own read of the config on disk may have been edited since this process started
+        var listen = Socks5Client.ParseEndPoint(config.Listen);
+        var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker} {ProxyWorker.ListenOption} {listen}", null, workerErrorLog);
         log.Info($"forward-proxy: worker spawned via cmd, pid={pid}");
 
         try

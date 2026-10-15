@@ -51,7 +51,10 @@ public static class DohClient
         }
     }
 
-    private static async Task<DnsAnswer> QueryOverStreamAsync(
+    /// <summary>A DNS message is at most 64 KB; anything larger than this is not a DoH answer.</summary>
+    private const int MaxResponseBytes = 128 * 1024;
+
+    internal static async Task<DnsAnswer> QueryOverStreamAsync(
         Stream stream,
         DohEndpoint endpoint,
         string name,
@@ -70,8 +73,13 @@ public static class DohClient
                       "Accept: application/dns-message\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request), ct);
 
+        // the end of the response is Content-Length when the server states it (a keep-alive
+        // server never closes: reading until EOF would cost the whole timeout and mark the
+        // endpoint dead), the closure otherwise; both are bounded
         var data = new MemoryStream();
-        var buffer = new byte[64 * 1024];
+        var buffer = new byte[16 * 1024];
+        var headerEnd = -1;
+        long expectedTotal = -1;
         while (true)
         {
             var chunk = await stream.ReadAsync(buffer, ct);
@@ -81,14 +89,56 @@ public static class DohClient
             }
 
             data.Write(buffer, 0, chunk);
+            if (data.Length > MaxResponseBytes)
+            {
+                throw new FormatException("doh: response too large");
+            }
+
+            if (headerEnd < 0)
+            {
+                headerEnd = data.GetBuffer().AsSpan(0, (int)data.Length).IndexOf("\r\n\r\n"u8);
+                if (headerEnd >= 0
+                    && ParseContentLength(Encoding.ASCII.GetString(data.GetBuffer(), 0, headerEnd)) is { } length)
+                {
+                    if (length > MaxResponseBytes)
+                    {
+                        throw new FormatException("doh: response too large");
+                    }
+
+                    expectedTotal = headerEnd + 4 + length;
+                }
+            }
+
+            if (expectedTotal >= 0 && data.Length >= expectedTotal)
+            {
+                break;
+            }
         }
 
-        return ParseHttpResponse(data.ToArray());
+        var raw = data.ToArray();
+        return ParseHttpResponse(expectedTotal >= 0 && raw.Length > expectedTotal ? raw[..(int)expectedTotal] : raw);
+    }
+
+    private static long? ParseContentLength(string head)
+    {
+        foreach (var line in head.Split("\r\n").Skip(1))
+        {
+            var colon = line.IndexOf(':');
+            if (colon > 0
+                && line[..colon].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
+                && long.TryParse(line[(colon + 1)..].Trim(), out var length)
+                && length >= 0)
+            {
+                return length;
+            }
+        }
+
+        return null;
     }
 
     internal static DnsAnswer ParseHttpResponse(byte[] raw)
     {
-        var separator = IndexOf(raw, "\r\n\r\n"u8);
+        var separator = raw.AsSpan().IndexOf("\r\n\r\n"u8);
         if (separator < 0)
         {
             throw new FormatException("doh: response without header delimiter");
@@ -110,19 +160,5 @@ public static class DohClient
         }
 
         return answer;
-    }
-
-    private static int IndexOf(byte[] haystack, ReadOnlySpan<byte> needle)
-    {
-        var window = haystack.AsSpan();
-        for (var i = 0; i <= window.Length - needle.Length; i++)
-        {
-            if (window[i..].StartsWith(needle))
-            {
-                return i;
-            }
-        }
-
-        return -1;
     }
 }

@@ -81,13 +81,33 @@ public class TailscaleNetmapDohSourceTests
     }
 
     [Fact]
-    public async Task Ipv6LiteralIsSkippedDialIsIpv4Only()
+    public async Task Ipv6LiteralIsKeptTheDialCarriesIt()
     {
         const string netmap = """{"Resolvers":[{"Addr":"http://[2001:db8::1]:8480/dns-query"}]}""";
 
         var endpoints = await TailscaleNetmapDohSource.ParseEndpointsAsync(netmap, ResolveAsync, CancellationToken.None);
 
-        Assert.Empty(endpoints);
+        var endpoint = Assert.Single(endpoints);
+        Assert.Equal(new DohEndpoint(IPAddress.Parse("2001:db8::1"), 8480), endpoint);
+        Assert.Equal("[2001:db8::1]:8480", endpoint.ToString());
+    }
+
+    /// <summary>An unusable port drops its entry only: it used to abort the whole discovery (overflow) or be truncated by the wire cast.</summary>
+    [Theory]
+    [InlineData("99999999999")]
+    [InlineData("65536")]
+    [InlineData("0")]
+    public async Task EntryWithAnInvalidPortIsSkippedTheRestSurvives(string port)
+    {
+        var netmap = $$"""
+            {"Resolvers":[
+                {"Addr":"http://203.0.113.20:{{port}}/dns-query"},
+                {"Addr":"http://203.0.113.10:8480/dns-query"}]}
+            """;
+
+        var endpoints = await TailscaleNetmapDohSource.ParseEndpointsAsync(netmap, ResolveAsync, CancellationToken.None);
+
+        Assert.Equal([new DohEndpoint(IPAddress.Parse("203.0.113.10"), 8480)], endpoints);
     }
 
     [Fact]

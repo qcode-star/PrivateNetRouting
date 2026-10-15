@@ -7,8 +7,9 @@ namespace PrivateNetRouting.Core.Net.Socks;
 
 /// <summary>
 /// SOCKS5 client (RFC 1928) for the upstream: no authentication or username/password
-/// (RFC 1929). Two dial forms: by IPv4 (ATYP=1) — the tailscale sidecar's own resolution is
-/// poisoned by the hosts/NRPT ban, so the caller always resolves first; and by name (ATYP=3) —
+/// (RFC 1929). Two dial forms: by IP (ATYP=1 for IPv4, ATYP=4 for IPv6) — the tailscale
+/// sidecar's own resolution is poisoned by the hosts/NRPT ban, so the caller always resolves
+/// first; and by name (ATYP=3) —
 /// the socks5 mode passes the target name to the trusted external upstream, which resolves it
 /// on its side.
 /// </summary>
@@ -38,22 +39,51 @@ public sealed class Socks5Client
             : (string.IsNullOrEmpty(user) ? null : user, string.IsNullOrEmpty(password) ? null : password);
     }
 
-    /// <summary>Establishes a tunnel to IP:port through the upstream and returns a ready socket.</summary>
+    /// <summary>
+    /// Establishes a tunnel to IP:port through the upstream and returns a ready socket: IPv4 by
+    /// ATYP=1, IPv6 by ATYP=4 (an IPv4-mapped IPv6 address dials as the IPv4 it stands for).
+    /// </summary>
     public Task<Socket> ConnectAsync(IPAddress destination, int port, TimeSpan timeout, CancellationToken ct)
     {
-        if (destination.AddressFamily != AddressFamily.InterNetwork)
+        ValidatePort(port);
+        if (destination.IsIPv4MappedToIPv6)
         {
-            throw new NotSupportedException($"socks5: dial is IPv4-only, got {destination}");
+            destination = destination.MapToIPv4();
         }
 
-        // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
-        var request = new byte[10];
+        byte[] request;
+        switch (destination.AddressFamily)
+        {
+            case AddressFamily.InterNetwork:
+                // CONNECT: VER CMD=1 RSV=0 ATYP=1 IPv4 port
+                request = new byte[10];
+                request[3] = 0x01;
+                destination.TryWriteBytes(request.AsSpan(4, 4), out _);
+                BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(8, 2), (ushort)port);
+                break;
+            case AddressFamily.InterNetworkV6:
+                // CONNECT: VER CMD=1 RSV=0 ATYP=4 IPv6 port
+                request = new byte[22];
+                request[3] = 0x04;
+                destination.TryWriteBytes(request.AsSpan(4, 16), out _);
+                BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(20, 2), (ushort)port);
+                break;
+            default:
+                throw new NotSupportedException($"socks5: unsupported address family of {destination}");
+        }
+
         request[0] = 0x05;
         request[1] = 0x01;
-        request[3] = 0x01;
-        destination.TryWriteBytes(request.AsSpan(4, 4), out _);
-        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(8, 2), (ushort)port);
         return DialAsync(request, timeout, ct);
+    }
+
+    private static void ValidatePort(int port)
+    {
+        // a port above 65535 would be truncated by the wire cast and dial a different one
+        if (port is < 1 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(port), port, "socks5: port must be 1..65535");
+        }
     }
 
     /// <summary>
@@ -63,6 +93,7 @@ public sealed class Socks5Client
     public Task<Socket> ConnectAsync(string hostName, int port, TimeSpan timeout, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(hostName);
+        ValidatePort(port);
         if (IPAddress.TryParse(hostName, out var literal))
         {
             return ConnectAsync(literal, port, timeout, ct);
@@ -91,7 +122,8 @@ public sealed class Socks5Client
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
 
-        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        // the family of the upstream itself, not of the destination: the destination rides the request
+        var socket = new Socket(_upstream.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         try
         {
             await socket.ConnectAsync(_upstream, cts.Token);
@@ -199,7 +231,12 @@ public sealed class Socks5Client
         }
 
         var host = hostPort[..separator];
-        var port = int.Parse(hostPort[(separator + 1)..]);
+        // port 0 stays valid: a listen address may ask the OS for an ephemeral port
+        if (!int.TryParse(hostPort[(separator + 1)..], out var port) || port is < 0 or > 65535)
+        {
+            throw new FormatException($"expected a port in 0..65535 in '{hostPort}'");
+        }
+
         if (!IPAddress.TryParse(host, out var ip))
         {
             // system resolution is not used: the upstream is always an IP from the config

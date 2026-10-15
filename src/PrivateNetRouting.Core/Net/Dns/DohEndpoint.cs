@@ -33,5 +33,9 @@ public sealed record DohEndpoint(IPAddress Ip, int Port, bool Secure = false, st
     }
 
     public override string ToString() =>
-        HostName is null ? $"{Ip}:{Port}" : $"{HostName} ({Ip}:{Port})";
+        HostName is null ? Authority : $"{HostName} ({Authority})";
+
+    /// <summary>ip:port, an IPv6 address in brackets (also valid as an HTTP Host value).</summary>
+    private string Authority =>
+        Ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? $"[{Ip}]:{Port}" : $"{Ip}:{Port}";
 }

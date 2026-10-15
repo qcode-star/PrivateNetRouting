@@ -171,7 +171,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         await supervisor.StartAsync(CancellationToken.None);
 
         var spawn = Assert.Single(spawns);
-        Assert.Equal(@"""C:\app with space\pnr.exe"" --proxy-worker", spawn.CommandLine);
+        Assert.Equal(@"""C:\app with space\pnr.exe"" --proxy-worker --listen 127.0.0.1:18081", spawn.CommandLine);
         Assert.Null(spawn.Stdout);
         Assert.EndsWith("forward-proxy.err.log", spawn.Stderr);
         Assert.Equal(0, inner.StartCount);
@@ -305,7 +305,7 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         await supervisor.DetachAsync(CancellationToken.None);
 
         var spawn = Assert.Single(spawns);
-        Assert.EndsWith(" --proxy-worker", spawn.CommandLine);
+        Assert.Contains(" --proxy-worker --listen ", spawn.CommandLine);
         Assert.Equal(1, inner.StopCount);
         Assert.True(supervisor.IsRunning);
     }

@@ -46,6 +46,119 @@ public class DohClientTests
         Assert.Throws<FormatException>(() => DohClient.ParseHttpResponse("HTTP/1.0 200 OK"u8.ToArray()));
     }
 
+    /// <summary>
+    /// A keep-alive server states Content-Length and keeps the connection open: the answer must
+    /// come back at once instead of after the whole query timeout.
+    /// </summary>
+    [Fact]
+    public async Task StopsAtContentLengthWithoutWaitingForTheServerToClose()
+    {
+        var body = BuildResponse("1.2.3.4", ttl: 240);
+        var response = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n").Concat(body).ToArray();
+        using var stream = new ScriptedStream(response, closeAfter: false);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
+
+        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+    }
+
+    [Fact]
+    public async Task ContentLengthAnswerSplitAcrossReadsIsAssembled()
+    {
+        var body = BuildResponse("1.2.3.4", ttl: 240);
+        var response = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n").Concat(body).ToArray();
+        using var stream = new ScriptedStream(response, closeAfter: false, chunkSize: 7);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
+
+        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+    }
+
+    [Fact]
+    public async Task WithoutContentLengthTheClosureEndsTheResponse()
+    {
+        var response = Head(200).Concat(BuildResponse("1.2.3.4", ttl: 240)).ToArray();
+        using var stream = new ScriptedStream(response, closeAfter: true);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
+
+        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+    }
+
+    [Fact]
+    public async Task OversizedResponsesAreRefused()
+    {
+        var huge = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 10000000\r\n\r\n");
+        using var declared = new ScriptedStream(huge, closeAfter: false);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<FormatException>(() =>
+            DohClient.QueryOverStreamAsync(declared, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token));
+
+        // no Content-Length: a stream that never ends is cut at the cap
+        var endless = Head(200).Concat(new byte[300 * 1024]).ToArray();
+        using var streamed = new ScriptedStream(endless, closeAfter: true);
+        await Assert.ThrowsAsync<FormatException>(() =>
+            DohClient.QueryOverStreamAsync(streamed, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token));
+    }
+
+    /// <summary>Serves a canned response in chunks; after it either ends (EOF) or stays open until cancelled. Writes are swallowed.</summary>
+    private sealed class ScriptedStream(byte[] response, bool closeAfter, int chunkSize = int.MaxValue) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position >= response.Length)
+            {
+                if (closeAfter)
+                {
+                    return 0;
+                }
+
+                await Task.Delay(Timeout.Infinite, cancellationToken); // an open, silent connection
+            }
+
+            var count = Math.Min(Math.Min(buffer.Length, chunkSize), response.Length - _position);
+            response.AsMemory(_position, count).CopyTo(buffer);
+            _position += count;
+            return count;
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+        }
+    }
+
     private static byte[] Head(int status) =>
         Encoding.ASCII.GetBytes($"HTTP/1.0 {status} X\r\nContent-Type: application/dns-message\r\n\r\n");
 

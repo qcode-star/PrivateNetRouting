@@ -51,19 +51,18 @@ public static class ProxyHealthCheck
             // the marker header tells our own proxy that this is a liveness probe, not client
             // traffic: otherwise every status poll would refresh the activity marker and the
             // idle stopper would never see an idle chain
-            var request = $"CONNECT {targetHost}:{targetPort} HTTP/1.1\r\n{ConnectRequestParser.ProbeHeaderName}: 1\r\n\r\n";
+            // HTTP/1.1 requires Host; a strict upstream proxy (the http mode) answers 400 without it
+            var request = $"CONNECT {targetHost}:{targetPort} HTTP/1.1\r\nHost: {targetHost}:{targetPort}\r\n" +
+                          $"{ConnectRequestParser.ProbeHeaderName}: 1\r\n\r\n";
             await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cts.Token);
 
-            var buffer = new byte[256];
-            var read = await stream.ReadAsync(buffer, cts.Token);
+            var statusLine = await ReadStatusLineAsync(stream, cts.Token);
             stopwatch.Stop();
-            if (read == 0)
+            if (statusLine is null)
             {
                 return HealthProbeResult.FailIn(stopwatch.ElapsedMilliseconds, "connection closed without response");
             }
 
-            var response = Encoding.ASCII.GetString(buffer, 0, read);
-            var statusLine = response.Split('\r')[0];
             return statusLine.StartsWith("HTTP/1.1 2", StringComparison.Ordinal)
                 || statusLine.StartsWith("HTTP/1.0 2", StringComparison.Ordinal)
                 ? HealthProbeResult.OkIn(stopwatch.ElapsedMilliseconds, statusLine)
@@ -74,5 +73,38 @@ public static class ProxyHealthCheck
             stopwatch.Stop();
             return HealthProbeResult.FailIn(stopwatch.ElapsedMilliseconds, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// The first response line, however the segments split it: reads until the line terminator
+    /// (or a sane limit); null — the peer closed before sending anything.
+    /// </summary>
+    private static async Task<string?> ReadStatusLineAsync(NetworkStream stream, CancellationToken ct)
+    {
+        var buffer = new byte[1024];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (buffer.AsSpan(0, total).IndexOfAny((byte)'\r', (byte)'\n') >= 0)
+            {
+                break;
+            }
+        }
+
+        if (total == 0)
+        {
+            return null;
+        }
+
+        var text = Encoding.ASCII.GetString(buffer, 0, total);
+        var end = text.IndexOfAny(['\r', '\n']);
+        return end < 0 ? text : text[..end];
     }
 }

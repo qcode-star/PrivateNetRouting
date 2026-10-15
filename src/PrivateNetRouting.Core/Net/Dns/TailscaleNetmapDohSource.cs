@@ -17,8 +17,7 @@ public interface IDohEndpointSource
 /// `tailscale --socket &lt;pipe&gt; debug netmap` carries them as http(s)://…/dns-query URLs —
 /// to IP literals or to names. Any tailscale DNS config is honored: a named resolver is
 /// resolved once at discovery by the system resolver (resolver names are not part of the
-/// AI ban) and the name is kept for the TLS SNI; an IPv6 literal is skipped — the dial is
-/// IPv4-only. Changes on the admins' side are picked up automatically. The CLI and the pipe
+/// AI ban) and the name is kept for the TLS SNI; an IPv6 literal is dialed by ATYP=4. Changes on the admins' side are picked up automatically. The CLI and the pipe
 /// are chain.tailscale.cliPath / .socket — the same ones the chain itself speaks through.
 /// </summary>
 public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailscale, FileLog? log = null) : IDohEndpointSource
@@ -45,16 +44,52 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(NetmapTimeout);
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(cts.Token);
-        await process.WaitForExitAsync(cts.Token);
-        if (process.ExitCode != 0)
+        string stdout;
+        try
         {
-            // a dead sidecar pipe: the pool keeps what it has instead of reading "no resolvers"
-            throw new IOException($"{tailscale.CliPath} debug netmap exited with code {process.ExitCode}");
+            // both pipes are drained at once: a chatty stderr that fills its pipe would stall the child
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+            await Task.WhenAll(stdoutTask, stderrTask);
+            await process.WaitForExitAsync(cts.Token);
+            stdout = await stdoutTask;
+            if (process.ExitCode != 0)
+            {
+                // a dead sidecar pipe: the pool keeps what it has instead of reading "no resolvers"
+                var detail = (await stderrTask).Trim();
+                throw new IOException($"{tailscale.CliPath} debug netmap exited with code {process.ExitCode}"
+                    + (detail.Length == 0 ? string.Empty : $": {Truncate(detail)}"));
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"{tailscale.CliPath} debug netmap did not finish within {NetmapTimeout.TotalSeconds:F0}s");
+        }
+        finally
+        {
+            KillIfRunning(process);
         }
 
         return await ParseEndpointsAsync(stdout, ResolveHostAsync, ct, log);
     }
+
+    /// <summary>A hung or abandoned child must not outlive the call (timeout, cancellation).</summary>
+    private static void KillIfRunning(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // it exited on its own in the meantime
+        }
+    }
+
+    private static string Truncate(string value) => value.Length <= 200 ? value : value[..200];
 
     /// <summary>
     /// Parsing of the netmap text, separated for tests. A host that is not an IPv4 literal is
@@ -74,18 +109,21 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
             var secure = match.Groups[1].Value == Uri.UriSchemeHttps;
             var hostGroup = match.Groups["host"].Value;
             var host = hostGroup.StartsWith('[') ? hostGroup.Trim('[', ']') : hostGroup;
-            // an omitted port means the scheme default (Uri semantics for the config seeds too)
+            // an omitted port means the scheme default (Uri semantics for the config seeds too);
+            // an unusable one (overflow, 0, above 65535) drops this entry only, not the discovery
             var port = match.Groups["port"].Success
-                ? int.Parse(match.Groups["port"].Value)
+                ? int.TryParse(match.Groups["port"].Value, out var parsedPort) ? parsedPort : 0
                 : secure ? 443 : 80;
+            if (port is < 1 or > 65535)
+            {
+                log?.Debug($"doh: discovery: resolver entry with an invalid port skipped: {match.Value}");
+                continue;
+            }
 
             DohEndpoint? endpoint = null;
             if (IPAddress.TryParse(host, out var literal))
             {
-                if (literal.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    endpoint = new DohEndpoint(literal, port, secure);
-                }
+                endpoint = new DohEndpoint(literal, port, secure);
             }
             else
             {

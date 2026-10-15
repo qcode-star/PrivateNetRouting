@@ -64,6 +64,79 @@ public class Socks5ClientTests
     }
 
     [Fact]
+    public async Task DialsAnIpv6DestinationByAtyp4()
+    {
+        var (upstream, connectTask) = await StartFakeUpstreamAsync();
+        var client = new Socks5Client(upstream);
+
+        using var socket = await client.ConnectAsync(IPAddress.Parse("2001:db8::1"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        var (seenTarget, seenPort, seenAtyp) = await connectTask;
+        Assert.Equal(0x04, seenAtyp);
+        Assert.Equal("ipv6", seenTarget);
+        Assert.Equal(8443, seenPort);
+    }
+
+    [Fact]
+    public async Task AnIpv4MappedIpv6DestinationDialsAsIpv4()
+    {
+        var (upstream, connectTask) = await StartFakeUpstreamAsync();
+        var client = new Socks5Client(upstream);
+
+        using var socket = await client.ConnectAsync(IPAddress.Parse("::ffff:10.1.2.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        var (seenTarget, _, seenAtyp) = await connectTask;
+        Assert.Equal(0x01, seenAtyp);
+        Assert.Equal("10.1.2.3", seenTarget);
+    }
+
+    [Fact]
+    public async Task TalksToAnIpv6Upstream()
+    {
+        var listener = new TcpListener(IPAddress.IPv6Loopback, 0);
+        try
+        {
+            listener.Start();
+        }
+        catch (SocketException)
+        {
+            return; // no IPv6 loopback on this machine
+        }
+
+        var endpoint = (IPEndPoint)listener.LocalEndpoint;
+        var accepted = Task.Run(async () =>
+        {
+            using var session = await listener.AcceptTcpClientAsync();
+            var stream = session.GetStream();
+            var greeting = new byte[3];
+            await ReadExactAsync(stream, greeting);
+            await stream.WriteAsync(new byte[] { 5, 0 });
+            await ReadExactAsync(stream, new byte[10]); // CONNECT to an IPv4 address
+            await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
+        });
+
+        using var socket = await new Socks5Client(endpoint).ConnectAsync(
+            IPAddress.Parse("10.1.2.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        await accepted;
+        listener.Stop();
+        Assert.Equal(AddressFamily.InterNetworkV6, socket.AddressFamily);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(65536)]
+    [InlineData(-1)]
+    public async Task RejectsPortsOutsideTheWireRange(int port)
+    {
+        var client = new Socks5Client("127.0.0.1:1080");
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            client.ConnectAsync(IPAddress.Loopback, port, TimeSpan.FromSeconds(1), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            client.ConnectAsync("target.example", port, TimeSpan.FromSeconds(1), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task RejectsNamesOver255Bytes()
     {
         var client = new Socks5Client("127.0.0.1:1080");
@@ -163,6 +236,9 @@ public class Socks5ClientTests
     [InlineData(":1055")]
     [InlineData("example.com:1055")]
     [InlineData("127.0.0.1:")]
+    [InlineData("127.0.0.1:70000")]
+    [InlineData("127.0.0.1:-1")]
+    [InlineData("127.0.0.1:99999999999")] // used to surface as OverflowException
     public void ParseEndPointRejects(string value)
     {
         Assert.Throws<FormatException>(() => Socks5Client.ParseEndPoint(value));

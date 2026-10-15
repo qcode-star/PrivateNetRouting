@@ -32,7 +32,7 @@ internal static class Program
                 e.Cancel = true;
                 stop.Cancel();
             };
-            return await ProxyWorker.RunAsync(stop.Token);
+            return await ProxyWorker.RunAsync(stop.Token, args);
         }
 
         // the detached idle-stop worker: a chain raise from a CLI process spawns this exe with

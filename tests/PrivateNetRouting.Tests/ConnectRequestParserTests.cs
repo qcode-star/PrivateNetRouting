@@ -46,7 +46,14 @@ public class ConnectRequestParserTests
     [InlineData("CONNECT example.com:0 HTTP/1.1")]       // port out of range
     [InlineData("CONNECT example.com:notaport HTTP/1.1")]
     [InlineData("CONNECT :443 HTTP/1.1")]                // empty host
-    [InlineData("CONNECT [2001:db8::1]:443 HTTP/1.1")]   // IPv6 literal: the dial is IPv4-only
+    [InlineData("CONNECT 2001:db8::1:443 HTTP/1.1")]     // IPv6 literal without brackets: the port is ambiguous
+    [InlineData("CONNECT [2001:db8::1 HTTP/1.1")]        // unclosed bracket
+    [InlineData("CONNECT [2001:db8::1]:x HTTP/1.1")]     // bad port after the bracket
+    [InlineData("CONNECT [2001:db8::1]443 HTTP/1.1")]    // no colon before the port
+    [InlineData("CONNECT [fe80::1%5]:443 HTTP/1.1")]     // a zone id cannot ride a SOCKS request
+    [InlineData("CONNECT [192.0.2.1]:443 HTTP/1.1")]     // brackets are for IPv6 only
+    [InlineData("CONNECT [example.com]:443 HTTP/1.1")]
+    [InlineData("CONNECT a:1:443 HTTP/1.1")]             // a colon in a name
     [InlineData("CONNECT a..b:443 HTTP/1.1")]            // empty label
     [InlineData("CONNECT .:443 HTTP/1.1")]               // nothing left after the trailing dot
     public void Rejects(string firstLine)
@@ -54,6 +61,18 @@ public class ConnectRequestParserTests
         var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out _, out var error);
         Assert.False(ok);
         Assert.False(string.IsNullOrEmpty(error));
+    }
+
+    [Theory]
+    [InlineData("CONNECT [2001:db8::1]:8443 HTTP/1.1", "2001:db8::1", 8443, "[2001:db8::1]:8443")]
+    [InlineData("CONNECT [2001:DB8::1] HTTP/1.1", "2001:db8::1", 443, "[2001:db8::1]:443")]
+    public void ParsesBracketedIpv6Literals(string firstLine, string host, int port, string text)
+    {
+        var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out var request, out _);
+        Assert.True(ok);
+        Assert.Equal(host, request!.Host);
+        Assert.Equal(port, request.Port);
+        Assert.Equal(text, request.ToString());
     }
 
     [Fact]
