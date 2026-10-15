@@ -92,3 +92,28 @@ begin
   if CurUninstallStep = usUninstall then
     TerminateBackgroundProcesses;
 end;
+
+// The uninstaller reverts nothing outside its own folder: the guards live in the system (the hosts
+// block, the name-resolution rule, the firewall rules, the Claude managed policy, the Windows
+// system proxy) and in the settings files of the applications, and all of them keep pointing at a
+// local proxy that is about to disappear. Reverting them needs the application's own commands
+// (the policy and the ban need administrator rights), so the owner is told what to run while
+// pnr.exe is still installed and may stop the uninstall to run it. A silent uninstall skips the
+// question.
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  if UninstallSilent then
+    Exit;
+  Result := MsgBox(
+    'PrivateNetRouting has changed settings outside its own folder, and this uninstaller does not revert them. ' +
+    'They keep pointing at a local proxy that will be gone, so Claude and Codex may lose connectivity.' + #13#10 + #13#10 +
+    'To turn them off first, cancel this uninstall and run in a terminal (pnr.exe is in ' + ExpandConstant('{app}') + '):' + #13#10 + #13#10 +
+    '    pnr guard ban off        (hosts block, name-resolution rule, firewall rules)' + #13#10 +
+    '    pnr guard policy off     (Claude managed policy)' + #13#10 +
+    '    pnr guard sysproxy off   (Windows system proxy)' + #13#10 +
+    '    pnr chain down           (the chain processes)' + #13#10 + #13#10 +
+    'The proxy entries in the Claude settings.json, the Codex .env and the WSL startup files have to be removed by hand.' + #13#10 + #13#10 +
+    'Continue with the uninstall?',
+    mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
