@@ -185,7 +185,7 @@ internal static class Program
                 await runtime.Chain.EnsureRunningAsync(progress, CancellationToken.None);
                 Console.WriteLine("chain is up");
                 await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
-                return 0;
+                return await HandOverProxyAsync(runtime) ? 0 : 1;
 
             case "down":
                 await runtime.Chain.StopAsync(progress, CancellationToken.None);
@@ -195,6 +195,28 @@ internal static class Program
             default:
                 Console.Error.WriteLine($"unknown action: {action} (status | up | down)");
                 return 1;
+        }
+    }
+
+    /// <summary>
+    /// For the commands that leave a client behind (a launched app, a browser, a raised chain):
+    /// the in-process forward proxy would die with this process and the client would be left
+    /// pointed at a dead port, so the listener goes to a detached worker first — the same
+    /// handover as the tray "Exit". A no-op when a worker, the GUI or nobody holds the port, and
+    /// in the skipped shapes. False — the worker did not come up; the caller exits non-zero.
+    /// </summary>
+    private static async Task<bool> HandOverProxyAsync(ProxyRuntime runtime)
+    {
+        try
+        {
+            await runtime.ProxyControl.DetachAsync(CancellationToken.None);
+            return true;
+        }
+        catch (IOException ex)
+        {
+            Console.Error.WriteLine($"the forward proxy could not be handed over to a background worker: {ex.Message}");
+            Console.Error.WriteLine("the client was started, but nothing will listen on the proxy address once this command exits");
+            return false;
         }
     }
 
@@ -431,16 +453,17 @@ internal static class Program
 
         var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
+        var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == LaunchOutcome.CheckOnly)
         {
             Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
-            return 0;
+            return handedOver ? 0 : 1;
         }
 
         Console.WriteLine(result.RestartedExisting
             ? $"claude restarted through the proxy (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})"
             : $"claude launched (proxy {runtime.Launcher.ProxyUrl}, chain raised: {result.ChainRaised})");
-        return 0;
+        return handedOver ? 0 : 1;
     }
 
     private static async Task<int> RunBrowserAsync(List<string> rest)
@@ -531,6 +554,7 @@ internal static class Program
             progress,
             CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
+        var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == BrowserLaunchOutcome.Cancelled)
         {
             Console.WriteLine("launch cancelled: the egress is not responding");
@@ -540,7 +564,7 @@ internal static class Program
         Console.WriteLine(result.EgressResponded
             ? $"browser launched over the ready egress {runtime.Browser.EgressUrl}"
             : $"browser launched over the egress {runtime.Browser.EgressUrl} that had not answered");
-        return 0;
+        return handedOver ? 0 : 1;
     }
 
     private static async Task<int> RunCodexAsync(List<string> rest)
@@ -616,16 +640,17 @@ internal static class Program
 
         var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
+        var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == CodexLaunchOutcome.CheckOnly)
         {
             Console.WriteLine(result.ChainRaised ? "OK: chain is up" : "OK: chain healthy");
-            return 0;
+            return handedOver ? 0 : 1;
         }
 
         Console.WriteLine(result.RestartedExisting
             ? $"codex restarted through the proxy (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})"
             : $"codex launched (proxy {runtime.CodexLauncher.ProxyUrl}, chain raised: {result.ChainRaised})");
-        return 0;
+        return handedOver ? 0 : 1;
     }
 
     private static async Task<int> RunCodexUpdateAsync(List<string> rest)

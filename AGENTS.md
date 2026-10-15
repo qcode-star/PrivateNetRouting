@@ -154,7 +154,9 @@ Architecture notes:
   `--proxy-worker`) that outlives the command/GUI exit: bring-up/shutdown go through chain up/down
   (a GUI exit does not kill the worker), a one-off bring-up — `pnr proxy --detached`; the tray
   "Exit" with the chain kept hands an in-process listener over to such a worker
-  (`ForwardProxySupervisor.DetachAsync`); the idle
+  (`ForwardProxySupervisor.DetachAsync`), and so do the CLI commands that leave a client behind
+  (`pnr launch`, `pnr codex launch`, `pnr browser`, `pnr chain up`) before they exit — a failed
+  handover is a non-zero exit; the idle
   stopper started from the GUI — a separate worker (`--watchdog-worker`) that outlives the exit on
   its own and disappears after the idle stop (the CLI form `pnr watchdog` — foreground, in the
   terminal).
