@@ -1300,6 +1300,34 @@ public class GuardTests : IDisposable
         Assert.Contains("PROXYENV=missing", probe);
     }
 
+    [Theory]
+    [InlineData("/etc/wsl.d/startup/10-claude-proxy.sh", true)]
+    [InlineData("/opt/wsl/startup/pnr.sh", true)]
+    [InlineData("/usr/local/bin/pnr-proxy.sh", false)]
+    [InlineData("/opt/x.sh", false)]
+    [InlineData("/startup/x.sh", false)]
+    [InlineData("startup/x.sh", false)]
+    [InlineData("/etc/wsl.d/startup/", false)]
+    [InlineData("", false)]
+    public void StartupScriptPathMustLiveInADedicatedStartupDirectory(string path, bool expected)
+        => Assert.Equal(expected, WslConfigGuard.IsDedicatedStartupScriptPath(path));
+
+    [Fact]
+    public async Task WslSyncRefusesAStartupScriptOutsideADedicatedDirectory()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n" };
+        var config = WslConfig("on", ("d1", "u1"));
+        config.Wsl.StartupScriptPath = "/usr/local/bin/pnr-proxy.sh";
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.True(d1.Failed);
+        Assert.Contains("dedicated directory", d1.Reason);
+        Assert.Empty(runner.Scripts); // nothing was written
+    }
+
     [Fact]
     public async Task WslSyncInstallsBootRunnerWhenCommandIsEmpty()
     {

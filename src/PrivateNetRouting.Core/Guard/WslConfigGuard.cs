@@ -336,6 +336,13 @@ public sealed class WslConfigGuard(
         var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config)
             ?? throw new IOException($"WSL NAT gateway (vEthernet) not found for '{distro.Name}' — is WSL up?");
 
+        if (config.Wsl.SyncClaude && !IsDedicatedStartupScriptPath(config.Wsl.StartupScriptPath))
+        {
+            throw new IOException(
+                $"wsl.startupScriptPath '{config.Wsl.StartupScriptPath}' must live in a dedicated directory named 'startup' "
+                + "(e.g. /etc/wsl.d/startup/10-claude-proxy.sh): the boot runner executes every script of that directory as root");
+        }
+
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
 
@@ -780,6 +787,20 @@ public sealed class WslConfigGuard(
         var startupDir = dirEnd > 0 ? script[..dirEnd] : "/etc/wsl.d/startup";
         var rootEnd = startupDir.LastIndexOf('/');
         return (rootEnd > 0 ? startupDir[..rootEnd] : "/etc") + "/startup.sh";
+    }
+
+    /// <summary>
+    /// The runner executes every script of the startup directory as root at each distro start, so
+    /// the directory must be a dedicated one: …/<parent>/startup/<script>. A script path such as
+    /// /usr/local/bin/x.sh would make /usr/local/bin the startup directory and run everything in it.
+    /// </summary>
+    internal static bool IsDedicatedStartupScriptPath(string startupScriptPath)
+    {
+        var parts = startupScriptPath.Trim().Split('/');
+        return startupScriptPath.StartsWith('/')
+            && parts.Length >= 4
+            && parts[^2] == "startup"
+            && parts[^1].Length > 0;
     }
 
     /// <summary>The preserved foreign [boot] command, as the first script of the startup directory.</summary>
