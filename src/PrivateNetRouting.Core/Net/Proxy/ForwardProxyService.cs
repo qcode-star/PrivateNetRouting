@@ -215,10 +215,32 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 // on the liveness of the UI thread (continuations — to the pool)
                 client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
             {
                 // the listener was taken down by the service stop
                 return;
+            }
+            catch (SocketException ex) when (_cts.IsCancellationRequested
+                || ex.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted or SocketError.Shutdown)
+            {
+                // the listener was stopped under the pending accept
+                return;
+            }
+            catch (SocketException ex)
+            {
+                // a client reset in the backlog or a transient resource shortage must not end the
+                // loop: the listener stays bound and would answer nobody
+                _log.Warn($"forward-proxy: accept failed ({ex.SocketErrorCode}), continuing: {ex.Message}");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(50), _cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                continue;
             }
 
             _ = Task.Run(() => HandleClientAsync(client));
