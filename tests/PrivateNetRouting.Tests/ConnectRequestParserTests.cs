@@ -31,12 +31,24 @@ public class ConnectRequestParserTests
         Assert.Equal(8443, request.Port);
     }
 
+    [Fact]
+    public void RejectsOverlongLabelAndName()
+    {
+        var label = new string('a', 64);
+        Assert.False(ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes($"CONNECT {label}.example.com:443 HTTP/1.1\r\n\r\n"), out _, out _));
+        var name = string.Join('.', Enumerable.Repeat(new string('a', 60), 5));
+        Assert.False(ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes($"CONNECT {name}:443 HTTP/1.1\r\n\r\n"), out _, out _));
+    }
+
     [Theory]
     [InlineData("GET http://example.com/ HTTP/1.1")]
     [InlineData("CONNECT example.com:443")]              // no protocol version
     [InlineData("CONNECT example.com:0 HTTP/1.1")]       // port out of range
     [InlineData("CONNECT example.com:notaport HTTP/1.1")]
     [InlineData("CONNECT :443 HTTP/1.1")]                // empty host
+    [InlineData("CONNECT [2001:db8::1]:443 HTTP/1.1")]   // IPv6 literal: the dial is IPv4-only
+    [InlineData("CONNECT a..b:443 HTTP/1.1")]            // empty label
+    [InlineData("CONNECT .:443 HTTP/1.1")]               // nothing left after the trailing dot
     public void Rejects(string firstLine)
     {
         var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out _, out var error);

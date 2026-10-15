@@ -66,8 +66,42 @@ public static class ConnectRequestParser
             return false;
         }
 
-        request = new ConnectRequest(host.TrimEnd('.').ToLowerInvariant(), port, HasProbeHeader(header[lineEnd..]));
+        host = host.TrimEnd('.').ToLowerInvariant();
+        if (!IsDialableHost(host))
+        {
+            error = $"invalid host: {Truncate(host)}";
+            return false;
+        }
+
+        request = new ConnectRequest(host, port, HasProbeHeader(header[lineEnd..]));
         return true;
+    }
+
+    /// <summary>
+    /// An IPv4 literal, or a DNS name: non-empty labels of at most 63 bytes, 253 in all. Anything
+    /// else (an IPv6 literal, "a..b") could only fail after the upstream dial was spent.
+    /// </summary>
+    private static bool IsDialableHost(string host)
+    {
+        if (host.Length is 0 or > 253)
+        {
+            return false;
+        }
+
+        if (System.Net.IPAddress.TryParse(host, out var literal))
+        {
+            return literal.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+        }
+
+        foreach (var label in host.Split('.'))
+        {
+            if (label.Length is < 1 or > 63)
+            {
+                return false;
+            }
+        }
+
+        return !host.Contains('[') && !host.Contains(']');
     }
 
     /// <summary>Whether the header block (the part after the request line) holds the probe marker header.</summary>

@@ -309,24 +309,39 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         {
             // service stop: close silently
         }
-        catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException or FormatException)
+        catch (Exception ex)
         {
+            // any failure of one connection (an unsupported address family, a bad certificate of a
+            // DoH endpoint, a reset client) ends in a 502 and a counter, never in an unobserved fault
             Interlocked.Increment(ref _failedConnections);
             var detail = ex is OperationCanceledException
                 ? "timeout"
                 : ex.Message;
-            _log.Error($"forward-proxy: {client.Client.RemoteEndPoint}: {detail}");
+            _log.Error($"forward-proxy: {DescribeRemote(client)}: {detail}");
             try
             {
                 await client.GetStream().WriteAsync(BadGatewayResponse, CancellationToken.None);
             }
-            catch (IOException)
+            catch (Exception ex2) when (ex2 is IOException or InvalidOperationException or ObjectDisposedException or SocketException)
             {
             }
         }
         finally
         {
             Interlocked.Decrement(ref _activeConnections);
+        }
+    }
+
+    /// <summary>The peer address for log lines; a reset client no longer has one.</summary>
+    private static string DescribeRemote(TcpClient client)
+    {
+        try
+        {
+            return client.Client.RemoteEndPoint?.ToString() ?? "unknown";
+        }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+        {
+            return "unknown";
         }
     }
 

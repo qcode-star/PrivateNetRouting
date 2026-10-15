@@ -24,8 +24,10 @@ public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSp
                 pool.MarkAlive(endpoint);
                 return new ResolveResult(answer.Ips[0], endpoint.ToString(), answer.MinTtl);
             }
-            catch (Exception ex) when (ex is IOException or FormatException or TimeoutException or SocketException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
+                // any endpoint failure (including a bad certificate) fails over to the next one;
+                // only the caller's own cancellation aborts the loop
                 pool.MarkDead(endpoint);
                 lastError = ex;
             }
