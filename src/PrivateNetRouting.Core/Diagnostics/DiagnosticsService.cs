@@ -218,7 +218,7 @@ public sealed class DiagnosticsService(
             WslBindLine(wslBind),
             new(
                 "connections",
-                proxy.IsRunning
+                proxy.IsRunning && proxy.CountersAreLocal
                     ? $"active {proxy.ActiveConnections}, total {proxy.TotalConnections}, failed {proxy.FailedConnections}"
                     : proxyListeners.Count > 0
                         ? "n/a (the proxy lives in another process)"

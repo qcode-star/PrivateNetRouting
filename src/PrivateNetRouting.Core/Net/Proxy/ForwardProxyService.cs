@@ -21,6 +21,12 @@ public interface IProxyStatistics
     long TotalConnections { get; }
 
     long FailedConnections { get; }
+
+    /// <summary>
+    /// False when the listener is held by another process (a detached worker): the counters above
+    /// belong to this process's idle instance and say nothing about the traffic.
+    /// </summary>
+    bool CountersAreLocal => true;
 }
 
 /// <summary>

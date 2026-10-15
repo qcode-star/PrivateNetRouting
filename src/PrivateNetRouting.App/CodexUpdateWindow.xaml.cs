@@ -377,8 +377,18 @@ public partial class CodexUpdateWindow : Window
         BtnLaunch.IsEnabled = false;
         try
         {
+            // the same contract as the main window's button: a copy that runs without the proxy is
+            // offered a restart (its flags never reach a running single-instance app otherwise)
+            var running = await Task.Run(() => _runtime.CodexLauncher.InspectRunning());
+            if (!LaunchPrompts.ConfirmRestart(this, running, "App.Name.Codex"))
+            {
+                _runtime.CodexLauncher.NoteRestartDeclined();
+                SetHintKey("Main.Launch.RestartDeclined");
+                return;
+            }
+
             // the launcher itself will check/bring up the chain and pass the proxy flags and env
-            await _runtime.CodexLauncher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
+            await _runtime.CodexLauncher.LaunchAsync(LaunchPrompts.OptionsFor(running), null, CancellationToken.None);
             SetHintKey("CodexUpdate.Launch.Done");
         }
         catch (Exception ex)

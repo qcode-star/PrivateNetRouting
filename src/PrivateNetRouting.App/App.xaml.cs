@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
@@ -40,6 +42,7 @@ public partial class App : Application
     private ProxyRuntime? _runtime;
     private TrayIcon? _tray;
     private bool _exiting;
+    private bool _exitStarted;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -62,6 +65,9 @@ public partial class App : Application
         {
             // hand the verb over to the running instance: a shortcut launch must start Claude or
             // the browser there, not just surface the window
+            // this process was just started by the user's click, so it may pass the foreground
+            // right to the first instance — otherwise its window only flashes in the taskbar
+            AllowFirstInstanceToForeground();
             if (launchOnStart)
             {
                 _launchSignal.Set();
@@ -249,6 +255,33 @@ public partial class App : Application
         }
     }
 
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
+    /// <summary>Lets the other processes of this executable (the running instance) take the foreground; best effort.</summary>
+    private static void AllowFirstInstanceToForeground()
+    {
+        try
+        {
+            using var self = Process.GetCurrentProcess();
+            foreach (var other in Process.GetProcessesByName(self.ProcessName))
+            {
+                using (other)
+                {
+                    if (other.Id != self.Id)
+                    {
+                        AllowSetForegroundWindow(other.Id);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // a missing right only costs a taskbar flash instead of a raised window
+        }
+    }
+
     private static EventWaitHandle CreateSignal(string name) =>
         new(false, EventResetMode.AutoReset, name);
 
@@ -282,6 +315,12 @@ public partial class App : Application
     /// </summary>
     private async Task ExitFromTrayAsync(bool stopChain)
     {
+        if (_exitStarted)
+        {
+            return; // a menu that was already open can still deliver a second click
+        }
+
+        _exitStarted = true;
         _exiting = true;
         _tray?.Dispose();
         _tray = null;
@@ -302,6 +341,13 @@ public partial class App : Application
             catch (Exception ex)
             {
                 runtime.Log.Error($"exit: {(stopChain ? "chain stop" : "proxy detach")} failed: {ex.Message}");
+                // the window and the tray are gone by now: the dialog is the only place the owner
+                // can learn that the proxy may be dead or that the chain may still be up
+                MessageBox.Show(
+                    Loc.F(stopChain ? "App.Error.ExitStopFmt" : "App.Error.ExitDetachFmt", ex.Message),
+                    Loc.S("App.Error.Title"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
         }
 

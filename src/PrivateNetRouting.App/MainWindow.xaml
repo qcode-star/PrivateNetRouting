@@ -18,7 +18,7 @@
              UIElement as item content measures wrong). Tooltips live on the item container. -->
         <DataTemplate x:Key="LanguageOptionTemplate">
             <StackPanel Orientation="Horizontal">
-                <Border Width="23" Height="16" CornerRadius="2" Background="{StaticResource Brush.Code}"
+                <Border Width="23" Height="16" CornerRadius="{StaticResource Radius.Control}" Background="{StaticResource Brush.Code}"
                         BorderBrush="{StaticResource Brush.CardBorder}" BorderThickness="1"
                         VerticalAlignment="Center">
                     <app:LanguageFlag Code="{Binding Code}"/>
@@ -59,7 +59,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource Brush.Accent}"
+                    <Border Width="10" Height="10" CornerRadius="{StaticResource Radius.Control}" Background="{StaticResource Brush.Accent}"
                             VerticalAlignment="Center" Margin="0,0,10,0" />
                     <TextBlock Text="{DynamicResource Main.Header}" Style="{StaticResource Text.Title}"/>
                 </StackPanel>
@@ -73,7 +73,7 @@
                     <Button x:Name="HelpButton" Style="{StaticResource IconButton}" Margin="10,0,0,0"
                             Click="OnHelp" ToolTip="{DynamicResource Main.Help}"
                             AutomationProperties.Name="{DynamicResource Main.Help}">
-                        <TextBlock Text="?" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="?" FontWeight="SemiBold" FontSize="{StaticResource Font.Section}"/>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -254,7 +254,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{DynamicResource Main.Guard}" Style="{StaticResource Text.Section}"/>
-                                <Ellipse x:Name="GuardDot" Width="10" Height="10" Fill="Gray"
+                                <Ellipse x:Name="GuardDot" Width="10" Height="10" Fill="{StaticResource Brush.Idle}"
                                          VerticalAlignment="Center" Margin="12,1,0,1" Visibility="Collapsed"/>
                                 <TextBlock x:Name="GuardSummary" Style="{StaticResource Text.Caption}" FontWeight="SemiBold"
                                            VerticalAlignment="Center" Margin="10,0,0,0" Visibility="Collapsed"/>
@@ -264,8 +264,9 @@
                                         Style="{StaticResource GhostButton}" MinWidth="100" VerticalAlignment="Center"
                                         Click="OnRefreshGuards" IsEnabled="{Binding CanGuard}"/>
                                 <Button x:Name="GuardAllButton" MinWidth="130" Margin="8,0,0,0"
+                                        Content="{DynamicResource Main.Guard.Button.EnableAll}"
                                         Style="{StaticResource AccentGhostButton}" Click="OnGuardAll"
-                                        IsEnabled="{Binding CanGuard}" Visibility="Collapsed"/>
+                                        IsEnabled="{Binding CanGuardAll}" Visibility="Collapsed"/>
                                 <Button x:Name="GuardCardToggle" Style="{StaticResource IconButton}" Margin="8,0,0,0"
                                         VerticalAlignment="Center" Click="OnToggleGuardsCard">
                                     <Path x:Name="GuardCardChevron" Data="{StaticResource Mark.Chevron.Up}"
@@ -298,7 +299,7 @@
                             </Grid.RowDefinitions>
 
                             <!-- Local ban (hosts + NRPT + firewall) -->
-                            <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="Gray"
+                            <Ellipse Grid.Row="0" Grid.Column="0" x:Name="BanDot" Width="10" Height="10" Fill="{StaticResource Brush.Idle}"
                                      VerticalAlignment="Center" Margin="0,0,6,10" />
                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource Main.Guard.Ban}"
                                        Style="{StaticResource Text.Body}" MinWidth="128" VerticalAlignment="Center" Margin="0,0,14,10"/>
@@ -315,7 +316,7 @@
                             </StackPanel>
 
                             <!-- Managed policy egressProxyUrl -->
-                            <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="Gray"
+                            <Ellipse Grid.Row="1" Grid.Column="0" x:Name="PolicyDot" Width="10" Height="10" Fill="{StaticResource Brush.Idle}"
                                      VerticalAlignment="Center" Margin="0,0,6,10" />
                             <TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Main.Guard.Policy}"
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
@@ -332,7 +333,7 @@
                             </StackPanel>
 
                             <!-- app settings: env in Claude Code settings.json + the system-proxy flag in Codex config.toml -->
-                            <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="Gray"
+                            <Ellipse Grid.Row="2" Grid.Column="0" x:Name="SettingsDot" Width="10" Height="10" Fill="{StaticResource Brush.Idle}"
                                      VerticalAlignment="Center" Margin="0,0,6,10" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Main.Guard.Settings}"
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,10"/>
@@ -345,7 +346,7 @@
                                     Click="OnGuardSettingsSync" IsEnabled="{Binding CanGuard}"/>
 
                             <!-- WSL config: startup script + distro settings.json -->
-                            <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="Gray"
+                            <Ellipse Grid.Row="3" Grid.Column="0" x:Name="WslDot" Width="10" Height="10" Fill="{StaticResource Brush.Idle}"
                                      VerticalAlignment="Center" Margin="0,0,6,0" />
                             <TextBlock Grid.Row="3" Grid.Column="1" Text="{DynamicResource Main.Guard.Wsl}"
                                        Style="{StaticResource Text.Body}" VerticalAlignment="Center" Margin="0,0,14,0"/>

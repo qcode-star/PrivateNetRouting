@@ -151,6 +151,25 @@ public sealed class ForwardProxySupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task Counters_AreLocal_OnlyWhenNoOtherProcessHoldsTheListener()
+    {
+        // an in-process listener and a free port: the counters are this process's own
+        var inner = new FakeProxyInstance();
+        var ports = new FakePortProbe();
+        var supervisor = Make(new ForwardProxyConfig(), inner, ports, new FakeTcpTable(), new FakeFinderById());
+        Assert.True(supervisor.CountersAreLocal);
+        await supervisor.StartAsync(CancellationToken.None);
+        ports.Listening = true;
+        Assert.True(supervisor.CountersAreLocal);
+
+        // a worker (or a foreign process) holds the port: the idle inner instance reads 0 and must not be shown
+        var idle = new FakeProxyInstance();
+        var held = Make(new ForwardProxyConfig(), idle, new FakePortProbe { Listening = true }, new FakeTcpTable(), new FakeFinderById());
+        Assert.True(held.IsRunning);
+        Assert.False(held.CountersAreLocal);
+    }
+
+    [Fact]
     public async Task Start_Detached_SpawnsWorkerWithMarkerAndWaitsForListener()
     {
         var inner = new FakeProxyInstance();

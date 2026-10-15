@@ -34,6 +34,7 @@ public class PathTextBlock : TextBlock
 
     public PathTextBlock()
     {
+        TextTrimming = TextTrimming.CharacterEllipsis; // the fallback when the file name does not fit either
         SizeChanged += (_, _) => Retrim();
     }
 
@@ -46,6 +47,9 @@ public class PathTextBlock : TextBlock
 
     private void Retrim()
     {
+        // until the width is known (and whenever the path is not shortened) the full value is the
+        // text: the built-in end ellipsis trims it, so the cell is never empty
+        Text = _source;
         var available = ActualWidth - FitMargin;
         if (available <= 0 || _source.Length == 0)
         {
@@ -59,7 +63,6 @@ public class PathTextBlock : TextBlock
 
         if (Measure(_source) <= available)
         {
-            Text = _source;
             return;
         }
 

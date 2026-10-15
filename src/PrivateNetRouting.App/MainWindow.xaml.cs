@@ -82,6 +82,7 @@ public partial class MainWindow : Window
     private CodexUpdateWindow? _codexUpdateWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private AboutWindow? _aboutWindow;
+    private bool _appUpdateChecking;
     private bool _idleStopBusy;
     private bool _autoStartSyncing;
     private bool _chainCardExpanded;
@@ -450,7 +451,7 @@ public partial class MainWindow : Window
 
             _rail.SetStage(2, state.BackendState is null
                 ? new RailStage(Loc.S("Main.Chain.Node.NoResponse"), Theme.Idle)
-                : new RailStage(state.BackendState, state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
+                : new RailStage(LocalizeBackendState(state.BackendState), state.BackendState == "Running" ? Theme.Ok : Theme.Warn));
 
             // the two closing stages are the same in both modes, only the indexes differ
             proxyStage = 3;
@@ -588,6 +589,7 @@ public partial class MainWindow : Window
 
             _guardAppliedSeq = seq;
             _lastGuards = snapshot;
+            _viewModel.SetGuardsKnown(true);
             RenderGuards();
         }
         catch (Exception ex)
@@ -598,6 +600,7 @@ public partial class MainWindow : Window
             }
 
             _lastGuards = null;
+            _viewModel.SetGuardsKnown(false);
             BanDetail.Text = PolicyDetail.Text = SettingsDetail.Text = WslDetail.Text = ex.Message;
             SetGuardDots(GuardState.Unknown, GuardState.Unknown, GuardState.Unknown, GuardState.Unknown);
             RenderGuardSummary();
@@ -667,7 +670,7 @@ public partial class MainWindow : Window
                     ? null
                     : Loc.F(
                         "Main.Guard.Settings.Codex.FlagFmt",
-                        snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : "unset"),
+                        snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : Loc.S("Main.Guard.Settings.Codex.Unset")),
                 snapshot.CodexSettings.EnvUpToDate ? null : Loc.S("Main.Guard.Settings.Codex.EnvStale"),
             }.Where(part => part is not null)),
             _ => snapshot.CodexSettings.Detail ?? Loc.S("Main.Guard.Unknown"),
@@ -732,6 +735,11 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnGuardAll(object sender, RoutedEventArgs e)
     {
+        if (_lastGuards is null)
+        {
+            return; // the state is not read yet: the direction of the action is unknown
+        }
+
         var disable = _lastGuards is { } snapshot && GuardAggregate.AllOn(snapshot);
         await RunGuardAsync(async () =>
         {
@@ -771,6 +779,14 @@ public partial class MainWindow : Window
         ? Loc.F("Main.Guard.Wsl.CodexEnvOnFmt", distro.ProxyEnvPort ?? 0)
         : Loc.S("Main.Guard.Wsl.CodexEnvMissing");
 
+    /// <summary>The node's tailscale backend state as a word of the UI language; an unknown state stays verbatim.</summary>
+    private static string LocalizeBackendState(string backendState) => backendState switch
+    {
+        "Running" or "Stopped" or "Starting" or "NeedsLogin" or "NeedsMachineAuth" or "NoState" =>
+            Loc.S($"Main.Chain.Node.{backendState}"),
+        _ => backendState,
+    };
+
     private static string LocalizeWslReason(string reason)
     {
         if (reason.Contains("mode=off", StringComparison.Ordinal))
@@ -788,7 +804,8 @@ public partial class MainWindow : Window
             return Loc.S("Main.Guard.Wsl.NoSync");
         }
 
-        if (reason.Contains("auto", StringComparison.Ordinal))
+        // the auto mode's "WSL is not available (<error>)" reason carries the error and stays verbatim
+        if (reason.Contains("none of the configured distros", StringComparison.Ordinal))
         {
             return Loc.S("Main.Guard.Wsl.AutoNone");
         }
@@ -1322,7 +1339,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            // the pre-check is cancellable too (Stop acts during it); the probe swallows a cancel as a
+            // failed check, so the token is re-checked: a cancel here raised nothing to roll back
+            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15), cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
             chainWasDown = !healthy;
             if (!healthy)
             {
@@ -1590,7 +1610,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15));
+            // the pre-check is cancellable too (Stop acts during it); the probe swallows a cancel as a
+            // failed check, so the token is re-checked: a cancel here raised nothing to roll back
+            var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15), cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
             chainWasDown = !healthy;
             if (!healthy)
             {
@@ -1764,7 +1787,9 @@ public partial class MainWindow : Window
         menu.Items.Add(MakeHelpItem("Main.Help.Diagnostics", OnDiagnostics));
         menu.Items.Add(MakeHelpItem("Main.Help.OpenLogs", OnOpenLogs));
         menu.Items.Add(MakeHelpItem("Main.Help.CreateBrowserProfile", OnCreateBrowserProfile));
-        menu.Items.Add(MakeHelpItem("Main.Help.CheckUpdates", OnCheckAppUpdates));
+        var checkUpdates = MakeHelpItem("Main.Help.CheckUpdates", OnCheckAppUpdates);
+        checkUpdates.IsEnabled = !_appUpdateChecking; // the menu is rebuilt on every open, a running check must show
+        menu.Items.Add(checkUpdates);
         menu.Items.Add(new Separator());
         menu.Items.Add(MakeHelpItem("Main.Help.About", OnAbout));
         HelpButton.ContextMenu = menu;
@@ -1836,6 +1861,12 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnCheckAppUpdates(object sender, RoutedEventArgs e)
     {
+        if (_appUpdateChecking)
+        {
+            return;
+        }
+
+        _appUpdateChecking = true;
         var menuItem = sender as MenuItem;
         if (menuItem is not null)
         {
@@ -1874,6 +1905,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _appUpdateChecking = false;
             if (menuItem is not null)
             {
                 menuItem.IsEnabled = true;
@@ -1979,18 +2011,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private string? _checkResultLiteral;
     private string _endpoints = "—";
     private string _activeConnections = "0";
-    private long _totalConnections;
-    private long _failedConnections;
-    private Brush _failedBrush = Brushes.Gray;
+    private string _totalConnections = "0";
+    private string _failedConnections = "0";
+    private Brush _failedBrush = Theme.TextSecondary;
     private string _upstreamListeners = "";
     private string _upstreamState = "";
-    private Brush _upstreamBrush = Brushes.Gray;
+    private Brush _upstreamBrush = Theme.TextMuted;
     private string _configPath = "";
     private bool _idleStopRunning;
     private bool _idleStopBusy;
     private string _idleStopState = "…";
     private string _idleStopAction = "";
-    private Brush _idleStopBrush = Brushes.Gray;
+    private Brush _idleStopBrush = Theme.TextMuted;
     private string _chainSummary = "…";
     private Brush _chainStateBrush = Theme.TextMuted;
     private bool _chainOperationRunning;
@@ -2025,13 +2057,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _activeConnections, value);
     }
 
-    public long TotalConnections
+    public string TotalConnections
     {
         get => _totalConnections;
         private set => SetField(ref _totalConnections, value);
     }
 
-    public long FailedConnections
+    public string FailedConnections
     {
         get => _failedConnections;
         private set => SetField(ref _failedConnections, value);
@@ -2237,11 +2269,26 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CanGuard { get; private set; } = true;
 
+    private bool _guardsKnown;
+
+    /// <summary>
+    /// The combined guard action follows the state it flips, so it waits for the first status read
+    /// (and for a readable one: after a failed read nobody knows whether "enable" or "disable" is meant).
+    /// </summary>
+    public bool CanGuardAll => CanGuard && _guardsKnown;
+
     /// <summary>Busy state of guard operations (UAC/write): the card's buttons gray out during the action.</summary>
     public void SetGuardBusy(bool busy)
     {
         CanGuard = !busy;
         OnPropertyChanged(nameof(CanGuard));
+        OnPropertyChanged(nameof(CanGuardAll));
+    }
+
+    public void SetGuardsKnown(bool known)
+    {
+        _guardsKnown = known;
+        OnPropertyChanged(nameof(CanGuardAll));
     }
 
     public void SetLaunchBusy(bool busy)
@@ -2307,10 +2354,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 : "—";
         }
 
-        ActiveConnections = proxy.ActiveConnections.ToString();
-        TotalConnections = proxy.TotalConnections;
-        FailedConnections = proxy.FailedConnections;
-        FailedBrush = FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
+        // a detached worker holds the listener: its counters live in its own process, ours would read 0
+        if (proxy.CountersAreLocal)
+        {
+            ActiveConnections = proxy.ActiveConnections.ToString();
+            TotalConnections = proxy.TotalConnections.ToString();
+            FailedConnections = proxy.FailedConnections.ToString();
+            FailedBrush = proxy.FailedConnections > 0 ? Theme.Bad : Theme.TextSecondary;
+        }
+        else
+        {
+            ActiveConnections = TotalConnections = FailedConnections = "—";
+            FailedBrush = Theme.TextSecondary;
+        }
+
         if (_externalUpstream)
         {
             UpstreamListeners = _runtime.Config.Chain.EffectiveMode == ChainMode.Http
@@ -2412,6 +2469,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Refresh();
         OnPropertyChanged(nameof(CheckResult));
         OnPropertyChanged(nameof(UpdateBadgeToolTip));
+        OnPropertyChanged(nameof(CodexUpdateBadgeToolTip));
         UpdateIdleStop(_idleStopRunning);
         if (_chainOperationRunning)
         {

@@ -64,6 +64,8 @@ public sealed class ForwardProxySupervisor(
                     .Select(entry => new IPEndPoint(entry.Address, entry.Port).ToString())
                     .ToList();
 
+    public bool CountersAreLocal => skipped || inner!.IsRunning || !ports.IsListening(Port);
+
     public int ActiveConnections => skipped ? 0 : inner!.ActiveConnections;
 
     public long TotalConnections => skipped ? 0 : inner!.TotalConnections;

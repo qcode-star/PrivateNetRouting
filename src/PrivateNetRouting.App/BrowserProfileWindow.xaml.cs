@@ -143,11 +143,21 @@ public partial class BrowserProfileWindow : Window
 
     private void OnKindChanged(object sender, RoutedEventArgs e) => RefreshState(kindChanged: true);
 
-    private void OnFolderChanged(object sender, TextChangedEventArgs e) => RefreshState(kindChanged: false);
+    // a change that is not the window's own (loading the config, a suggestion) is the user's: typed
+    // and picked paths alike must survive a later switch of the browser family
+    private void OnFolderChanged(object sender, TextChangedEventArgs e)
+    {
+        _folderTouched |= !_loading && !_refreshing;
+        RefreshState(kindChanged: false);
+    }
 
     private void OnShortcutToggled(object sender, RoutedEventArgs e) => RefreshState(kindChanged: false);
 
-    private void OnShortcutPathChanged(object sender, TextChangedEventArgs e) => RefreshState(kindChanged: false);
+    private void OnShortcutPathChanged(object sender, TextChangedEventArgs e)
+    {
+        _shortcutTouched |= !_loading && !_refreshing;
+        RefreshState(kindChanged: false);
+    }
 
     /// <summary>Everything the window shows about the future profile is recomputed here.</summary>
     private void RefreshState(bool kindChanged)

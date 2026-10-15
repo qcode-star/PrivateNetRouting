@@ -54,6 +54,12 @@
     <s:String x:Key="Main.Chain.Keeper.Running">running</s:String>
     <s:String x:Key="Main.Chain.Keeper.Down">down</s:String>
     <s:String x:Key="Main.Chain.Node.NoResponse">no response</s:String>
+    <s:String x:Key="Main.Chain.Node.Running">running</s:String>
+    <s:String x:Key="Main.Chain.Node.Stopped">stopped</s:String>
+    <s:String x:Key="Main.Chain.Node.Starting">starting</s:String>
+    <s:String x:Key="Main.Chain.Node.NeedsLogin">needs login</s:String>
+    <s:String x:Key="Main.Chain.Node.NeedsMachineAuth">needs approval</s:String>
+    <s:String x:Key="Main.Chain.Node.NoState">no state</s:String>
     <s:String x:Key="Main.Chain.Proxy.Running">running</s:String>
     <s:String x:Key="Main.Chain.Proxy.Stopped">stopped</s:String>
     <s:String x:Key="Main.Chain.Health.Ok">ok</s:String>
@@ -201,6 +207,7 @@
     <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json was not found</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true, .env proxy is up to date</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.Unset">unset</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (expected true)</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml and .env were not found</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.EnvStale">Codex: .env proxy is stale or missing</s:String>
@@ -317,6 +324,8 @@
     <!-- Application-level errors (the global exception net and the startup failure) -->
     <s:String x:Key="App.Error.Title">PrivateNetRouting</s:String>
     <s:String x:Key="App.Error.UnhandledFmt">An unexpected error occurred: {0}&#10;&#10;The application keeps running; the details are in the log.</s:String>
+    <s:String x:Key="App.Error.ExitStopFmt">The chain could not be stopped before exit: {0}&#10;&#10;Parts of it may still be running; check with "pnr chain status" and stop it with "pnr chain down".</s:String>
+    <s:String x:Key="App.Error.ExitDetachFmt">The proxy could not be handed over to a background worker: {0}&#10;&#10;The proxy stopped with the application, so Claude and Codex lose their connection until the chain is raised again.</s:String>
     <s:String x:Key="App.Error.StartupFmt">PrivateNetRouting cannot start: {0}&#10;&#10;Check the configuration file: {1}</s:String>
 
     <!-- App self-update (the help menu item and the one-time start check) -->
@@ -337,4 +346,5 @@
     <s:String x:Key="Diag.Section.health">Health</s:String>
     <s:String x:Key="Diag.Section.guards">Guards</s:String>
     <s:String x:Key="Diag.Section.watchdog">Idle supervisor</s:String>
+    <s:String x:Key="Diag.Section.logs">Logs</s:String>
 </ResourceDictionary>
