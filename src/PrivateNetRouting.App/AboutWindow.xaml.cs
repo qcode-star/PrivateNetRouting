@@ -46,8 +46,18 @@ public partial class AboutWindow : Window
     private static string AssemblyVersion() =>
         typeof(AboutWindow).Assembly.GetName().Version?.ToString() ?? "?";
 
-    private void OnOpenSite(object sender, RoutedEventArgs e) =>
-        Process.Start(new ProcessStartInfo(HomePageUrl) { UseShellExecute = true });
+    private void OnOpenSite(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(HomePageUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // no default browser registered: say so instead of dropping out of the click handler
+            MessageBox.Show(this, ex.Message, Loc.S("App.Error.Title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 }

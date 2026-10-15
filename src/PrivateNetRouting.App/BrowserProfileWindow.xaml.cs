@@ -256,9 +256,18 @@ public partial class BrowserProfileWindow : Window
             return (null, null);
         }
 
-        if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any())
+        try
         {
-            return (null, Loc.F("BrowserProfile.FolderNotEmptyFmt", full));
+            if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any())
+            {
+                return (null, Loc.F("BrowserProfile.FolderNotEmptyFmt", full));
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // this runs on every keystroke of the folder box: a folder we cannot read is a
+            // reason to refuse it, not an exception out of a TextChanged handler
+            return (ex.Message, null);
         }
 
         return (null, null);

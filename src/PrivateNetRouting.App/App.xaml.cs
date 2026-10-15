@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
@@ -45,6 +46,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        InstallGlobalExceptionHandlers();
 
         // detached proxy worker (spawned by the chain supervisor): no UI and no
         // single instance — lives until the chain shutdown kills it
@@ -126,9 +128,29 @@ public partial class App : Application
             Shutdown();
         };
 
-        var config = AppConfigStore.LoadOrCreate();
-        Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
-        _runtime = ProxyRuntime.FromConfig(config);
+        AppConfig config;
+        try
+        {
+            // the system language first: a startup error below has to be readable even when the
+            // config (and with it the configured language) cannot be loaded
+            Loc.Apply(AppLanguage.Resolve("auto", CultureInfo.CurrentUICulture));
+            config = AppConfigStore.LoadOrCreate();
+            Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
+            _runtime = ProxyRuntime.FromConfig(config);
+        }
+        catch (Exception ex)
+        {
+            // a malformed config or endpoint: without this the shortcut would just "do nothing"
+            LogUnhandled("startup", ex);
+            MessageBox.Show(
+                Loc.F("App.Error.StartupFmt", ex.Message, AppConfigStore.GetDefaultConfigPath()),
+                Loc.S("App.Error.Title"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
         // opening the window raises nothing: without the chain the proxy is unusable (its SOCKS5
         // upstream is down), so an auto-start would only produce a guaranteed-failing CONNECT
         // check; the proxy comes up as part of the chain (chain up / launches / update)
@@ -216,6 +238,84 @@ public partial class App : Application
                 : ElevatedChainCommands.Execute(command1, resultFile))
             .GetAwaiter().GetResult();
         return true;
+    }
+
+    /// <summary>
+    /// Safety net for everything a handler does not catch itself. An exception escaping a UI
+    /// handler would otherwise end the process — together with the in-process forward proxy (all
+    /// Claude/Codex traffic drops) — and leave a ghost tray icon. The dispatcher exception is
+    /// logged, shown once, and swallowed: the application keeps running. Exceptions the runtime
+    /// cannot let us survive (a crash on another thread) are logged before the process goes.
+    /// </summary>
+    private void InstallGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            LogUnhandled("ui", args.Exception);
+            args.Handled = true;
+            ShowUnhandledOnce(args.Exception);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            LogUnhandled("domain", args.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            LogUnhandled("task", args.Exception);
+            args.SetObserved();
+        };
+    }
+
+    private const int ErrorDialogMinGapSeconds = 60;
+    private bool _errorDialogOpen;
+    private DateTime _lastErrorDialog = DateTime.MinValue;
+
+    /// <summary>One dialog at a time and at most one a minute: a timer-driven handler that throws on every tick must not bury the owner in dialogs (every occurrence is in the log).</summary>
+    private void ShowUnhandledOnce(Exception ex)
+    {
+        if (_errorDialogOpen || (DateTime.UtcNow - _lastErrorDialog).TotalSeconds < ErrorDialogMinGapSeconds)
+        {
+            return;
+        }
+
+        _errorDialogOpen = true;
+        try
+        {
+            MessageBox.Show(
+                Loc.F("App.Error.UnhandledFmt", ex.Message),
+                Loc.S("App.Error.Title"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _errorDialogOpen = false;
+            _lastErrorDialog = DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// To the application log when the runtime exists, otherwise (a startup failure, a crash
+    /// before the runtime is built) to a small fallback file in the default log folder. Never throws.
+    /// </summary>
+    private void LogUnhandled(string source, Exception? ex)
+    {
+        var text = $"unhandled exception ({source}): {ex}";
+        try
+        {
+            if (_runtime is not null)
+            {
+                _runtime.Log.Error(text);
+                return;
+            }
+
+            var folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrivateNetRouting", "logs");
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(Path.Combine(folder, "app-crash.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // the safety net itself must not fail the application
+        }
     }
 
     private static EventWaitHandle CreateSignal(string name) =>
