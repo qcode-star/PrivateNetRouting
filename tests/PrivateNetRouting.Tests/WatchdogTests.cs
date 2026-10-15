@@ -386,7 +386,8 @@ public class WatchdogTests : IDisposable
             }
 
             events.Add("wsl.stop:" + arguments[1]);
-            Assert.Equal(["-d", "--", "bash", "-s"], [arguments[0], arguments[2], arguments[3], arguments[4]]);
+            // root: the app hosts of any user must be visible and signalable
+            Assert.Equal(["-d", "-u", "root", "--", "bash", "-s"], [arguments[0], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]]);
             return Task.FromResult(BashResponse);
         }
     }

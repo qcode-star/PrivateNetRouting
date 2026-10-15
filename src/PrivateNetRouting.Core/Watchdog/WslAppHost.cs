@@ -81,7 +81,7 @@ public sealed class WslProcessRunner : IWslProcessRunner
 }
 
 /// <summary>
-/// Stopper via `wsl.exe -d &lt;distro&gt; -- bash -s`: first the running distros are listed
+/// Stopper via `wsl.exe -d &lt;distro&gt; -u root -- bash -s`: first the running distros are listed
 /// (`--list --running`, wsl.exe output is UTF-16LE with possible NULs) and intersected with the
 /// configured names — a distro that is not running is skipped without being started. In every
 /// running configured distro the stop script runs once (the Claude and Codex passes are gated
@@ -115,7 +115,9 @@ public sealed class WslAppHostStopper(
         var state = WslHostState.None;
         foreach (var distro in targets)
         {
-            var output = await wsl.RunAsync(["-d", distro, "--", "bash", "-s"], Script(stopClaude, stopCodex), Encoding.UTF8, ct);
+            // as root, like the guard: another default user cannot read /proc/*/environ or the exe
+            // links of the app hosts, nor signal them, and the stop would silently find nothing
+            var output = await wsl.RunAsync(["-d", distro, "-u", "root", "--", "bash", "-s"], Script(stopClaude, stopCodex), Encoding.UTF8, ct);
             var result = Parse(output);
             details.Add($"[{distro}] {result.State}: {result.Detail}");
             if (result.State == WslHostState.Stuck || (result.State == WslHostState.Stopped && state == WslHostState.None))
