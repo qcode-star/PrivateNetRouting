@@ -222,7 +222,7 @@ public sealed class ClaudeUpdater(
             log.Warn("updater: version did not change after install — check the AppX journal");
         }
 
-        if (!options.KeepFile)
+        if (!options.KeepFile && IsInCache(file))
         {
             try
             {
@@ -236,6 +236,13 @@ public sealed class ClaudeUpdater(
         }
 
         return after;
+    }
+
+    /// <summary>Only a package the updater downloaded itself is ours to delete — never a file the user pointed at.</summary>
+    private bool IsInCache(string file)
+    {
+        var cache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(config.Claude.Update.CacheDir));
+        return Path.GetFullPath(file).StartsWith(cache + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Full cycle without a pause (CLI): check -> chain -> download -> install.</summary>

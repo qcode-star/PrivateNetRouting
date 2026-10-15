@@ -265,6 +265,17 @@ public class UpdaterTests : IDisposable
     }
 
     [Fact]
+    public async Task InstallNeverDeletesAFileOutsideTheCache()
+    {
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher); // lives under the test root, not in CacheDir
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.True(File.Exists(package));
+    }
+
+    [Fact]
     public async Task KeepFileLeavesPackageInCache()
     {
         var updater = Create();
