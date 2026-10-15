@@ -30,10 +30,14 @@ public partial class App : Application
 {
     private const string MutexName = @"Local\PrivateNetRouting.SingleInstance";
     private const string ActivateEventName = @"Local\PrivateNetRouting.Activate";
+    private const string LaunchEventName = @"Local\PrivateNetRouting.Launch";
+    private const string LaunchBrowserEventName = @"Local\PrivateNetRouting.LaunchBrowser";
 
     private Mutex? _singleInstance;
     private EventWaitHandle? _activate;
-    private RegisteredWaitHandle? _activationSubscription;
+    private EventWaitHandle? _launchSignal;
+    private EventWaitHandle? _launchBrowserSignal;
+    private readonly List<RegisteredWaitHandle> _subscriptions = [];
     private ProxyRuntime? _runtime;
     private TrayIcon? _tray;
     private bool _exiting;
@@ -71,22 +75,51 @@ public partial class App : Application
         var launchOnStart = e.Args.Contains("--launch", StringComparer.OrdinalIgnoreCase);
         var launchBrowserOnStart = e.Args.Contains("--launch-browser", StringComparer.OrdinalIgnoreCase);
 
+        // the events are created (or opened) BEFORE the mutex is taken: a second instance that
+        // lands while the first one is still starting finds the event and its signal is kept for
+        // the first instance's wait (a named event lives while any handle to it is open, and the
+        // first instance holds its handles from before it owns the mutex)
+        _activate = CreateSignal(ActivateEventName);
+        _launchSignal = CreateSignal(LaunchEventName);
+        _launchBrowserSignal = CreateSignal(LaunchBrowserEventName);
+
         _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var firstInstance);
         if (!firstInstance)
         {
-            EventWaitHandle.TryOpenExisting(ActivateEventName, out var existing);
-            existing?.Set();
+            // hand the verb over to the running instance: a shortcut launch must start Claude or
+            // the browser there, not just surface the window
+            if (launchOnStart)
+            {
+                _launchSignal.Set();
+            }
+
+            if (launchBrowserOnStart)
+            {
+                _launchBrowserSignal.Set();
+            }
+
+            if (!launchOnStart && !launchBrowserOnStart)
+            {
+                _activate.Set();
+            }
+
             Shutdown();
             return;
         }
 
-        _activate = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
-        _activationSubscription = ThreadPool.RegisterWaitForSingleObject(
-            _activate,
-            callBack: (_, _) => Dispatcher.BeginInvoke(ActivateMainWindow),
-            state: null,
-            millisecondsTimeOutInterval: -1,
-            executeOnlyOnce: false);
+        // the callbacks only queue work to the dispatcher, which runs it after OnStartup has
+        // finished — the main window exists by then
+        _subscriptions.Add(Subscribe(_activate, ActivateMainWindow));
+        _subscriptions.Add(Subscribe(_launchSignal, () =>
+        {
+            ActivateMainWindow();
+            (MainWindow as MainWindow)?.LaunchFromShortcut();
+        }));
+        _subscriptions.Add(Subscribe(_launchBrowserSignal, () =>
+        {
+            ActivateMainWindow();
+            (MainWindow as MainWindow)?.LaunchBrowserFromShortcut();
+        }));
         SessionEnding += (_, _) =>
         {
             _exiting = true;
@@ -184,6 +217,17 @@ public partial class App : Application
             .GetAwaiter().GetResult();
         return true;
     }
+
+    private static EventWaitHandle CreateSignal(string name) =>
+        new(false, EventResetMode.AutoReset, name);
+
+    private RegisteredWaitHandle Subscribe(EventWaitHandle signal, Action action) =>
+        ThreadPool.RegisterWaitForSingleObject(
+            signal,
+            callBack: (_, _) => Dispatcher.BeginInvoke(action),
+            state: null,
+            millisecondsTimeOutInterval: -1,
+            executeOnlyOnce: false);
 
     private void ActivateMainWindow()
     {
@@ -326,8 +370,11 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _activationSubscription?.Unregister(null);
-        _activate?.Dispose();
+        foreach (var subscription in _subscriptions)
+        {
+            subscription.Unregister(null);
+        }
+
         _tray?.Dispose();
         // runtime shutdown — on the pool: await continuations inside DisposeAsync must not
         // land in the dispatcher queue, whose thread is blocking here as well
@@ -336,7 +383,12 @@ public partial class App : Application
             Task.Run(() => _runtime.DisposeAsync().AsTask()).GetAwaiter().GetResult();
         }
 
+        // the mutex goes first, the events last: a launch signalled while this instance still
+        // owned the mutex finds the event alive
         _singleInstance?.Dispose();
+        _activate?.Dispose();
+        _launchSignal?.Dispose();
+        _launchBrowserSignal?.Dispose();
         base.OnExit(e);
     }
 }
