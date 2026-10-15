@@ -428,8 +428,10 @@ From the repository root, `dotnet build` / `dotnet test` act on all four project
 style; run it before committing.
 
 Commits: in small steps, the message in the infinitive ("Add forward proxy core", "Fix chain card
-focus"). Branching: `main` is the buildable state; features go in short branches or straight into
-`main` (a personal repository, the main thing is not to break the build).
+focus"). No attribution trailers: a commit message never gets Co-Authored-By or "Generated with …"
+lines (rule #2 — the repository stays anonymous; the Claude Code setting is
+`includeCoAuthoredBy: false`). Branching: `main` is the buildable state; features go in short
+branches or straight into `main` (a personal repository, the main thing is not to break the build).
 
 ## Code conventions
 
