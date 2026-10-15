@@ -329,6 +329,23 @@ public sealed class WslConfigGuard(
             fi
             cp -p "$f" "$slot" && touch "$slot" && echo "$prefix=$slot"
         }
+        pnr_put() {
+            # pnr_put <new> <dest>: replaces <dest> with the payload file. The payload must be
+            # non-empty (a failed decode or a full /tmp leaves an empty one), and the write goes
+            # through a temp file next to <dest>, so a failure never leaves a truncated file
+            # behind; mode and owner of an existing file are kept, a symlink is followed.
+            local new="$1" dest tmp
+            dest=$(readlink -f "$2" 2>/dev/null)
+            [ -n "$dest" ] || dest="$2"
+            [ -s "$new" ] || { echo "FAILED: empty payload for $2"; return 1; }
+            tmp="$dest.pnr-tmp"
+            cat "$new" > "$tmp" || { rm -f "$tmp"; echo "FAILED: cannot write $tmp"; return 1; }
+            if [ -f "$dest" ]; then
+                chmod --reference="$dest" "$tmp" 2>/dev/null
+                chown --reference="$dest" "$tmp" 2>/dev/null
+            fi
+            mv -f "$tmp" "$dest" || { rm -f "$tmp"; echo "FAILED: cannot replace $dest"; return 1; }
+        }
         """;
 
     private async Task<WslDistroSyncResult> SyncDistroAsync(WslDistroConfig distro, System.Net.IPAddress? gateway, CancellationToken ct)
@@ -391,13 +408,14 @@ public sealed class WslConfigGuard(
             var settingsScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 SETTINGS="$HOME/.claude/settings.json"
+                mkdir -p "$HOME/.claude" || { echo "FAILED: cannot create $HOME/.claude"; exit 1; }
                 NEW="/tmp/.pnr-settings-{{stamp}}"
-                echo '{{DistroPayload(json)}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(json)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 if [ -f "$SETTINGS" ] && cmp -s "$NEW" "$SETTINGS"; then
                     echo SETTINGS=unchanged
                 else
-                    if [ -f "$SETTINGS" ]; then pnr_bak "$SETTINGS" BACKUP; fi
-                    cat "$NEW" > "$SETTINGS"
+                    if [ -f "$SETTINGS" ]; then pnr_bak "$SETTINGS" BACKUP || { echo "FAILED: backup of $SETTINGS"; exit 1; }; fi
+                    pnr_put "$NEW" "$SETTINGS" || exit 1
                     echo SETTINGS=written
                 fi
                 rm -f "$NEW"
@@ -414,13 +432,13 @@ public sealed class WslConfigGuard(
                 {{PnrBakFn}}
                 SCRIPT="{{scriptPath}}"
                 NEW="/tmp/.pnr-startup-{{stamp}}"
-                echo '{{DistroPayload(scriptContent)}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(scriptContent)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$SCRIPT")"
                 if [ -f "$SCRIPT" ] && cmp -s "$NEW" "$SCRIPT"; then
                     echo SCRIPT=unchanged
                 else
-                    if [ -f "$SCRIPT" ]; then pnr_bak "$SCRIPT" BACKUP; fi
-                    cat "$NEW" > "$SCRIPT"
+                    if [ -f "$SCRIPT" ]; then pnr_bak "$SCRIPT" BACKUP || { echo "FAILED: backup of $SCRIPT"; exit 1; }; fi
+                    pnr_put "$NEW" "$SCRIPT" || exit 1
                     chmod 755 "$SCRIPT"
                     echo SCRIPT=written
                 fi
@@ -449,13 +467,13 @@ public sealed class WslConfigGuard(
                 {{PnrBakFn}}
                 ENVFILE="{{envPath}}"
                 NEW="/tmp/.pnr-codexenv-{{stamp}}"
-                echo '{{DistroPayload(envContent)}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(envContent)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$ENVFILE")"
                 if [ -f "$ENVFILE" ] && cmp -s "$NEW" "$ENVFILE"; then
                     echo ENVFILE=unchanged
                 else
-                    if [ -f "$ENVFILE" ]; then pnr_bak "$ENVFILE" BACKUP; fi
-                    cat "$NEW" > "$ENVFILE"
+                    if [ -f "$ENVFILE" ]; then pnr_bak "$ENVFILE" BACKUP || { echo "FAILED: backup of $ENVFILE"; exit 1; }; fi
+                    pnr_put "$NEW" "$ENVFILE" || exit 1
                     chmod 644 "$ENVFILE"
                     echo ENVFILE=written
                 fi
@@ -1020,13 +1038,13 @@ public sealed class WslConfigGuard(
             {{PnrBakFn}}
             RUNNER="{{runnerPath}}"
             NEW="/tmp/.pnr-runner-{{stamp}}"
-            echo '{{DistroPayload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW"
+            echo '{{DistroPayload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
             mkdir -p "$(dirname "$RUNNER")"
             if [ -f "$RUNNER" ] && cmp -s "$NEW" "$RUNNER"; then
                 echo RUNNER=unchanged
             else
-                if [ -f "$RUNNER" ]; then pnr_bak "$RUNNER" BACKUP_RUNNER; fi
-                cat "$NEW" > "$RUNNER"
+                if [ -f "$RUNNER" ]; then pnr_bak "$RUNNER" BACKUP_RUNNER || { echo "FAILED: backup of $RUNNER"; exit 1; }; fi
+                pnr_put "$NEW" "$RUNNER" || exit 1
                 chmod 755 "$RUNNER"
                 echo RUNNER=written
             fi
@@ -1040,13 +1058,13 @@ public sealed class WslConfigGuard(
             sb.Append($$"""
                 USERCMD="{{userCommandPath}}"
                 NEW="/tmp/.pnr-usercmd-{{stamp}}"
-                echo '{{DistroPayload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$USERCMD")"
                 if [ -f "$USERCMD" ] && cmp -s "$NEW" "$USERCMD"; then
                     echo USERCMD=unchanged
                 else
-                    if [ -f "$USERCMD" ]; then pnr_bak "$USERCMD" BACKUP_USERCMD; fi
-                    cat "$NEW" > "$USERCMD"
+                    if [ -f "$USERCMD" ]; then pnr_bak "$USERCMD" BACKUP_USERCMD || { echo "FAILED: backup of $USERCMD"; exit 1; }; fi
+                    pnr_put "$NEW" "$USERCMD" || exit 1
                     chmod 755 "$USERCMD"
                     echo USERCMD=written
                 fi
@@ -1061,12 +1079,12 @@ public sealed class WslConfigGuard(
             sb.Append($$"""
                 WSLCONF="/etc/wsl.conf"
                 NEW="/tmp/.pnr-wslconf-{{stamp}}"
-                echo '{{DistroPayload(wslConfText)}}' | base64 -d > "$NEW"
+                echo '{{DistroPayload(wslConfText)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 if [ -f "$WSLCONF" ] && cmp -s "$NEW" "$WSLCONF"; then
                     echo WSLCONF=unchanged
                 else
-                    if [ -f "$WSLCONF" ]; then pnr_bak "$WSLCONF" BACKUP_WSLCONF; fi
-                    cat "$NEW" > "$WSLCONF"
+                    if [ -f "$WSLCONF" ]; then pnr_bak "$WSLCONF" BACKUP_WSLCONF || { echo "FAILED: backup of $WSLCONF"; exit 1; }; fi
+                    pnr_put "$NEW" "$WSLCONF" || exit 1
                     chmod 644 "$WSLCONF"
                     echo WSLCONF=written
                 fi

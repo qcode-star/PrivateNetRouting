@@ -1361,6 +1361,45 @@ public class GuardTests : IDisposable
         Assert.EndsWith(@"drivers\etc\hosts", config.Guard.HostsFile, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The scripts end with PNR=ok only when every write was verified: a failed decode, an empty
+    /// payload, a failed backup or a failed replacement stops them with a FAILED line instead of
+    /// truncating a settings file and reporting success.
+    /// </summary>
+    [Fact]
+    public async Task WslWriteScriptsVerifyEveryWriteAndNeverOverwriteAfterAFailedBackup()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nWSLCONF=written\nSETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.SyncAsync(CancellationToken.None);
+
+        Assert.Equal(4, runner.Scripts.Count);
+        foreach (var (_, _, script) in runner.Scripts)
+        {
+            Assert.Contains("pnr_put()", script);
+            Assert.DoesNotContain("cat \"$NEW\" >", script); // no unverified truncate-and-write
+            Assert.All(
+                script.Split('\n').Where(l => l.Contains("base64 -d")),
+                l => Assert.Contains("|| { echo \"FAILED: cannot write the payload to /tmp\"; exit 1; }", l));
+            Assert.All(
+                script.Split('\n').Where(l => l.Contains("then pnr_bak ")),
+                l => Assert.Contains("|| { echo \"FAILED: backup of", l));
+            Assert.Equal(
+                script.Split('\n').Count(l => l.Trim().StartsWith("pnr_put \"$NEW\"", StringComparison.Ordinal)),
+                script.Split('\n').Count(l => l.Contains("pnr_put \"$NEW\"") && l.Contains("|| exit 1")));
+        }
+
+        // the user's settings directory is created by the script itself
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("mkdir -p \"$HOME/.claude\" ||"));
+    }
+
     [Fact]
     public async Task WslProbeResolvesTheUsersRealHome()
     {
