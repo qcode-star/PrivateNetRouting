@@ -94,7 +94,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         FakeFinderById processes,
         Func<string, string?, string, int?>? spawn = null,
         Action<int>? kill = null,
-        string exePath = @"C:\app\pnr.exe") =>
+        string exePath = @"C:\app\pnr.exe",
+        IProxyStopChannel? channel = null) =>
         new(
             config,
             inner,
@@ -104,7 +105,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             new FileLog(Path.Combine(_tempDir, $"supervisor-{Guid.NewGuid():N}.log")),
             spawn,
             kill,
-            () => exePath);
+            () => exePath,
+            stopChannel: channel);
 
     [Fact]
     public async Task Start_InProcess_WhenDetachedOffAndPortFree()
@@ -349,6 +351,131 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         await supervisor.StopAsync();
 
         Assert.Equal([42], kills);
+    }
+
+    /// <summary>
+    /// The idle stopper is a separate process and the GUI hosts the proxy in-process: it asks the
+    /// owner through the stop channel instead of leaving a half-stopped chain behind.
+    /// </summary>
+    [Fact]
+    public async Task Stop_AsksAnInProcessOwnerToStopThroughTheChannel()
+    {
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18082] = [Entry(7, "PrivateNetRouting.App")];
+        var processes = new FakeFinderById { CommandLineById = { { 7, @"""C:\app\PrivateNetRouting.App.exe""" } } };
+        var channel = new FakeStopChannel { OnRequest = () => ports.Listening = false };
+        var kills = new List<int>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082" },
+            new FakeProxyInstance(),
+            ports,
+            tcp,
+            processes,
+            kill: kills.Add,
+            channel: channel);
+
+        await supervisor.StopAsync();
+
+        Assert.Equal([18082], channel.Requested);
+        Assert.Empty(kills); // the owner is asked, never killed
+        Assert.False(ports.Listening);
+    }
+
+    [Fact]
+    public async Task Stop_WithNoOwnerListeningOnTheChannelStillLeavesAForeignOwnerAlone()
+    {
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18082] = [Entry(7, "somebody-else")];
+        var channel = new FakeStopChannel { Answers = false };
+        var supervisor = Make(
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082", WorkerStopWaitSeconds = 0 },
+            new FakeProxyInstance(),
+            ports,
+            tcp,
+            new FakeFinderById(),
+            channel: channel);
+
+        await supervisor.StopAsync();
+
+        Assert.Equal([18082], channel.Requested);
+        Assert.True(ports.Listening);
+    }
+
+    /// <summary>An in-process proxy listens for stop requests while it runs and stops itself on one.</summary>
+    [Fact]
+    public async Task InProcessProxyStopsItselfOnAStopRequest()
+    {
+        var inner = new FakeProxyInstance();
+        var channel = new FakeStopChannel();
+        var supervisor = Make(new ForwardProxyConfig(), inner, new FakePortProbe(), new FakeTcpTable(), new FakeFinderById(), channel: channel);
+        await supervisor.StartAsync(CancellationToken.None);
+        Assert.NotNull(channel.Handler);
+
+        await channel.Handler!();
+
+        Assert.Equal(1, inner.StopCount);
+        Assert.True(channel.ListenerDisposed); // one request is enough, the listening ends with the listener
+
+        // a normal stop ends the listening too
+        var inner2 = new FakeProxyInstance();
+        var channel2 = new FakeStopChannel();
+        var second = Make(new ForwardProxyConfig(), inner2, new FakePortProbe(), new FakeTcpTable(), new FakeFinderById(), channel: channel2);
+        await second.StartAsync(CancellationToken.None);
+        await second.StopAsync();
+        Assert.True(channel2.ListenerDisposed);
+    }
+
+    [Fact]
+    public async Task NamedEventChannelDeliversARequestToTheListeningOwner()
+    {
+        const int port = 59871; // not a real listener: the channel is keyed by number only
+        var channel = new NamedEventProxyStopChannel();
+        Assert.False(channel.Request(port)); // nobody listens yet
+        var requested = new TaskCompletionSource();
+        using (channel.Listen(port, () =>
+        {
+            requested.TrySetResult();
+            return Task.CompletedTask;
+        }))
+        {
+            Assert.True(channel.Request(port));
+            await requested.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.False(channel.Request(port)); // the listening ended with the listener
+    }
+
+    private sealed class FakeStopChannel : IProxyStopChannel
+    {
+        public List<int> Requested { get; } = [];
+
+        public bool Answers { get; init; } = true;
+
+        public Action? OnRequest { get; init; }
+
+        public Func<Task>? Handler { get; private set; }
+
+        public bool ListenerDisposed { get; private set; }
+
+        public IDisposable Listen(int port, Func<Task> onStopRequested)
+        {
+            Handler = onStopRequested;
+            return new Disposer(this);
+        }
+
+        public bool Request(int port)
+        {
+            Requested.Add(port);
+            OnRequest?.Invoke();
+            return Answers;
+        }
+
+        private sealed class Disposer(FakeStopChannel owner) : IDisposable
+        {
+            public void Dispose() => owner.ListenerDisposed = true;
+        }
     }
 
     [Fact]

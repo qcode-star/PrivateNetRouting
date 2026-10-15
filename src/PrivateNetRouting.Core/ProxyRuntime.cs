@@ -220,7 +220,8 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var proxyControl = new ForwardProxySupervisor(fp, proxy, ports, tcpTable, processes, log,
             skipped: skipProxy,
             skippedAppsEndpoint: skipProxy ? AppProxyEndpoint.Address(config) : null,
-            skippedReason: skipProxy ? SkipReason(config) : null);
+            skippedReason: skipProxy ? SkipReason(config) : null,
+            stopChannel: new NamedEventProxyStopChannel());
         var watchdogLog = NewLog("watchdog.log");
         var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
         var chainLog = NewLog("chain.log");

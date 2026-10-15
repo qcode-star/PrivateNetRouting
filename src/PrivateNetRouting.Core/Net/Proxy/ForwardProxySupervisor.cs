@@ -32,7 +32,8 @@ public sealed class ForwardProxySupervisor(
     Func<string?>? currentExePath = null,
     bool skipped = false,
     string? skippedAppsEndpoint = null,
-    string? skippedReason = null) : IProxyControl, IProxyStatistics
+    string? skippedReason = null,
+    IProxyStopChannel? stopChannel = null) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
@@ -91,6 +92,40 @@ public sealed class ForwardProxySupervisor(
         }
 
         await inner.StartAsync(ct).ConfigureAwait(false);
+        StartListeningForStopRequests();
+    }
+
+    private IDisposable? _stopListener;
+
+    /// <summary>
+    /// An in-process listener can be stopped only from inside this process, but the idle stopper
+    /// is a separate process: it asks through the stop channel (see StopAsync) and this process
+    /// stops its own listener.
+    /// </summary>
+    private void StartListeningForStopRequests()
+    {
+        StopListeningForStopRequests();
+        _stopListener = stopChannel?.Listen(Port, HandleStopRequestAsync);
+    }
+
+    private void StopListeningForStopRequests()
+    {
+        _stopListener?.Dispose();
+        _stopListener = null;
+    }
+
+    private async Task HandleStopRequestAsync()
+    {
+        try
+        {
+            log.Info("forward-proxy: another process (the idle stopper) asked this one to stop its listener");
+            StopListeningForStopRequests();
+            await inner!.StopAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"forward-proxy: stopping the listener on request failed: {ex.Message}");
+        }
     }
 
     /// <summary>Bring-up of the detached worker (the same executable with the marker, via cmd with file redirection) and waiting for its listener.</summary>
@@ -145,6 +180,7 @@ public sealed class ForwardProxySupervisor(
         }
 
         log.Info("forward-proxy: handing the listener over to a detached worker");
+        StopListeningForStopRequests();
         await inner.StopAsync().ConfigureAwait(false);
         await StartWorkerAsync(ct).ConfigureAwait(false);
     }
@@ -158,6 +194,7 @@ public sealed class ForwardProxySupervisor(
 
         if (inner!.IsRunning)
         {
+            StopListeningForStopRequests();
             await inner.StopAsync().ConfigureAwait(false);
             return;
         }
@@ -171,6 +208,14 @@ public sealed class ForwardProxySupervisor(
         var workerPids = owners.Select(owner => owner.ProcessId).Distinct().Where(IsOurWorker).ToList();
         if (workerPids.Count == 0)
         {
+            if (stopChannel is not null && stopChannel.Request(Port))
+            {
+                // an in-process owner of ours (the GUI in the tray, a foreground pnr proxy)
+                log.Info($"forward-proxy: port {Port} is held by {DescribeOwners(owners)} — asked it to stop its listener");
+                await WaitForPortReleaseAsync("in-process owner stopped").ConfigureAwait(false);
+                return;
+            }
+
             log.Warn($"forward-proxy: port {Port} is held by {DescribeOwners(owners)} — not our worker, leaving it running");
             return;
         }
@@ -188,19 +233,24 @@ public sealed class ForwardProxySupervisor(
             }
         }
 
+        await WaitForPortReleaseAsync("worker stopped").ConfigureAwait(false);
+    }
+
+    private async Task WaitForPortReleaseAsync(string stoppedMessage)
+    {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.WorkerStopWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
             if (!ports.IsListening(Port))
             {
-                log.Info("forward-proxy: worker stopped, port released");
+                log.Info($"forward-proxy: {stoppedMessage}, port released");
                 return;
             }
 
             await Task.Delay(250).ConfigureAwait(false);
         }
 
-        log.Warn($"forward-proxy: port {Port} is still listening {config.WorkerStopWaitSeconds}s after the worker was killed");
+        log.Warn($"forward-proxy: port {Port} is still listening {config.WorkerStopWaitSeconds}s after the stop was requested");
     }
 
     /// <summary>
