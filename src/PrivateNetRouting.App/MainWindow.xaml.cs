@@ -64,6 +64,13 @@ public partial class MainWindow : Window
     private ChainState? _lastChainState;
     private GuardSnapshot? _lastGuards;
     private bool _guardBusy;
+    private int _chainEpoch; // bumped when an operation begins and ends: a snapshot taken across a bump is stale
+    private int _chainRefreshSeq; // issue order of the chain snapshots
+    private int _chainAppliedSeq; // the newest snapshot already painted — an older one finishing late is dropped
+    private bool _chainPolling; // a timer poll is in flight — the next tick waits for it
+    private int _guardEpoch;
+    private int _guardRefreshSeq;
+    private int _guardAppliedSeq;
     private bool _chainBusy;
     private bool _chainBusyCancellable; // the running chain operation is a bring-up — Stop cancels it
     private bool _chainBusyBringingUp; // the busy operation raises the chain — the rail speaks "starting", a stop speaks "stopping"
@@ -123,8 +130,21 @@ public partial class MainWindow : Window
         _chainTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         _chainTimer.Tick += async (_, _) =>
         {
-            await RefreshChainAsync();
-            await RefreshIdleStopAsync();
+            if (_chainPolling)
+            {
+                return; // the CLI timeout (20 s) outlives the tick (10 s) — do not stack polls
+            }
+
+            _chainPolling = true;
+            try
+            {
+                await RefreshChainAsync();
+                await RefreshIdleStopAsync();
+            }
+            finally
+            {
+                _chainPolling = false;
+            }
         };
         _chainTimer.Start();
         _ = RefreshChainAsync();
@@ -221,7 +241,7 @@ public partial class MainWindow : Window
         ApplyCardLayout(); // the toggle tooltips and the guard-all word follow the language
         UpstreamListenersLabel.Text = Loc.S(_externalUpstream ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Relabel();
-        if (_lastChainState is not null)
+        if (_lastChainState is not null && !_chainBusy && !_launchBusy) // a live operation owns the rail
         {
             RenderRail(_lastChainState);
         }
@@ -357,23 +377,26 @@ public partial class MainWindow : Window
             return; // an operation in flight owns the rail — a poll must not overwrite its progress
         }
 
+        var epoch = _chainEpoch;
+        var seq = ++_chainRefreshSeq;
         try
         {
             var state = await _runtime.Chain.GetStateAsync(CancellationToken.None);
-            if (_chainBusy || _launchBusy)
+            if (_chainBusy || _launchBusy || epoch != _chainEpoch || seq < _chainAppliedSeq)
             {
-                // an operation started while the snapshot was in flight — it owns the rail now,
-                // and the snapshot (taken before it) is stale
+                // an operation started (or started and finished) while the snapshot was in flight,
+                // or a newer snapshot is already painted — this one is stale
                 return;
             }
 
+            _chainAppliedSeq = seq;
             _lastChainState = state;
             _viewModel.UpdateChain(state);
             RenderRail(state);
         }
         catch (Exception ex)
         {
-            if (_chainBusy || _launchBusy)
+            if (_chainBusy || _launchBusy || epoch != _chainEpoch || seq < _chainAppliedSeq)
             {
                 return;
             }
@@ -513,6 +536,7 @@ public partial class MainWindow : Window
     /// <summary>The card shows a live operation: spinner, elapsed time and a line for the steps.</summary>
     private void BeginOperation()
     {
+        _chainEpoch++;
         ExpandChainCardForOperation();
         _busyWatch.Restart();
         BusyElapsed.Text = FormatElapsed(TimeSpan.Zero);
@@ -530,6 +554,7 @@ public partial class MainWindow : Window
 
     private void EndOperation()
     {
+        _chainEpoch++;
         _busyClock.Stop();
         BusySpinner.Visibility = Visibility.Collapsed;
         BusyElapsed.Visibility = Visibility.Collapsed;
@@ -551,13 +576,27 @@ public partial class MainWindow : Window
             return;
         }
 
+        var epoch = _guardEpoch;
+        var seq = ++_guardRefreshSeq;
         try
         {
-            _lastGuards = await _runtime.Guard.GetStatusAsync(CancellationToken.None);
+            var snapshot = await _runtime.Guard.GetStatusAsync(CancellationToken.None);
+            if (_guardBusy || epoch != _guardEpoch || seq < _guardAppliedSeq)
+            {
+                return; // a guard operation ran meanwhile, or a newer status is already painted
+            }
+
+            _guardAppliedSeq = seq;
+            _lastGuards = snapshot;
             RenderGuards();
         }
         catch (Exception ex)
         {
+            if (_guardBusy || epoch != _guardEpoch || seq < _guardAppliedSeq)
+            {
+                return; // stale — the failure belongs to a status nobody paints any more
+            }
+
             _lastGuards = null;
             BanDetail.Text = PolicyDetail.Text = SettingsDetail.Text = WslDetail.Text = ex.Message;
             SetGuardDots(GuardState.Unknown, GuardState.Unknown, GuardState.Unknown, GuardState.Unknown);
@@ -885,6 +924,7 @@ public partial class MainWindow : Window
         }
 
         _guardBusy = true;
+        _guardEpoch++;
         _viewModel.SetGuardBusy(true);
         _viewModel.SetCheckResult("Main.Guard.Busy");
         try
@@ -898,6 +938,7 @@ public partial class MainWindow : Window
         finally
         {
             _guardBusy = false;
+            _guardEpoch++;
             _viewModel.SetGuardBusy(false);
             await RefreshGuardsAsync();
         }
