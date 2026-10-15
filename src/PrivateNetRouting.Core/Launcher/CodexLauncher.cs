@@ -52,7 +52,7 @@ public sealed class CodexLauncher(
     private readonly RunningApp _running = new(
         processFinder,
         config.Codex.ProcessName,
-        config.Codex.PackageName,
+        [config.Codex.PackageName],
         AppProxyEndpoint.Url(config),
         appCloser ?? new WindowsRunningAppCloser(),
         log,

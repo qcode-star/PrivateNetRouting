@@ -323,7 +323,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new UpdateFeedUrlFinder(updaterHttp, config.Claude.Update, updaterLog),
             new FragmentDownloader(updaterHttp, config.Claude.Update, updaterLog),
             marker,
-            new RunningClaudeProcessSource(),
+            // the native Claude Code CLI is a claude.exe too: only the MSIX app's own processes
+            // (by the install path) may be closed and killed for the update
+            new RunningClaudeProcessSource(RunningApp.PackageInstallMarker(config.Claude.Update.PackageName)),
             updaterLog);
 
         // the Codex update goes through the Microsoft Store: the check and the install do not

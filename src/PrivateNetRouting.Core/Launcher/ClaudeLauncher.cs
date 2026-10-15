@@ -84,15 +84,20 @@ public sealed class ClaudeLauncher(
     private const string PolicyKey = @"SOFTWARE\Policies\Claude";
     private const string PolicyValue = "egressProxyUrl";
 
-    /// <summary>The launcher has no install path of its own to check against (unlike the Codex package name).</summary>
     private const string ProcessNamePart = "claude";
 
     private readonly Func<string?> _readEgressPolicy = readEgressPolicy ?? ReadEgressPolicyFromRegistry;
     private readonly Func<ProcessStartInfo, Process?> _startProcess = startProcess ?? (psi => Process.Start(psi));
+
+    /// <summary>
+    /// The native Claude Code CLI is a `claude.exe` as well, so the name alone does not identify
+    /// the Desktop app: its processes carry the MSIX install path, and the one the launcher
+    /// started itself carries the execution alias path.
+    /// </summary>
     private readonly RunningApp _running = new(
         processFinder,
         ProcessNamePart,
-        commandLineMarker: null,
+        [RunningApp.PackageInstallMarker(config.Claude.Update.PackageName), config.Claude.AliasPath],
         AppProxyEndpoint.Url(config),
         appCloser ?? new WindowsRunningAppCloser(),
         log,

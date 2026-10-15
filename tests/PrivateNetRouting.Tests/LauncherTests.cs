@@ -173,7 +173,7 @@ public class LauncherTests : IDisposable
     [Fact]
     public async Task ClaudeWithoutProxyFlagWarnsButLaunches()
     {
-        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe")];
+        _processes.Processes = [DesktopProcess(42)];
         var launcher = Create();
 
         await launcher.LaunchAsync(LauncherOptions.Default, null, CancellationToken.None);
@@ -185,7 +185,7 @@ public class LauncherTests : IDisposable
     [Fact]
     public async Task RestartClosesTheRunningClaudeBeforeStarting()
     {
-        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe")];
+        _processes.Processes = [DesktopProcess(42)];
         var closer = new FakeAppCloser { Alive = { 42 } };
         var launcher = Create(closer: closer);
 
@@ -201,7 +201,7 @@ public class LauncherTests : IDisposable
     [Fact]
     public async Task RunningClaudeWithOurProxyIsOnlyReported()
     {
-        _processes.Processes = [new FoundProcess(42, "claude-desktop.exe --proxy-server=http://127.0.0.1:18082")];
+        _processes.Processes = [DesktopProcess(42, " --proxy-server=http://127.0.0.1:18082")];
         var closer = new FakeAppCloser { Alive = { 42 } };
         var launcher = Create(closer: closer);
 
@@ -213,6 +213,36 @@ public class LauncherTests : IDisposable
         Assert.Single(_started);
         Assert.Contains("activates the existing window", ReadLog());
     }
+
+    [Fact]
+    public async Task ClaudeCodeCliIsNotMistakenForTheDesktopApp()
+    {
+        // the native Claude Code CLI is a claude.exe too: it must neither count as "already
+        // running" nor be closed by a restart
+        _processes.Processes = [new FoundProcess(77, @"C:\Users\someone\.local\bin\claude.exe --output-format stream-json")];
+        var closer = new FakeAppCloser { Alive = { 77 } };
+        var launcher = Create(closer: closer);
+
+        Assert.Equal(RunningAppState.NotRunning, launcher.InspectRunning().State);
+        await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        Assert.Empty(closer.GracefulCalls);
+        Assert.Contains(77, closer.Alive);
+        Assert.Single(_started);
+    }
+
+    [Fact]
+    public void TheProcessStartedThroughTheAliasCountsAsTheDesktopApp()
+    {
+        // the main process started through the execution alias carries the alias path, not the package path
+        _processes.Processes = [new FoundProcess(5, @"""C:\fake\claude.exe"" --proxy-server=http://127.0.0.1:18082")];
+        var launcher = Create();
+
+        Assert.Equal(RunningAppState.Proxied, launcher.InspectRunning().State);
+    }
+
+    private static FoundProcess DesktopProcess(int id, string args = "") =>
+        new(id, $@"""C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__abc\app\Claude.exe""{args}");
 
     // FileLog keeps the file open for writing, so read with ReadWrite sharing
     private string ReadLog()

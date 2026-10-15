@@ -97,14 +97,16 @@ public sealed record RunningAppCloseResult(int ClosedGracefully, int Killed, IRe
 /// <summary>
 /// Already-running detection and shutdown of one application. Detection counts only the
 /// processes of the application itself: a bare process name is not enough (the official ChatGPT
-/// app shares the Codex executable name), so an optional command-line marker — the MSIX package
-/// name — filters the scan. Closing is never started on its own initiative: the GUI and the CLI
+/// app shares the Codex executable name, and the native Claude Code CLI is a `claude.exe` too),
+/// so optional command-line markers — any one of them — filter the scan: the MSIX install path
+/// (see <see cref="PackageInstallMarker"/>) and the execution alias the launcher itself starts
+/// the app through. Closing is never started on its own initiative: the GUI and the CLI
 /// ask the owner first, the launcher only executes the decision.
 /// </summary>
 public sealed class RunningApp(
     IProcessFinder finder,
     string processNamePart,
-    string? commandLineMarker,
+    IReadOnlyList<string>? commandLineMarkers,
     string proxyUrl,
     IRunningAppCloser closer,
     FileLog log,
@@ -113,6 +115,13 @@ public sealed class RunningApp(
     private const string ProxyFlag = "--proxy-server=";
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan KillWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The path fragment every process of an MSIX package carries in its image path
+    /// (`…\WindowsApps\&lt;package&gt;_&lt;version&gt;_…\app\&lt;exe&gt;`): the package name plus the
+    /// separators keeps a CLI or another application that merely shares the executable name out.
+    /// </summary>
+    public static string PackageInstallMarker(string packageName) => $@"\WindowsApps\{packageName}_";
 
     /// <summary>Scan for the processes of the application and compare their flags with our proxy.</summary>
     public RunningAppInfo Inspect()
@@ -128,10 +137,10 @@ public sealed class RunningApp(
             return RunningAppInfo.NotRunning;
         }
 
-        if (commandLineMarker is not null)
+        if (commandLineMarkers is not null)
         {
             processes = processes
-                .Where(p => p.CommandLine.Contains(commandLineMarker, StringComparison.OrdinalIgnoreCase))
+                .Where(p => commandLineMarkers.Any(m => p.CommandLine.Contains(m, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
         }
 
