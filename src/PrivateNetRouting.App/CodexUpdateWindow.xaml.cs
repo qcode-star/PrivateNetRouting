@@ -255,7 +255,7 @@ public partial class CodexUpdateWindow : Window
             SetProgressUnknown();
             SetDetailDirect(p.Message);
         }
-        else if (p.Phase == UpdatePhase.Done && p.Message.Length > 0)
+        else if (p.Phase is UpdatePhase.Done or UpdatePhase.Check && p.Message.Length > 0)
         {
             SetDetailDirect(p.Message);
         }

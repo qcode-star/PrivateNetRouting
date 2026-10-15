@@ -170,7 +170,9 @@ public sealed class CodexUpdater(
             return;
         }
 
-        progress?.Report(new UpdateProgress(UpdatePhase.Install, 0, 0, "closing Codex"));
+        // preparation, not the Install phase: the window moves to its install step on the first
+        // Install report and from then on ignores the Store's download progress
+        progress?.Report(new UpdateProgress(UpdatePhase.Check, 0, 0, "closing Codex"));
         log.Info($"codex-updater: closing Codex ({running.Count} processes)");
         foreach (var process in running)
         {

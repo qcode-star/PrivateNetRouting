@@ -348,6 +348,34 @@ public class CodexTests : IDisposable
     }
 
     [Fact]
+    public async Task ClosingCodexIsNotReportedAsTheInstallPhase()
+    {
+        var (updater, store, appx, processes, _) = CreateUpdater();
+        appx.Installed = Package("26.1007.2314.0", "OpenAI.Codex_2p2nqsd0c76g0");
+        appx.AfterInstall = Package("26.1101.0.0", "OpenAI.Codex_2p2nqsd0c76g0");
+        processes.FindResult = [new FakeProcessHandle()];
+        store.Handle.StatusSequence = [
+            new StoreInstallStatus(StoreInstallPhase.Downloading, 100, 30, 30, null),
+            new StoreInstallStatus(StoreInstallPhase.Completed, 100, 100, 100, null),
+        ];
+        var reports = new SyncProgress();
+
+        await updater.UpdateAsync(reports, CancellationToken.None);
+
+        // the first Install report must come from the Store, after the download reports began
+        var firstInstall = reports.Items.FindIndex(p => p.Phase == UpdatePhase.Install);
+        Assert.True(firstInstall < 0 || reports.Items.Take(firstInstall).Any(p => p.Phase == UpdatePhase.Download));
+        Assert.Contains(reports.Items, p => p.Phase == UpdatePhase.Check && p.Message == "closing Codex");
+    }
+
+    private sealed class SyncProgress : IProgress<UpdateProgress>
+    {
+        public List<UpdateProgress> Items { get; } = [];
+
+        public void Report(UpdateProgress value) => Items.Add(value);
+    }
+
+    [Fact]
     public async Task CancellingTheRunCancelsTheQueuedStoreItem()
     {
         var (updater, store, appx, _, _) = CreateUpdater();
