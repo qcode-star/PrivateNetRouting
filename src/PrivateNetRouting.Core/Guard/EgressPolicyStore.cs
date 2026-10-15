@@ -19,7 +19,8 @@ public interface IEgressPolicyStore
     /// <summary>Requires administrator rights.</summary>
     void Apply(string proxyUrl);
 
-    /// <summary>Requires administrator rights: removes both values, deletes the whole key if empty.</summary>
+    /// <summary>Requires administrator rights: removes egressProxyUrl, and disableWslSessions
+    /// unless a foreign value keeps the key in managed mode; deletes the whole key if empty.</summary>
     void Remove();
 }
 
@@ -58,7 +59,17 @@ public sealed class RegistryEgressPolicyStore : IEgressPolicyStore
         }
 
         key.DeleteValue(UrlValue, throwOnMissingValue: false);
-        key.DeleteValue(WslValue, throwOnMissingValue: false);
+
+        // disableWslSessions=0 only compensates for managed mode, which any value under the key
+        // keeps on: with a foreign value remaining it must stay, or WSL sessions would be
+        // disabled by default for a policy that is not ours.
+        var foreign = key.GetValueNames()
+            .Any(name => !string.Equals(name, WslValue, StringComparison.OrdinalIgnoreCase));
+        if (!foreign)
+        {
+            key.DeleteValue(WslValue, throwOnMissingValue: false);
+        }
+
         if (key.GetValueNames().Length == 0)
         {
             key.Close();
