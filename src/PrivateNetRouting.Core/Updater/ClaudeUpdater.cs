@@ -101,10 +101,12 @@ public sealed class ClaudeUpdater(
         var url = await FindPackageUrlAsync(options, installed.Version, ct);
         var offered = url is null ? null : PackageUrl.ParseOfferedVersion(url);
 
-        // version formats differ: the URL has 2.26454.2, the package has 2.26454.2.0 — compare by prefix
-        var upToDate = offered is not null && installed.Version.StartsWith(offered, StringComparison.Ordinal);
-        return new UpdateCheckResult(installed, url, offered, upToDate);
+        return new UpdateCheckResult(installed, url, offered, IsUpToDate(installed.Version, offered));
     }
+
+    /// <summary>Version formats differ: the URL has 2.26454.2, the package has 2.26454.2.0 — compare by prefix.</summary>
+    private static bool IsUpToDate(string installedVersion, string? offered) =>
+        offered is not null && installedVersion.StartsWith(offered, StringComparison.Ordinal);
 
     /// <summary>
     /// Package address, in order: manual; the update feed (only when the proxy is already
@@ -271,6 +273,15 @@ public sealed class ClaudeUpdater(
                 ?? throw new IOException(
                     "package URL not found: the update feed gave nothing and the AppX journal has no fresh address. " +
                     "Pass the URL explicitly (--url)");
+
+            // the feed was out of reach for the check: now that it has answered, the offered
+            // version may well be the installed one — do not download and reinstall it
+            var offered = PackageUrl.ParseOfferedVersion(packageUrl);
+            if (IsUpToDate(check.Installed.Version, offered) && !options.Force)
+            {
+                progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} is up to date (offered {offered})"));
+                return new UpdateRunResult(UpdateOutcome.UpToDate, check.Installed, check.Installed, null, null);
+            }
         }
 
         await EnsureChainAsync(chainProgress, progress, ct);

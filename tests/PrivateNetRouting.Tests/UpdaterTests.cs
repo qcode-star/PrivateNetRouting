@@ -50,9 +50,10 @@ public class UpdaterTests : IDisposable
         string? journalUrl = null,
         IUpdateUrlFinder? feed = null,
         Func<bool>? health = null,
-        Func<string, long>? freeSpace = null)
+        Func<string, long>? freeSpace = null,
+        bool journalEmpty = false)
     {
-        _journal = new FakeUrlFinder(journalUrl ?? JournalUrl.ToString());
+        _journal = new FakeUrlFinder(journalEmpty ? null : journalUrl ?? JournalUrl.ToString());
         return new ClaudeUpdater(
             _config,
             _chain,
@@ -210,6 +211,21 @@ public class UpdaterTests : IDisposable
         Assert.Equal(UpdateOutcome.Installed, result.Outcome);
         Assert.Equal(1, _chain.EnsureCalls); // the second EnsureChainAsync sees a live chain and is a no-op
         Assert.Single(_downloader.Downloads);
+    }
+
+    [Fact]
+    public async Task RunDoesNotReinstallTheInstalledVersionOfferedAfterTheChainRaise()
+    {
+        // the feed is unreachable for the check and the journal is empty: the chain is raised for
+        // the URL itself, and the feed then offers the very version that is installed
+        var feed = new FakeUrlFinder("https://downloads.claude.ai/releases/win32/x64/2.26454.2/Claude-feed.msix");
+        var updater = Create(health: () => _chain.EnsureCalls > 0, journalEmpty: true, feed: feed);
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
+        Assert.Empty(_downloader.Downloads);
+        Assert.Empty(_appx.AddedFiles);
     }
 
     [Fact]
