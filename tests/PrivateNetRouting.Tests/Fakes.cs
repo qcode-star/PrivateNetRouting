@@ -80,9 +80,15 @@ internal sealed class FakeAppCloser : IRunningAppCloser
 
     public List<int> KillCalls { get; } = [];
 
+    /// <summary>What the restart pinned (in call order, relative to the close calls).</summary>
+    public List<string> Journal { get; } = [];
+
+    public void Track(IReadOnlyList<int> processIds) => Journal.Add("track:" + string.Join(",", processIds));
+
     public bool CloseGracefully(int processId)
     {
         GracefulCalls.Add(processId);
+        Journal.Add("graceful:" + processId);
         if (NoWindow.Contains(processId))
         {
             return false;
@@ -97,6 +103,7 @@ internal sealed class FakeAppCloser : IRunningAppCloser
     public void KillTree(int processId)
     {
         KillCalls.Add(processId);
+        Journal.Add("kill:" + processId);
         if (!SurvivesKill.Contains(processId))
         {
             Alive.Remove(processId);

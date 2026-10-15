@@ -34,6 +34,15 @@ public sealed record RunningAppInfo(RunningAppState State, IReadOnlyList<FoundPr
 /// <summary>Closing the processes of a foreign application: a graceful window close first, a forced tree kill as the fallback.</summary>
 public interface IRunningAppCloser
 {
+    /// <summary>
+    /// Pins the processes of the scan: from here on the closer acts on THOSE processes, not on
+    /// whatever owns the PID later (a PID of an exited process is reused quickly, and a forced
+    /// tree kill of a stranger — a compiler, a browser tab — is not recoverable).
+    /// </summary>
+    void Track(IReadOnlyList<int> processIds)
+    {
+    }
+
     /// <summary>WM_CLOSE to the main window; false — the process has no window (or is already gone).</summary>
     bool CloseGracefully(int processId);
 
@@ -43,17 +52,47 @@ public interface IRunningAppCloser
     void KillTree(int processId);
 }
 
-/// <summary>Closer over real processes; no special rights the applications do not have themselves.</summary>
-public sealed class WindowsRunningAppCloser : IRunningAppCloser
+/// <summary>
+/// Closer over real processes; no special rights the applications do not have themselves.
+/// <see cref="Track"/> opens a handle per process of the scan and keeps it: the handle keeps
+/// identifying the original process after its PID has been reused, so a late kill can never hit
+/// a stranger — a process that exited is "gone", and Kill on its handle only throws.
+/// </summary>
+public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
 {
+    private readonly Dictionary<int, Process> _tracked = [];
+
+    public void Track(IReadOnlyList<int> processIds)
+    {
+        lock (_tracked)
+        {
+            ReleaseTracked();
+            foreach (var processId in processIds)
+            {
+                try
+                {
+                    var process = Process.GetProcessById(processId);
+                    if (!_tracked.TryAdd(processId, process))
+                    {
+                        process.Dispose();
+                    }
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+                {
+                    // gone already, or not ours to open: nothing to pin
+                }
+            }
+        }
+    }
+
     public bool CloseGracefully(int processId)
     {
         try
         {
-            using var process = Process.GetProcessById(processId);
-            return process.CloseMainWindow();
+            var process = Handle(processId);
+            return process is not null && !process.HasExited && process.CloseMainWindow();
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
             return false;
         }
@@ -63,10 +102,10 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser
     {
         try
         {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
+            var process = Handle(processId);
+            return process is not null && !process.HasExited;
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
             // access denied is not "gone": the process stays a survivor the caller reports
             return ex is Win32Exception;
@@ -77,16 +116,45 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser
     {
         try
         {
-            using var process = Process.GetProcessById(processId);
-            process.Kill(entireProcessTree: true);
+            var process = Handle(processId);
+            if (process is not null && !process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
             // gone or not ours: the caller re-checks and reports what survived
         }
     }
-}
 
+    public void Dispose()
+    {
+        lock (_tracked)
+        {
+            ReleaseTracked();
+        }
+    }
+
+    /// <summary>The pinned process of this PID; a PID that was never tracked is not acted on.</summary>
+    private Process? Handle(int processId)
+    {
+        lock (_tracked)
+        {
+            return _tracked.GetValueOrDefault(processId);
+        }
+    }
+
+    private void ReleaseTracked()
+    {
+        foreach (var process in _tracked.Values)
+        {
+            process.Dispose();
+        }
+
+        _tracked.Clear();
+    }
+}
 public sealed record RunningAppCloseResult(int ClosedGracefully, int Killed, IReadOnlyList<int> Survived)
 {
     public static RunningAppCloseResult Nothing { get; } = new(0, 0, []);
@@ -208,6 +276,9 @@ public sealed class RunningApp(
             return RunningAppCloseResult.Nothing;
         }
 
+        // pin the scanned processes before anything is asked or killed: the waits below can take
+        // seconds, and a PID freed meanwhile may belong to somebody else by the time of the kill
+        closer.Track(processes.Select(p => p.Id).ToList());
         var asked = processes.Count(p => closer.CloseGracefully(p.Id));
         var pending = processes.Select(p => p.Id).ToList();
         if (asked > 0)

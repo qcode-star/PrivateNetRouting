@@ -199,6 +199,63 @@ public class LauncherTests : IDisposable
     }
 
     [Fact]
+    public async Task RestartPinsTheScannedProcessesBeforeClosingOrKillingAny()
+    {
+        _processes.Processes = [DesktopProcess(42), DesktopProcess(43)];
+        var closer = new FakeAppCloser { Alive = { 42, 43 }, NoWindow = { 43 } };
+        var launcher = Create(closer: closer);
+
+        await launcher.LaunchAsync(new LauncherOptions(CheckOnly: false, RestartRunning: true), null, CancellationToken.None);
+
+        // the PIDs are pinned first: a PID freed during the grace wait must not be killed later
+        Assert.Equal("track:42,43", closer.Journal[0]);
+        Assert.All(closer.Journal.Skip(1), entry => Assert.DoesNotContain("track", entry));
+        Assert.Contains("kill:43", closer.Journal);
+    }
+
+    [Fact]
+    public async Task RealCloserKillsOnlyWhatItPinned()
+    {
+        using var pinned = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping", "-n 60 127.0.0.1")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+        using var stranger = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping", "-n 60 127.0.0.1")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+        try
+        {
+            using var closer = new WindowsRunningAppCloser();
+
+            closer.KillTree(stranger.Id); // never pinned: left alone
+            Assert.True(closer.Exists(stranger.Id) is false); // and not reported as the closer's business
+            Assert.False(stranger.HasExited);
+
+            closer.Track([pinned.Id]);
+            Assert.True(closer.Exists(pinned.Id));
+            closer.KillTree(pinned.Id);
+            await pinned.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+
+            Assert.True(pinned.HasExited);
+            Assert.False(closer.Exists(pinned.Id));
+            Assert.False(stranger.HasExited);
+        }
+        finally
+        {
+            stranger.Kill(entireProcessTree: true);
+            if (!pinned.HasExited)
+            {
+                pinned.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunningClaudeWithOurProxyIsOnlyReported()
     {
         _processes.Processes = [DesktopProcess(42, " --proxy-server=http://127.0.0.1:18082")];
