@@ -5,7 +5,8 @@ namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
 /// Pool of DoH resolvers. The initial set comes from the config; when a discovery source
-/// (tailnet config) is present, the list is replenished and rechecked on a timer. Probes run
+/// (tailnet config) is present, the list is replenished and rechecked on a timer that starts with
+/// the first refresh request (the pool does no work until it is asked for an address). Probes run
 /// in parallel, live endpoints are moved to the front (a dead node at the top of the admin
 /// list does not slow resolution down); a failing endpoint goes into cooldown. Every pool
 /// refresh is written to Debug, a change of the live set — as a single line in Info, repeats
@@ -66,6 +67,21 @@ public sealed partial class DohEndpointPool : IDisposable
         _time = time ?? TimeProvider.System;
         _pool = [.. seed];
         _stopToken = _stop.Token;
+        // no background work here: a pool that is never asked for an address (every `pnr` command
+        // composes a runtime, most never resolve a name) must not spawn `tailscale debug netmap`
+        // and probe the endpoints — the refresh loop starts with the first refresh
+    }
+
+    private int _loopStarted;
+
+    /// <summary>Starts the periodic refresh once, on the first refresh request.</summary>
+    private void EnsureLoopStarted()
+    {
+        if (_stopToken.IsCancellationRequested || Interlocked.Exchange(ref _loopStarted, 1) != 0)
+        {
+            return;
+        }
+
         _ = Task.Run(RefreshForeverAsync);
     }
 
@@ -116,6 +132,7 @@ public sealed partial class DohEndpointPool : IDisposable
     /// </summary>
     public async Task EnsureLiveAsync(CancellationToken ct)
     {
+        EnsureLoopStarted();
         lock (_gate)
         {
             if (_lastLive is { Count: > 0 })
@@ -136,13 +153,14 @@ public sealed partial class DohEndpointPool : IDisposable
     {
         try
         {
+            // waiting first: the refresh that started this loop is already running or done
             while (!_stopToken.IsCancellationRequested)
             {
-                await SafeRefreshAsync().ConfigureAwait(false);
                 var delay = HasLive
                     ? _refreshInterval
                     : TimeSpan.FromTicks(Math.Min(_refreshInterval.Ticks, EmptyRetryInterval.Ticks));
                 await Task.Delay(delay, _stopToken).ConfigureAwait(false);
+                await SafeRefreshAsync().ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -174,6 +192,7 @@ public sealed partial class DohEndpointPool : IDisposable
     /// </summary>
     public async Task RefreshAsync(CancellationToken ct)
     {
+        EnsureLoopStarted();
         Task run;
         lock (_gate)
         {

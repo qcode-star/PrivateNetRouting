@@ -38,7 +38,10 @@ public static class ConnectRequestParser
         var parts = line.Split(' ', StringSplitOptions.TrimEntries);
         if (parts.Length != 3 || !parts[0].Equals("CONNECT", StringComparison.OrdinalIgnoreCase))
         {
-            error = $"not a CONNECT request: {Truncate(line)}";
+            // the method only: the rest of the line is a URL, and a URL can carry tokens
+            error = parts.Length == 3
+                ? $"not a CONNECT request (method {Truncate(parts[0], 16)})"
+                : "malformed request line";
             return false;
         }
 
@@ -52,7 +55,7 @@ public static class ConnectRequestParser
             var close = authority.IndexOf(']');
             if (close < 0)
             {
-                error = $"invalid host: {Truncate(authority)}";
+                error = $"invalid host: {Safe(authority)}";
                 return false;
             }
 
@@ -62,9 +65,9 @@ public static class ConnectRequestParser
             {
                 port = DefaultPort;
             }
-            else if (rest[0] != ':' || !int.TryParse(rest[1..], out port) || port is < 1 or > 65535)
+            else if (rest[0] != ':' || !int.TryParse(rest[1..], System.Globalization.NumberStyles.None, null, out port) || port is < 1 or > 65535)
             {
-                error = $"invalid port: {Truncate(authority)}";
+                error = $"invalid port: {Safe(authority)}";
                 return false;
             }
         }
@@ -74,9 +77,9 @@ public static class ConnectRequestParser
             if (separator >= 0)
             {
                 host = authority[..separator];
-                if (!int.TryParse(authority[(separator + 1)..], out port) || port is < 1 or > 65535)
+                if (!int.TryParse(authority[(separator + 1)..], System.Globalization.NumberStyles.None, null, out port) || port is < 1 or > 65535)
                 {
-                    error = $"invalid port: {Truncate(authority)}";
+                    error = $"invalid port: {Safe(authority)}";
                     return false;
                 }
             }
@@ -96,7 +99,7 @@ public static class ConnectRequestParser
         host = host.TrimEnd('.').ToLowerInvariant();
         if (!IsDialableHost(host, ipv6Literal))
         {
-            error = $"invalid host: {Truncate(host)}";
+            error = $"invalid host: {Safe(host)}";
             return false;
         }
 
@@ -123,17 +126,28 @@ public static class ConnectRequestParser
                 && v6.ScopeId == 0;
         }
 
+        // an IPv4 literal is the canonical dotted quad only: the platform parser also takes the
+        // inet_aton shorthands ("1" is 0.0.0.1, "0x7f.1" is 127.0.0.1) that no client means
         if (System.Net.IPAddress.TryParse(host, out var literal))
         {
-            return literal.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+            return literal.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                && literal.ToString() == host;
         }
 
-        foreach (var label in host.Split('.'))
+        var labels = host.Split('.');
+        foreach (var label in labels)
         {
             if (label.Length is < 1 or > 63)
             {
                 return false;
             }
+        }
+
+        // a name whose last label is numeric (or hex) is a malformed address, never a DNS name
+        var last = labels[^1];
+        if (last.All(char.IsAsciiDigit) || last.StartsWith("0x", StringComparison.Ordinal))
+        {
+            return false;
         }
 
         return !host.Contains('[') && !host.Contains(']') && !host.Contains(':');
@@ -155,5 +169,12 @@ public static class ConnectRequestParser
         return false;
     }
 
-    private static string Truncate(string value) => value.Length <= 120 ? value : value[..120];
+    private static string Truncate(string value, int max = 120) => value.Length <= max ? value : value[..max];
+
+    /// <summary>For error text: cut at a path or query (a URL can carry tokens) and shorten.</summary>
+    private static string Safe(string value)
+    {
+        var cut = value.IndexOfAny(['/', '?', '#']);
+        return Truncate(cut < 0 ? value : value[..cut], 64);
+    }
 }

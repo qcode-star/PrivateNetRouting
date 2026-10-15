@@ -134,6 +134,31 @@ public class DohEndpointPoolTests : IDisposable
         Assert.Equal(callsWhenLive, source.Calls);
     }
 
+    /// <summary>Every `pnr` command composes a runtime: a pool nobody asks must not spawn discovery or probe anything.</summary>
+    [Fact]
+    public async Task AnUnusedPoolDoesNoBackgroundWork()
+    {
+        var time = new ManualTimeProvider();
+        var source = new SwitchableSource { Endpoints = [Ep(9)] };
+        var probes = 0;
+        using var pool = CreatePool([Ep(1)], (_, _) =>
+        {
+            Interlocked.Increment(ref probes);
+            return Task.FromResult(true);
+        }, time, source);
+
+        await Task.Delay(300);
+
+        Assert.Equal(0, source.Calls);
+        Assert.Equal(0, probes);
+        Assert.Equal([Ep(1)], pool.SnapshotAlive()); // the seed is usable as it stands
+
+        // the first ask starts the work
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.Equal(1, source.Calls);
+        Assert.True(pool.HasLive);
+    }
+
     [Fact]
     public async Task FailedDiscoveryKeepsPreviouslyDiscoveredEndpoints()
     {

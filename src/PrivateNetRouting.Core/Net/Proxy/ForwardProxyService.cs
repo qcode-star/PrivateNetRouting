@@ -49,6 +49,9 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     private static readonly byte[] BadRequestResponse =
         "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
 
+    private static readonly byte[] ForbiddenResponse =
+        "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
+
     private static readonly byte[] BadGatewayResponse =
         "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
 
@@ -137,6 +140,11 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 var listener = BindListener(listen, token)!;
                 _ = AcceptLoopAsync(listener, token);
                 _log.Info($"forward-proxy: listening on {listen}");
+                if (!IPAddress.IsLoopback(listen.Address))
+                {
+                    // the proxy has no client authentication: whoever can reach this address can use the chain
+                    _log.Warn($"forward-proxy: {listen} is not a loopback address — any host that can reach it can use the proxy and the chain behind it");
+                }
 
                 if (_config.BindWslGateway)
                 {
@@ -311,13 +319,27 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         using var _ = client;
         Interlocked.Increment(ref _totalConnections);
         Interlocked.Increment(ref _activeConnections);
+        ConnectRequest? target = null;
         try
         {
             var stream = client.GetStream();
 
             using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
             headerCts.CancelAfter(TimeSpan.FromSeconds(_config.HeaderTimeoutSeconds));
-            var received = await ReadHeaderAsync(stream, headerCts.Token);
+            (byte[] Header, byte[] Leftover)? received;
+            try
+            {
+                received = await ReadHeaderAsync(stream, headerCts.Token);
+            }
+            catch (Exception ex) when (ex is IOException or SocketException
+                || (ex is OperationCanceledException && !stopToken.IsCancellationRequested))
+            {
+                // a client that never finished its request (a port scan, an idle pre-connect) or
+                // left mid-way: not a proxy failure, nothing to answer
+                _log.Debug($"forward-proxy: {DescribeRemote(client)}: no complete request ({(ex is OperationCanceledException ? "timeout" : ex.Message)})");
+                return;
+            }
+
             if (received is null)
             {
                 return;
@@ -326,11 +348,18 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             if (!ConnectRequestParser.TryParse(received.Value.Header, out var request, out var parseError))
             {
                 await stream.WriteAsync(BadRequestResponse, stopToken);
-                _log.Warn($"forward-proxy: {client.Client.RemoteEndPoint}: {parseError}");
+                _log.Warn($"forward-proxy: {DescribeRemote(client)}: {parseError}");
                 return;
             }
 
-            var target = request!;
+            target = request!;
+            if (ConnectTargetPolicy.IsForbidden(target.Host))
+            {
+                await stream.WriteAsync(ForbiddenResponse, stopToken);
+                _log.Warn($"forward-proxy: {DescribeRemote(client)} -> {target}: refused (a loopback or link-local target would reach the upstream's own host)");
+                return;
+            }
+
             Socket upstreamSocket;
             string route;
             if (_passHostName)
@@ -347,9 +376,11 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 var destination = IPAddress.TryParse(target.Host, out var literal)
                     ? new ResolveResult(literal, "literal", null)
                     : await resolver.ResolveAsync(target.Host, stopToken);
-                upstreamSocket = await _socks.ConnectAsync(
-                    destination.Ip, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), stopToken);
-                route = $"{destination.Ip} ({destination.Source})";
+
+                // a name with several addresses: the first one that the upstream manages to dial
+                IPAddress[] addresses = [destination.Ip, .. destination.Alternates ?? []];
+                (upstreamSocket, var dialed) = await DialFirstAsync(addresses, target, stopToken);
+                route = $"{dialed} ({destination.Source})";
             }
 
             using var upstreamClient = upstreamSocket;
@@ -390,7 +421,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             var detail = ex is OperationCanceledException
                 ? "timeout"
                 : ex.Message;
-            _log.Error($"forward-proxy: {DescribeRemote(client)}: {detail}");
+            _log.Warn($"forward-proxy: {DescribeRemote(client)} -> {target?.ToString() ?? "(no target yet)"}: {detail}");
             try
             {
                 await client.GetStream().WriteAsync(BadGatewayResponse, CancellationToken.None);
@@ -402,6 +433,24 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         finally
         {
             Interlocked.Decrement(ref _activeConnections);
+        }
+    }
+
+    /// <summary>Dials the addresses of one name in order; the last failure is the one that propagates.</summary>
+    private async Task<(Socket Socket, IPAddress Address)> DialFirstAsync(
+        IReadOnlyList<IPAddress> addresses, ConnectRequest target, CancellationToken stopToken)
+    {
+        var timeout = TimeSpan.FromSeconds(_config.SocksTimeoutSeconds);
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                return (await _socks.ConnectAsync(addresses[i], target.Port, timeout, stopToken), addresses[i]);
+            }
+            catch (Exception) when (i < addresses.Count - 1 && !stopToken.IsCancellationRequested)
+            {
+                _log.Debug($"forward-proxy: {target}: dialing {addresses[i]} failed, trying the next address");
+            }
         }
     }
 

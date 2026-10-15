@@ -1,106 +1,240 @@
-using System.Net.Sockets;
 using PrivateNetRouting.Core.Net.Socks;
 
 namespace PrivateNetRouting.Core.Net.Dns;
 
 /// <summary>
-/// Resolution via a pool of DoH endpoints over a SOCKS5 upstream. Iterates over candidates,
-/// marks a failing one dead (cooldown in the pool); the first successful answer is taken.
+/// Resolution via a pool of DoH endpoints over a SOCKS5 upstream. Candidates are tried in pool
+/// order, but a slow one does not hold the lookup for its whole timeout: after a short stagger
+/// the next candidate is started in parallel and the first answer wins (the losers are
+/// cancelled). A failing endpoint is marked dead (cooldown in the pool), one that answered with
+/// a negative answer stays alive.
 /// </summary>
-public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSpan timeout) : IDnsResolver
+public sealed class DohResolver : IDnsResolver
 {
+    /// <summary>How long a candidate gets alone before the next one is started alongside it.</summary>
+    public static readonly TimeSpan DefaultHedgeDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>How many addresses beyond the first one an answer hands on as alternates.</summary>
+    private const int MaxAlternates = 3;
+
+    private readonly DohEndpointPool _pool;
+    private readonly TimeSpan _hedgeDelay;
+    private readonly Func<DohEndpoint, string, CancellationToken, Task<DnsAnswer>> _query;
+
+    public DohResolver(
+        Socks5Client socks,
+        DohEndpointPool pool,
+        TimeSpan timeout,
+        TimeSpan? hedgeDelay = null,
+        Func<DohEndpoint, string, CancellationToken, Task<DnsAnswer>>? query = null)
+    {
+        _pool = pool;
+        _hedgeDelay = hedgeDelay ?? DefaultHedgeDelay;
+        _query = query ?? ((endpoint, host, ct) => DohClient.QueryAsync(socks, endpoint, host, timeout, ct));
+    }
+
+    private sealed record Attempt(DohEndpoint Endpoint, DnsAnswer? Answer, Exception? Error);
+
     public async Task<ResolveResult> ResolveAsync(string host, CancellationToken ct)
     {
         // a pool built before the chain came up (or refreshed over a down chain) holds nothing
         // answering: refresh it now instead of waiting for the next timer tick
-        await pool.EnsureLiveAsync(ct).ConfigureAwait(false);
+        await _pool.EnsureLiveAsync(ct).ConfigureAwait(false);
 
+        var candidates = _pool.SnapshotAlive();
+        using var race = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var running = new List<Task<Attempt>>();
+        var next = 0;
         Exception? lastError = null;
-        foreach (var endpoint in pool.SnapshotAlive())
+        try
         {
-            try
+            while (true)
             {
-                var answer = await DohClient.QueryAsync(socks, endpoint, host, timeout, ct);
-                pool.MarkAlive(endpoint);
-                return new ResolveResult(answer.Ips[0], endpoint.ToString(), answer.MinTtl);
-            }
-            catch (DnsNegativeAnswerException)
-            {
-                // the endpoint answered: the name simply has no address, so it stays alive
-                pool.MarkAlive(endpoint);
-                throw;
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
+                ct.ThrowIfCancellationRequested();
+                if (running.Count == 0 && next < candidates.Count)
+                {
+                    running.Add(AttemptAsync(candidates[next++], host, race.Token));
+                }
+
+                if (running.Count == 0)
+                {
+                    break;
+                }
+
+                using var staggerCts = CancellationTokenSource.CreateLinkedTokenSource(race.Token);
+                var stagger = next < candidates.Count ? Task.Delay(_hedgeDelay, staggerCts.Token) : null;
+                var waitFor = new List<Task>(running);
+                if (stagger is not null)
+                {
+                    waitFor.Add(stagger);
+                }
+
+                var finished = await Task.WhenAny(waitFor).ConfigureAwait(false);
+                if (finished == stagger)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    running.Add(AttemptAsync(candidates[next++], host, race.Token));
+                    continue;
+                }
+
+                await staggerCts.CancelAsync().ConfigureAwait(false);
+                var done = (Task<Attempt>)finished;
+                running.Remove(done);
+                var attempt = await done.ConfigureAwait(false);
+                if (attempt.Answer is { } answer)
+                {
+                    _pool.MarkAlive(attempt.Endpoint);
+                    return new ResolveResult(
+                        answer.Ips[0], attempt.Endpoint.ToString(), answer.MinTtl, [.. answer.Ips.Skip(1).Take(MaxAlternates)]);
+                }
+
+                ct.ThrowIfCancellationRequested();
+                if (attempt.Error is DnsNegativeAnswerException negative)
+                {
+                    // the endpoint answered: the name simply has no address, so it stays alive
+                    _pool.MarkAlive(attempt.Endpoint);
+                    throw negative;
+                }
+
                 // any endpoint failure (including a bad certificate) fails over to the next one;
-                // only the caller's own cancellation aborts the loop
-                pool.MarkDead(endpoint);
-                lastError = ex;
+                // only the caller's own cancellation aborts the lookup
+                _pool.MarkDead(attempt.Endpoint);
+                lastError = attempt.Error;
             }
+        }
+        finally
+        {
+            await race.CancelAsync().ConfigureAwait(false); // the losers of the race stop here
         }
 
         throw new IOException($"doh: all endpoints failed for {host}: {lastError?.Message}", lastError);
+    }
+
+    /// <summary>One query as a value: a failure is data (it must not fault a task nobody awaits any more).</summary>
+    private async Task<Attempt> AttemptAsync(DohEndpoint endpoint, string host, CancellationToken ct)
+    {
+        try
+        {
+            return new Attempt(endpoint, await _query(endpoint, host, ct).ConfigureAwait(false), null);
+        }
+        catch (Exception ex)
+        {
+            return new Attempt(endpoint, null, ex);
+        }
     }
 }
 
 /// <summary>
 /// Cache on top of the resolver: the response TTL is clamped to [min, max] — short answers from
 /// corporate resolvers do not force hitting DoH on every request, long ones do not hide an address
-/// change.
+/// change. Concurrent lookups of one name share a single inner resolution (single-flight), a
+/// negative answer is remembered briefly, expired entries are dropped when met and when the
+/// cache grows.
 /// </summary>
 public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, TimeSpan ttlMax, TimeProvider? time = null)
     : IDnsResolver
 {
+    private const int MaxEntries = 4096;
+    private const int MaxNegativeEntries = 1024;
+    private static readonly TimeSpan NegativeTtl = TimeSpan.FromSeconds(10);
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
-    private static readonly TimeSpan NegativeTtl = TimeSpan.FromSeconds(10);
     private readonly Dictionary<string, (ResolveResult Result, DateTimeOffset Expires)> _cache = [];
     private readonly Dictionary<string, (DnsNegativeAnswerException Error, DateTimeOffset Expires)> _negative = [];
+    private readonly Dictionary<string, Task<ResolveResult>> _inflight = [];
 
     public async Task<ResolveResult> ResolveAsync(string host, CancellationToken ct)
     {
-        var now = _time.GetUtcNow();
+        Task<ResolveResult> flight;
         lock (_gate)
         {
-            if (_cache.TryGetValue(host, out var hit) && hit.Expires > now)
+            var now = _time.GetUtcNow();
+            if (_cache.TryGetValue(host, out var hit))
             {
-                return hit.Result;
+                if (hit.Expires > now)
+                {
+                    return hit.Result;
+                }
+
+                _cache.Remove(host);
             }
 
-            if (_negative.TryGetValue(host, out var miss) && miss.Expires > now)
+            if (_negative.TryGetValue(host, out var miss))
             {
-                throw new DnsNegativeAnswerException(miss.Error.Message);
+                if (miss.Expires > now)
+                {
+                    throw new DnsNegativeAnswerException(miss.Error.Message);
+                }
+
+                _negative.Remove(host);
+            }
+
+            if (!_inflight.TryGetValue(host, out flight!))
+            {
+                // the shared lookup is not tied to the first caller's token: the others wait on it
+                // too (the inner resolver bounds itself with its own timeouts)
+                flight = Task.Run(() => ResolveAndRememberAsync(host), CancellationToken.None);
+                _inflight[host] = flight;
             }
         }
 
-        ResolveResult resolved;
+        return await flight.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<ResolveResult> ResolveAndRememberAsync(string host)
+    {
         try
         {
-            resolved = await inner.ResolveAsync(host, ct);
+            var resolved = await inner.ResolveAsync(host, CancellationToken.None).ConfigureAwait(false);
+            var ttl = resolved.TtlSeconds is { } seconds
+                ? TimeSpan.FromSeconds(Math.Clamp(seconds, (long)ttlMin.TotalSeconds, (long)ttlMax.TotalSeconds))
+                : ttlMin;
+            lock (_gate)
+            {
+                var now = _time.GetUtcNow();
+                MakeRoom(_cache, MaxEntries, now);
+                _cache[host] = (resolved, now + ttl);
+            }
+
+            return resolved;
         }
         catch (DnsNegativeAnswerException ex)
         {
             lock (_gate)
             {
-                if (_negative.Count >= 1024)
-                {
-                    _negative.Clear();
-                }
-
+                var now = _time.GetUtcNow();
+                MakeRoom(_negative, MaxNegativeEntries, now);
                 _negative[host] = (ex, now + NegativeTtl);
             }
 
             throw;
         }
-
-        var ttl = resolved.TtlSeconds is { } seconds
-            ? TimeSpan.FromSeconds(Math.Clamp(seconds, (long)ttlMin.TotalSeconds, (long)ttlMax.TotalSeconds))
-            : ttlMin;
-        lock (_gate)
+        finally
         {
-            _cache[host] = (resolved, now + ttl);
+            lock (_gate)
+            {
+                _inflight.Remove(host);
+            }
+        }
+    }
+
+    /// <summary>Before an insert: drop what has expired, and everything if that was not enough.</summary>
+    private static void MakeRoom<TValue>(Dictionary<string, (TValue Value, DateTimeOffset Expires)> entries, int limit, DateTimeOffset now)
+    {
+        if (entries.Count < limit)
+        {
+            return;
         }
 
-        return resolved;
+        foreach (var key in entries.Where(e => e.Value.Expires <= now).Select(e => e.Key).ToList())
+        {
+            entries.Remove(key);
+        }
+
+        if (entries.Count >= limit)
+        {
+            entries.Clear();
+        }
     }
 }

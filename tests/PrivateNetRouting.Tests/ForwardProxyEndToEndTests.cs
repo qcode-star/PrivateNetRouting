@@ -450,18 +450,132 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A name that resolves to several addresses: the upstream refuses the first one, the second
+    /// is dialed — the answer used to be reduced to its first address.
+    /// </summary>
+    [Fact]
+    public async Task DialsTheNextAddressWhenTheFirstIsRefused()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var refused = IPAddress.Parse("192.0.2.1");
+        var socksUpstream = await StartRefusingSocksAsync(originPort, refused);
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(refused, "fake", 300, [IPAddress.Parse("192.0.2.2")]));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.StartsWith("HTTP/1.1 200", await ReadLineAsync(stream, timeout.Token));
+
+        await stream.WriteAsync("ping"u8.ToArray());
+        var echo = new byte[16];
+        var read = await stream.ReadAsync(echo, timeout.Token);
+        Assert.Equal("pong"u8.ToArray(), echo[..read]);
+        Assert.Equal(0, proxy.FailedConnections);
+    }
+
+    /// <summary>
+    /// A client that connects and never sends its request (a port scan, an idle pre-connect) is
+    /// closed without a 502 and is not a proxy failure.
+    /// </summary>
+    [Fact]
+    public async Task AnIdleClientIsClosedQuietlyAndNotCountedAsAFailure()
+    {
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300),
+            headerTimeoutSeconds: 1);
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var read = await client.GetStream().ReadAsync(new byte[64], timeout.Token);
+
+        Assert.Equal(0, read); // closed, nothing written (no 502)
+        Assert.Equal(0, proxy.FailedConnections);
+    }
+
+    /// <summary>SOCKS5 upstream that answers "connection refused" for one IPv4 address and relays every other to the origin.</summary>
+    private async Task<string> StartRefusingSocksAsync(int originPort, IPAddress refusedAddress)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        _listeners.Add(listener);
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                TcpClient session;
+                try
+                {
+                    session = await listener.AcceptTcpClientAsync();
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
+                {
+                    return;
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    using var _ = session;
+                    var stream = session.GetStream();
+                    if (!await TryReadExactAsync(stream, new byte[3]))
+                    {
+                        return;
+                    }
+
+                    await stream.WriteAsync(new byte[] { 5, 0 });
+                    var request = new byte[10]; // VER CMD RSV ATYP=1 IPv4 port
+                    if (!await TryReadExactAsync(stream, request))
+                    {
+                        return;
+                    }
+
+                    if (new IPAddress(request[4..8]).Equals(refusedAddress))
+                    {
+                        await stream.WriteAsync(new byte[] { 5, 5, 0, 1, 0, 0, 0, 0, 0, 0 }); // REP=5: refused
+                        return;
+                    }
+
+                    await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
+                    try
+                    {
+                        using var target = new TcpClient();
+                        await target.ConnectAsync(IPAddress.Loopback, originPort);
+                        var targetStream = target.GetStream();
+                        await Task.WhenAll(
+                            RelayAsync(stream, targetStream),
+                            RelayAsync(targetStream, stream));
+                    }
+                    catch (SocketException)
+                    {
+                    }
+                });
+            }
+        });
+        return ((IPEndPoint)listener.LocalEndpoint).ToString();
+    }
+
     private async Task<(ForwardProxyService Proxy, IPEndPoint Endpoint)> StartProxyAsync(
         string socksUpstream,
         Func<string, Core.Net.Dns.ResolveResult> resolve,
         string? user = null,
-        string? password = null)
+        string? password = null,
+        int headerTimeoutSeconds = 5)
     {
         var log = new FileLog(Path.Combine(_tempDir, "proxy.log"));
         var config = new ForwardProxyConfig
         {
             Listen = "127.0.0.1:0",
             BindWslGateway = false,
-            HeaderTimeoutSeconds = 5,
+            HeaderTimeoutSeconds = headerTimeoutSeconds,
             SocksTimeoutSeconds = 5,
         };
         var proxy = new ForwardProxyService(

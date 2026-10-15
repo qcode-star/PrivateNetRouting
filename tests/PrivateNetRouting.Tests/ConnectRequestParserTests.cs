@@ -54,6 +54,16 @@ public class ConnectRequestParserTests
     [InlineData("CONNECT [192.0.2.1]:443 HTTP/1.1")]     // brackets are for IPv6 only
     [InlineData("CONNECT [example.com]:443 HTTP/1.1")]
     [InlineData("CONNECT a:1:443 HTTP/1.1")]             // a colon in a name
+    [InlineData("CONNECT example.com:+443 HTTP/1.1")]    // a sign is not part of a port
+    [InlineData("CONNECT example.com:-1 HTTP/1.1")]
+    [InlineData("CONNECT 1:443 HTTP/1.1")]               // inet_aton shorthand: 0.0.0.1
+    [InlineData("CONNECT 127.1:443 HTTP/1.1")]           // inet_aton shorthand: 127.0.0.1
+    [InlineData("CONNECT 0x7f.1:443 HTTP/1.1")]
+    [InlineData("CONNECT 0x7f000001:443 HTTP/1.1")]
+    [InlineData("CONNECT 127.000.000.001:443 HTTP/1.1")] // non-canonical octets
+    [InlineData("CONNECT 256.1.1.1:443 HTTP/1.1")]       // not an address and not a name
+    [InlineData("CONNECT 1.2.3.4.5:443 HTTP/1.1")]
+    [InlineData("CONNECT host.123:443 HTTP/1.1")]        // a numeric last label
     [InlineData("CONNECT a..b:443 HTTP/1.1")]            // empty label
     [InlineData("CONNECT .:443 HTTP/1.1")]               // nothing left after the trailing dot
     public void Rejects(string firstLine)
@@ -73,6 +83,31 @@ public class ConnectRequestParserTests
         Assert.Equal(host, request!.Host);
         Assert.Equal(port, request.Port);
         Assert.Equal(text, request.ToString());
+    }
+
+    [Theory]
+    [InlineData("203.0.113.5")]
+    [InlineData("host1.example.com")]
+    [InlineData("localhost")]
+    public void AcceptsCanonicalIpv4AndNames(string host)
+    {
+        var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes($"CONNECT {host}:443 HTTP/1.1\r\n\r\n"), out var request, out _);
+        Assert.True(ok);
+        Assert.Equal(host, request!.Host);
+    }
+
+    /// <summary>The error ends up in the log: a plain-HTTP request carries a URL, and a URL can carry tokens.</summary>
+    [Theory]
+    [InlineData("GET http://example.com/path?token=SECRET HTTP/1.1")]
+    [InlineData("CONNECT http://example.com/path?token=SECRET:443 HTTP/1.1")]
+    [InlineData("CONNECT example.com:443?token=SECRET HTTP/1.1")]
+    public void ErrorsDoNotEchoUrlQueries(string firstLine)
+    {
+        var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out _, out var error);
+
+        Assert.False(ok);
+        Assert.DoesNotContain("SECRET", error);
+        Assert.DoesNotContain("token", error);
     }
 
     [Fact]
