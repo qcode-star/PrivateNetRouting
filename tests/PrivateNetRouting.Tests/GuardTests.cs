@@ -1366,6 +1366,64 @@ public class GuardTests : IDisposable
     /// payload, a failed backup or a failed replacement stops them with a FAILED line instead of
     /// truncating a settings file and reporting success.
     /// </summary>
+    // ----- the collapsed Guards card: summary state and "all on" -----
+
+    private static GuardSnapshot Snapshot(
+        GuardState ban, GuardState policy, GuardState claude, GuardState codex, WslConfigStatus wsl) => new(
+        new LocalBanStatus(ban, 0, true, 0, [], 0, []),
+        new EgressPolicyStatus(policy, null, "", null),
+        new ClaudeSettingsStatus(claude, null, null, "", "", false),
+        new CodexSettingsStatus(codex, null, false, true),
+        wsl,
+        new SystemProxyStatus(false, null, null),
+        []);
+
+    private static WslDistroStatus Distro(GuardState state, bool inactive = false) =>
+        new("d", true, state, null, null, "", Inactive: inactive);
+
+    [Fact]
+    public void GuardsCardReachesAllOnWithTheWslLayerOffByConfig()
+    {
+        // the default config has no WSL: its "off" must not keep the card from "all on"
+        var snapshot = Snapshot(GuardState.On, GuardState.On, GuardState.On, GuardState.On, WslConfigStatus.LayerOff("no distros configured"));
+
+        Assert.Null(GuardAggregate.WslLayer(snapshot.Wsl));
+        Assert.True(GuardAggregate.AllOn(snapshot));
+        Assert.Equal(GuardState.On, GuardAggregate.Summary(snapshot));
+    }
+
+    [Fact]
+    public void AStoppedOrAbsentDistroDoesNotVote()
+    {
+        var wsl = new WslConfigStatus(GuardState.Unknown, [Distro(GuardState.Unknown, inactive: true)], 18081, null, "");
+        var snapshot = Snapshot(GuardState.On, GuardState.On, GuardState.On, GuardState.On, wsl);
+
+        Assert.True(GuardAggregate.AllOn(snapshot));
+        Assert.Equal(GuardState.On, GuardAggregate.Summary(snapshot));
+    }
+
+    [Fact]
+    public void ARunningDistroThatIsNotInSyncKeepsTheCardFromAllOn()
+    {
+        var wsl = new WslConfigStatus(GuardState.Partial, [Distro(GuardState.On), Distro(GuardState.Partial)], 18081, null, "");
+        var snapshot = Snapshot(GuardState.On, GuardState.On, GuardState.On, GuardState.On, wsl);
+
+        Assert.False(GuardAggregate.AllOn(snapshot));
+        Assert.Equal(GuardState.Partial, GuardAggregate.Summary(snapshot));
+    }
+
+    [Fact]
+    public void SummaryFoldsLayersUnknownDominatesAndMixesArePartial()
+    {
+        var off = WslConfigStatus.LayerOff("off");
+
+        Assert.Equal(GuardState.Off, GuardAggregate.Summary(Snapshot(GuardState.Off, GuardState.Off, GuardState.Off, GuardState.Off, off)));
+        Assert.Equal(GuardState.Partial, GuardAggregate.Summary(Snapshot(GuardState.On, GuardState.Off, GuardState.On, GuardState.On, off)));
+        Assert.Equal(GuardState.Unknown, GuardAggregate.Summary(Snapshot(GuardState.On, GuardState.Off, GuardState.Unknown, GuardState.On, off)));
+        // Claude Code and Codex settings are one layer: one on and one off is a mix, not "all on"
+        Assert.False(GuardAggregate.AllOn(Snapshot(GuardState.On, GuardState.On, GuardState.On, GuardState.Off, off)));
+    }
+
     [Fact]
     public async Task WslWriteScriptsVerifyEveryWriteAndNeverOverwriteAfterAFailedBackup()
     {

@@ -44,7 +44,8 @@ public sealed record WslDistroStatus(
     string? CurrentProxy,
     string Reason,
     bool ProxyEnvPresent = false,
-    int? ProxyEnvPort = null);
+    int? ProxyEnvPort = null,
+    bool Inactive = false);
 
 /// <summary>Status of the WSL layer: off (Reason explains) or an aggregate over distros. Warning — a read-only note about the environment (e.g. a loopback-only applications proxy endpoint the distros cannot reach).</summary>
 public sealed record WslConfigStatus(
@@ -258,12 +259,12 @@ public sealed class WslConfigGuard(
     {
         if (!installed.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not installed");
+            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not installed", Inactive: true);
         }
 
         if (!running.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not running");
+            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not running", Inactive: true);
         }
 
         try
@@ -1184,7 +1185,7 @@ public sealed class WslConfigGuard(
         fi
         """);
 
-    private static GuardState Aggregate(IReadOnlyList<WslDistroStatus> distros)
+    internal static GuardState Aggregate(IReadOnlyList<WslDistroStatus> distros)
     {
         if (distros.Any(d => d.State == GuardState.Unknown))
         {

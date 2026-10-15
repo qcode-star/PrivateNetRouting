@@ -577,7 +577,7 @@ public partial class MainWindow : Window
         SetGuardDots(
             snapshot.Ban.State,
             snapshot.Policy.State,
-            Merge(snapshot.Settings.State, snapshot.CodexSettings.State),
+            GuardAggregate.SettingsLayer(snapshot),
             snapshot.Wsl.State);
 
         // a hosts block that lags behind the configured list carries a visible note at the end of the
@@ -660,11 +660,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void RenderGuardSummary()
     {
-        var state = _lastGuards is null
-            ? GuardState.Unknown
-            : Merge(
-                Merge(_lastGuards.Ban.State, _lastGuards.Policy.State),
-                Merge(_lastGuards.Settings.State, Merge(_lastGuards.CodexSettings.State, _lastGuards.Wsl.State)));
+        var state = _lastGuards is null ? GuardState.Unknown : GuardAggregate.Summary(_lastGuards);
 
         var (word, brush) = state switch
         {
@@ -680,33 +676,13 @@ public partial class MainWindow : Window
         GuardSummary.Foreground = state == GuardState.Unknown ? Theme.TextMuted : brush;
     }
 
-    /// <summary>Two layer states as one: equals stay, anything mixed is partial, unknown dominates.</summary>
-    private static GuardState Merge(GuardState a, GuardState b)
-    {
-        if (a == b)
-        {
-            return a;
-        }
-
-        return a == GuardState.Unknown || b == GuardState.Unknown ? GuardState.Unknown : GuardState.Partial;
-    }
-
-    /// <summary>The settings row and the combined action treat both applications as one layer.</summary>
-    private GuardState SettingsLayerState() => _lastGuards is { } snapshot
-        ? Merge(snapshot.Settings.State, snapshot.CodexSettings.State)
-        : GuardState.Unknown;
-
     /// <summary>
     /// The collapsed card's single action follows the state: everything on — "Disable all"
     /// (ban and policy; the sync layers have no "off"), anything less — "Enable all".
     /// </summary>
     private void UpdateGuardAllButton()
     {
-        var allOn = _lastGuards is { } snapshot
-            && snapshot.Ban.State == GuardState.On
-            && snapshot.Policy.State == GuardState.On
-            && SettingsLayerState() == GuardState.On
-            && snapshot.Wsl.State == GuardState.On;
+        var allOn = _lastGuards is { } snapshot && GuardAggregate.AllOn(snapshot);
         GuardAllButton.Content = Loc.S(allOn ? "Main.Guard.Button.DisableAll" : "Main.Guard.Button.EnableAll");
     }
 
@@ -717,11 +693,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnGuardAll(object sender, RoutedEventArgs e)
     {
-        var disable = _lastGuards is { } snapshot
-            && snapshot.Ban.State == GuardState.On
-            && snapshot.Policy.State == GuardState.On
-            && SettingsLayerState() == GuardState.On
-            && snapshot.Wsl.State == GuardState.On;
+        var disable = _lastGuards is { } snapshot && GuardAggregate.AllOn(snapshot);
         await RunGuardAsync(async () =>
         {
             var all = await _runtime.Guard.AllAsync(!disable, CancellationToken.None);
