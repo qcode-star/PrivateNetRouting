@@ -58,4 +58,16 @@ public class ConnectRequestParserTests
         Assert.True(ok);
         Assert.Equal("example.com", request!.Host);
     }
+
+    [Theory]
+    [InlineData("CONNECT example.com:443 HTTP/1.1\r\nX-Pnr-Probe: 1\r\n\r\n", true)]
+    [InlineData("CONNECT example.com:443 HTTP/1.1\r\nHost: x\r\nx-pnr-probe:1\r\n\r\n", true)]
+    [InlineData("CONNECT example.com:443 HTTP/1.1\r\n\r\n", false)]
+    [InlineData("CONNECT example.com:443 HTTP/1.1\r\nUser-Agent: X-Pnr-Probe: 1\r\n\r\n", false)]
+    public void DetectsTheProbeMarkerHeader(string header, bool isProbe)
+    {
+        var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(header), out var request, out _);
+        Assert.True(ok);
+        Assert.Equal(isProbe, request!.IsProbe);
+    }
 }

@@ -48,7 +48,10 @@ public static class ProxyHealthCheck
             using var client = new TcpClient();
             await client.ConnectAsync(proxyHost, proxyPort, cts.Token);
             var stream = client.GetStream();
-            var request = $"CONNECT {targetHost}:{targetPort} HTTP/1.1\r\n\r\n";
+            // the marker header tells our own proxy that this is a liveness probe, not client
+            // traffic: otherwise every status poll would refresh the activity marker and the
+            // idle stopper would never see an idle chain
+            var request = $"CONNECT {targetHost}:{targetPort} HTTP/1.1\r\n{ConnectRequestParser.ProbeHeaderName}: 1\r\n\r\n";
             await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cts.Token);
 
             var buffer = new byte[256];

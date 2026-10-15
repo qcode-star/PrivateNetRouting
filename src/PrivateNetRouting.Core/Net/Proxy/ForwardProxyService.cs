@@ -273,7 +273,11 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
             using var upstreamClient = upstreamSocket;
             await stream.WriteAsync(EstablishResponse, _cts.Token);
-            _marker.Touch();
+            if (!target.IsProbe)
+            {
+                _marker.Touch();
+            }
+
             _log.Debug($"forward-proxy: {target} -> {route}");
 
             var upstreamStream = new NetworkStream(upstreamClient, ownsSocket: false);

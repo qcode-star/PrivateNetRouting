@@ -126,6 +126,41 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task HealthProbeDoesNotTouchActivityMarker()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (_, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+        var markerPath = Path.Combine(_tempDir, "marker");
+
+        var alive = await ProxyHealthCheck.CheckAsync(
+            "127.0.0.1", proxyEndpoint.Port, "health.example", originPort, TimeSpan.FromSeconds(5));
+        Assert.True(alive);
+
+        // the marker is touched right after the 200 is written: give a wrongly touching proxy time to do it
+        await Task.Delay(300);
+        Assert.False(File.Exists(markerPath), "a health probe counted as client activity");
+
+        // a real client CONNECT does touch it
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+        Assert.StartsWith("HTTP/1.1 200", await ReadLineAsync(stream));
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!File.Exists(markerPath) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.True(File.Exists(markerPath), "client traffic did not touch the activity marker");
+    }
+
+    [Fact]
     public async Task Socks5ModePassesTargetNameToUpstream()
     {
         var origin = await StartEchoServerAsync();

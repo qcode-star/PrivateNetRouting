@@ -1,7 +1,11 @@
 namespace PrivateNetRouting.Core.Net.Proxy;
 
-/// <summary>Parsed CONNECT: the host is normalized (no trailing dot, lowercase).</summary>
-public sealed record ConnectRequest(string Host, int Port)
+/// <summary>
+/// Parsed CONNECT: the host is normalized (no trailing dot, lowercase). IsProbe — the request
+/// carries the health-probe marker header: the proxy still serves it, but it is our own
+/// liveness check, not client traffic, so it must not count as activity for the idle stopper.
+/// </summary>
+public sealed record ConnectRequest(string Host, int Port, bool IsProbe = false)
 {
     public override string ToString() => $"{Host}:{Port}";
 }
@@ -14,6 +18,9 @@ public static class ConnectRequestParser
 {
     public const int MaxHeaderBytes = 64 * 1024;
     public const int DefaultPort = 443;
+
+    /// <summary>The header our own health probes put on their CONNECT (see <see cref="ProxyHealthCheck"/>).</summary>
+    public const string ProbeHeaderName = "X-Pnr-Probe";
 
     public static bool TryParse(ReadOnlySpan<byte> header, out ConnectRequest? request, out string? error)
     {
@@ -59,8 +66,24 @@ public static class ConnectRequestParser
             return false;
         }
 
-        request = new ConnectRequest(host.TrimEnd('.').ToLowerInvariant(), port);
+        request = new ConnectRequest(host.TrimEnd('.').ToLowerInvariant(), port, HasProbeHeader(header[lineEnd..]));
         return true;
+    }
+
+    /// <summary>Whether the header block (the part after the request line) holds the probe marker header.</summary>
+    private static bool HasProbeHeader(ReadOnlySpan<byte> headers)
+    {
+        foreach (var raw in System.Text.Encoding.Latin1.GetString(headers).Split('\n'))
+        {
+            var colon = raw.IndexOf(':');
+            if (colon > 0
+                && raw[..colon].Trim().Equals(ProbeHeaderName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string Truncate(string value) => value.Length <= 120 ? value : value[..120];
