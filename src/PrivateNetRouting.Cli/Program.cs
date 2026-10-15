@@ -968,6 +968,12 @@ internal static class Program
 
                 foreach (var distro in wsl.Distros)
                 {
+                    if (distro.Failed)
+                    {
+                        Console.Error.WriteLine($"{distro.Distro}: {distro.Reason}");
+                        continue;
+                    }
+
                     if (distro.Skipped)
                     {
                         Console.WriteLine($"{distro.Distro}: skipped ({distro.Reason})");
@@ -980,7 +986,7 @@ internal static class Program
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                 }
 
-                return 0;
+                return wsl.Distros.Any(d => d.Failed) ? 1 : 0;
 
             case "sysproxy":
                 bool? sysOn = rest.FirstOrDefault() switch

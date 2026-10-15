@@ -284,6 +284,12 @@ public sealed class GuardService(
         {
             foreach (var distro in result.Distros)
             {
+                if (distro.Failed)
+                {
+                    log.Warn($"guard wsl sync: {distro.Distro} {distro.Reason}");
+                    continue;
+                }
+
                 if (distro.Skipped)
                 {
                     log.Info($"guard wsl sync: {distro.Distro} skipped ({distro.Reason})");

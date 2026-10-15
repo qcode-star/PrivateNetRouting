@@ -72,7 +72,8 @@ public sealed record WslDistroSyncResult(
     bool BootRunnerWritten = false,
     bool UserCommandWritten = false,
     bool WslConfWritten = false,
-    IReadOnlyList<string>? BootBackups = null);
+    IReadOnlyList<string>? BootBackups = null,
+    bool Failed = false);
 
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
@@ -182,7 +183,17 @@ public sealed class WslConfigGuard(
                 continue;
             }
 
-            results.Add(await SyncDistroAsync(distro, gateway, ct));
+            // one broken distro must not abort the others: its failure becomes its own result
+            // (reported through the same skipped-with-reason surface); cancellation still propagates
+            try
+            {
+                results.Add(await SyncDistroAsync(distro, gateway, ct));
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException
+                or System.ComponentModel.Win32Exception)
+            {
+                results.Add(new WslDistroSyncResult(distro.Name, true, $"sync failed: {ex.Message}", null, false, null, false, null, Failed: true));
+            }
         }
 
         return new WslSyncResult(false, null, results);

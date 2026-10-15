@@ -1191,23 +1191,28 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
-    public async Task WslSyncFailsLoudlyWhenDistroScriptDidNotRun()
+    public async Task WslSyncReportsADistroWhoseScriptDidNotRunAndKeepsGoing()
     {
         // a bash syntax error inside the distro does not change the wsl.exe exit code
         var runner = new FakeWslRunner
         {
-            Installed = ["d1"],
-            Running = ["d1"],
+            Installed = ["d1", "d2"],
+            Running = ["d1", "d2"],
             WriteOutput = "bash: line 3: syntax error near unexpected token\n",
         };
         var guard = new WslConfigGuard(
-            WslConfig("on", ("d1", "u1")),
+            WslConfig("on", ("d1", "u1"), ("d2", "u2")),
             runner,
             gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
 
-        var ex = await Assert.ThrowsAsync<IOException>(() => guard.SyncAsync(CancellationToken.None));
-        Assert.Contains("did not run to the end", ex.Message);
-        Assert.Contains("syntax error", ex.Message);
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        // the failure is the distro's own result, and the next distro is still attempted
+        Assert.Equal(2, result.Distros.Count);
+        Assert.All(result.Distros, d => Assert.True(d.Failed));
+        Assert.Contains("did not run to the end", result.Distros[0].Reason);
+        Assert.Contains("syntax error", result.Distros[0].Reason);
+        Assert.Contains(runner.Scripts, s => s.Distro == "d2");
     }
 
     // ----- WSL boot layer (wsl.conf [boot] command → the marked runner) -----
