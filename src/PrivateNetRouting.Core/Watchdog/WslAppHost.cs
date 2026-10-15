@@ -58,6 +58,19 @@ public sealed class WslProcessRunner : IWslProcessRunner
 
         using var process = Process.Start(info)
             ?? throw new IOException("failed to start wsl.exe");
+
+        // a cancelled call (the stopper's own timeout included) must not leave a hung wsl.exe behind
+        using var killOnCancel = ct.Register(() =>
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // already gone
+            }
+        });
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
         if (standardInput is not null)
@@ -91,11 +104,34 @@ public sealed class WslAppHostStopper(
     IReadOnlyList<string> distros,
     bool stopClaude,
     bool stopCodex,
-    IWslProcessRunner wsl) : IWslAppHost
+    IWslProcessRunner wsl,
+    TimeSpan? distroTimeout = null) : IWslAppHost
 {
+    /// <summary>
+    /// Worst case of the stop script (RPC stops, SIGTERM and SIGKILL waits of both passes) with a
+    /// margin; a wedged wsl.exe or app host must not hold the idle stop — and with it the chain
+    /// stop that follows — forever.
+    /// </summary>
+    private static readonly TimeSpan DefaultDistroTimeout = TimeSpan.FromSeconds(120);
+
+    private static readonly TimeSpan ListTimeout = TimeSpan.FromSeconds(30);
+
     public async Task<WslHostStopResult> StopAsync(CancellationToken ct)
     {
-        var listing = await wsl.RunAsync(["--list", "--running", "--quiet"], null, Encoding.Unicode, ct);
+        string listing;
+        using (var listCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            listCts.CancelAfter(ListTimeout);
+            try
+            {
+                listing = await wsl.RunAsync(["--list", "--running", "--quiet"], null, Encoding.Unicode, listCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new IOException($"wsl.exe --list did not answer within {ListTimeout.TotalSeconds:0} s");
+            }
+        }
+
         var running = listing.Split('\n')
             .Select(line => line.Replace("\0", "").Trim())
             .Where(line => line.Length > 0)
@@ -117,8 +153,22 @@ public sealed class WslAppHostStopper(
         {
             // as root, like the guard: another default user cannot read /proc/*/environ or the exe
             // links of the app hosts, nor signal them, and the stop would silently find nothing
-            var output = await wsl.RunAsync(["-d", distro, "-u", "root", "--", "bash", "-s"], Script(stopClaude, stopCodex), Encoding.UTF8, ct);
-            var result = Parse(output);
+            var limit = distroTimeout ?? DefaultDistroTimeout;
+            using var distroCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            distroCts.CancelAfter(limit);
+            WslHostStopResult result;
+            try
+            {
+                var output = await wsl.RunAsync(["-d", distro, "-u", "root", "--", "bash", "-s"], Script(stopClaude, stopCodex), Encoding.UTF8, distroCts.Token);
+                result = Parse(output);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // the caller is not cancelling: this distro simply did not finish — report it as
+                // unconfirmed and go on to the next distro and, in the end, the chain stop
+                result = new WslHostStopResult(WslHostState.Stuck, $"timed out after {limit.TotalSeconds:0} s");
+            }
+
             details.Add($"[{distro}] {result.State}: {result.Detail}");
             if (result.State == WslHostState.Stuck || (result.State == WslHostState.Stopped && state == WslHostState.None))
             {
@@ -236,7 +286,7 @@ public sealed class WslAppHostStopper(
                         echo "SKIP pid=$p (exe='$exe' socket='$sock')"
                         continue
                     fi
-                    out=$("$exe" --stop --socket "$sock" 2>&1 | head -n 1)
+                    out=$(timeout 20 "$exe" --stop --socket "$sock" 2>&1 | head -n 1)
                     echo "STOP pid=$p -> ${out:-<no output>}"
                 done
 

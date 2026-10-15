@@ -208,6 +208,56 @@ public class WatchdogTests : IDisposable
         Assert.DoesNotContain("[pnr-c]", result.Detail);
     }
 
+    /// <summary>A wedged distro must not hold the idle stop (and the chain stop behind it) forever.</summary>
+    [Fact]
+    public async Task StopperTimesOutAWedgedDistroAndMovesOn()
+    {
+        var wsl = new HangingWsl("pnr-a", "pnr-a\r\npnr-b\r\n");
+        var stopper = new WslAppHostStopper(
+            ["pnr-a", "pnr-b"], stopClaude: true, stopCodex: true, wsl, distroTimeout: TimeSpan.FromMilliseconds(200));
+
+        var result = await stopper.StopAsync(CancellationToken.None);
+
+        Assert.Equal(WslHostState.Stuck, result.State);
+        Assert.Contains("[pnr-a] Stuck: timed out", result.Detail);
+        Assert.Contains("[pnr-b] Stopped", result.Detail); // the next distro was still visited
+    }
+
+    [Fact]
+    public async Task StopperDoesNotSwallowTheCallersCancellation()
+    {
+        var wsl = new HangingWsl("pnr-a", "pnr-a\r\n");
+        var stopper = new WslAppHostStopper(["pnr-a"], stopClaude: true, stopCodex: true, wsl);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stopper.StopAsync(cts.Token));
+    }
+
+    [Fact]
+    public void StopScriptBoundsTheClaudeRpcStop()
+    {
+        Assert.Contains("timeout 20 \"$exe\" --stop", WslAppHostStopper.Script(stopClaude: true, stopCodex: false));
+    }
+
+    /// <summary>wsl.exe that never returns for the hanging distro and answers STATE=stopped for the others.</summary>
+    private sealed class HangingWsl(string hangingDistro, string listing) : IWslProcessRunner
+    {
+        public async Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct)
+        {
+            if (arguments[0] == "--list")
+            {
+                return listing;
+            }
+
+            if (arguments[1] == hangingDistro)
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+
+            return "STOP pid=1 -> ok\nREMAIN=0\nSTATE=stopped\n";
+        }
+    }
+
     [Fact]
     public void UsageProbePriorityProcessesOverConnectionsOverMarker()
     {
