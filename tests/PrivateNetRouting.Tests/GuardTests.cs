@@ -181,6 +181,24 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void HostsBlockWithoutEndMarkerIsNeverRewritten()
+    {
+        var path = Path.Combine(_tempDir, "hosts");
+        var original = "127.0.0.1 localhost\n# >>> ban\n0.0.0.0 old.example\n# docker section\n10.0.0.5 host.docker.internal\n";
+        File.WriteAllText(path, original);
+        var domains = new List<string> { "claude.ai" };
+
+        Assert.Throws<IOException>(() => HostsFileBlock.Apply(path, "# >>> ban", "# <<< ban", "# comment", domains));
+        Assert.Throws<IOException>(() => HostsFileBlock.Remove(path, "# >>> ban", "# <<< ban"));
+
+        Assert.Equal(original, File.ReadAllText(path));
+        var state = HostsFileBlock.Read(path, "# >>> ban", "# <<< ban", "# comment", domains);
+        Assert.True(state.Present);
+        Assert.False(state.Current);
+        Assert.Equal(0, state.EntryCount);
+    }
+
+    [Fact]
     public void HostsBlockReapplyIsNoop()
     {
         var path = Path.Combine(_tempDir, "hosts");
