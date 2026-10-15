@@ -306,6 +306,16 @@ public class WatchdogTests : IDisposable
         }
     }
 
+    [Fact]
+    public void StopScriptNeverTargetsItselfOrItsAncestors()
+    {
+        var script = WslAppHostStopper.Script(stopClaude: true, stopCodex: true);
+
+        Assert.Contains("q=$$", script);
+        Assert.Contains("case \"$self_pids\" in *\" ${p#/proc/} \"*) continue ;; esac", script);
+        Assert.DoesNotContain("\r", script);
+    }
+
     private WatchdogService Create(
         FakeUsage usage,
         FakeWsl? wsl,

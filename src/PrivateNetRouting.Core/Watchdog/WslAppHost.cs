@@ -163,8 +163,17 @@ public sealed class WslAppHostStopper(
         STOP_CODEX={{(stopCodex ? 1 : 0)}}
 
         # --- codex: leftover processes of the desktop app (env carries CODEX_HOME) ---
+        # This script and its ancestors are never targets: a CODEX_HOME forwarded through WSLENV
+        # (or exported by the user's profile) would otherwise make the stopper kill itself.
+        self_pids=" "
+        q=$$
+        while [ -n "$q" ] && [ "$q" -gt 0 ] 2>/dev/null; do
+            self_pids="$self_pids$q "
+            q=$(sed -e 's/^.*) //' "/proc/$q/stat" 2>/dev/null | awk '{print $2}')
+        done
         codex_pids() {
             for p in /proc/[0-9]*; do
+                case "$self_pids" in *" ${p#/proc/} "*) continue ;; esac
                 if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -q '^CODEX_HOME='; then
                     echo "${p#/proc/}"
                 fi
