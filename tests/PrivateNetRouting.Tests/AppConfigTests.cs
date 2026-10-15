@@ -27,6 +27,17 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void FirstRunFileKeepsEnvironmentVariablesUnexpanded()
+    {
+        var config = AppConfigStore.LoadOrCreate(_path);
+
+        var text = File.ReadAllText(_path);
+        Assert.Contains("%LOCALAPPDATA%", text);
+        Assert.DoesNotContain(Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%").Replace("\\", "\\\\"), text);
+        Assert.DoesNotContain("%", config.Claude.Update.CacheDir); // the returned copy is expanded
+    }
+
+    [Fact]
     public void RoundTripsChangedValues()
     {
         var config = AppConfigStore.LoadOrCreate(_path);

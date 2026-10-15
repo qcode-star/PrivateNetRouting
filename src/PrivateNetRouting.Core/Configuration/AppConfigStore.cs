@@ -38,9 +38,11 @@ public static class AppConfigStore
             return config;
         }
 
+        // saved first: the file keeps %VAR% as written (no user name leaks into it), the
+        // in-memory copy is expanded afterwards
         var fresh = new AppConfig();
-        fresh.ExpandEnvironmentVariables();
         Save(fresh, path);
+        fresh.ExpandEnvironmentVariables();
         return fresh;
     }
 
