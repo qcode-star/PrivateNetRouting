@@ -177,7 +177,8 @@ Architecture notes:
   the running GUI by the single-instance mutex, terminates the background workers before touching
   the files (they have no window, so the Restart Manager cannot close them — the install and the
   uninstall would stop on the "unable to automatically close all applications" error), and writes
-  no autostart entries (rule #4).
+  no autostart entries (rule #4). The uninstaller reverts nothing outside its folder: it asks first,
+  listing the commands that turn the guards off (`pnr guard ban|policy|sysproxy off`, `pnr chain down`).
 - Guard: the ban rule identifiers (hosts block markers, the NRPT rule DisplayName, the firewall
   rule Group) are in the config; the application maintains a ban with these identifiers, not a
   parallel one. The guard status is read-only; after applying or removing a ban — live probes,
