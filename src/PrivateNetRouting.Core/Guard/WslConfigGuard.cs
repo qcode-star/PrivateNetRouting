@@ -540,6 +540,20 @@ public sealed class WslConfigGuard(
         var envPath = config.Wsl.ProxyEnvPath;
         var settingsPath = $"/home/{distro.User}/.claude/settings.json";
         var runnerPath = BootRunnerPath(scriptPath);
+
+        // An empty path would make `[ -f  ]` true and `grep -E …` with no file read the rest of
+        // the probe script from stdin, so the block exists only for a configured path.
+        var envProbe = string.IsNullOrWhiteSpace(envPath)
+            ? "echo PROXYENV=missing"
+            : $"""
+            if [ -f {envPath} ]; then
+                echo PROXYENV=present
+                grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
+                grep -E '^PNR_CODEX_PROXY_HOST=' {envPath} 2>/dev/null || true
+            else
+                echo PROXYENV=missing
+            fi
+            """;
         var probe = NormalizeLf($"""
             if [ -f {scriptPath} ]; then
                 echo SCRIPT=present
@@ -549,13 +563,7 @@ public sealed class WslConfigGuard(
             else
                 echo SCRIPT=missing
             fi
-            if [ -f {envPath} ]; then
-                echo PROXYENV=present
-                grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
-                grep -E '^PNR_CODEX_PROXY_HOST=' {envPath} 2>/dev/null || true
-            else
-                echo PROXYENV=missing
-            fi
+            {envProbe}
             if [ -f {runnerPath} ]; then
                 if grep -q '{BootRunnerMarker}' {runnerPath} 2>/dev/null; then
                     echo RUNNER=ours

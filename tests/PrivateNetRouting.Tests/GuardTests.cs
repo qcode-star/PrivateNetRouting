@@ -112,6 +112,9 @@ internal sealed class FakeWslRunner : IWslProcessRunner
     /// <summary>stdin of scripts passed to the distro: (distro, user, script).</summary>
     public List<(string Distro, string? User, string Script)> Scripts { get; } = [];
 
+    /// <summary>stdin of the reading probes (state read), by distro.</summary>
+    public List<(string Distro, string Script)> Probes { get; } = [];
+
     public Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct)
     {
         if (arguments.Contains("--list"))
@@ -129,6 +132,7 @@ internal sealed class FakeWslRunner : IWslProcessRunner
             // the writing scripts (settings/startup) are only recorded
             if (standardInput.Contains("echo SETTINGS=END"))
             {
+                Probes.Add((distro, standardInput));
                 return Task.FromResult(ProbeOutput(distro) + "PNR=ok\n");
             }
 
@@ -1267,6 +1271,28 @@ public class GuardTests : IDisposable
         // paths are Linux-side: no separator rewriting
         Assert.Equal("/etc/wsl.d/startup.sh", WslConfigGuard.BootRunnerPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
         Assert.Equal("/etc/wsl.d/startup/00-user-boot-command.sh", WslConfigGuard.UserCommandPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
+    }
+
+    [Fact]
+    public async Task WslProbeOmitsTheProxyEnvBlockForAnEmptyPath()
+    {
+        // `[ -f  ]` is true and a file-less `grep -E` reads the rest of the probe from stdin
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => WslProbeInSync("u1"),
+        };
+        var config = WslConfig("on", ("d1", "u1"));
+        config.Wsl.ProxyEnvPath = "";
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.ReadAsync(CancellationToken.None);
+
+        var probe = Assert.Single(runner.Probes).Script;
+        Assert.DoesNotContain("PNR_CODEX_PROXY_PORT", probe);
+        Assert.DoesNotContain("[ -f  ]", probe);
+        Assert.Contains("PROXYENV=missing", probe);
     }
 
     [Fact]
