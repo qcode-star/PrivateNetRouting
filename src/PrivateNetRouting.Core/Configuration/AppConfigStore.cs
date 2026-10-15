@@ -32,8 +32,7 @@ public static class AppConfigStore
         path ??= GetDefaultConfigPath();
         if (File.Exists(path))
         {
-            using var stream = File.OpenRead(path);
-            var config = Deserialize(stream, path);
+            var config = Deserialize(ReadShared(path), path);
             config.ExpandEnvironmentVariables();
             return config;
         }
@@ -57,8 +56,7 @@ public static class AppConfigStore
         AppConfig config;
         if (File.Exists(path))
         {
-            using var stream = File.OpenRead(path);
-            config = Deserialize(stream, path);
+            config = Deserialize(ReadShared(path), path);
         }
         else
         {
@@ -72,13 +70,62 @@ public static class AppConfigStore
     public static void Save(AppConfig config, string? path = null)
     {
         path ??= GetDefaultConfigPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var stream = File.Create(path);
-        JsonSerializer.Serialize(stream, config, JsonOptions);
+        WriteAtomic(path, JsonSerializer.Serialize(config, JsonOptions));
     }
 
-    private static AppConfig Deserialize(Stream stream, string path) =>
-        JsonSerializer.Deserialize<AppConfig>(stream, JsonOptions)
+    /// <summary>
+    /// The file is replaced in one step (a temp file next to it, then a move over it): a worker
+    /// starting during the write reads the old or the new content, never an empty or half-written
+    /// file, and a crash mid-write leaves the previous config in place.
+    /// </summary>
+    internal static void WriteAtomic(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = $"{path}.{Environment.ProcessId}.tmp";
+        try
+        {
+            File.WriteAllText(temp, content, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (IOException)
+            {
+                // the temp file is leftover garbage, not the config
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reads the file for deserialization. A writer or a scanner may hold it for a moment (the
+    /// replacement above is atomic, but an editor or an antivirus can still lock it), so a
+    /// sharing violation is retried briefly before it surfaces.
+    /// </summary>
+    private static string ReadShared(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(50 * (attempt + 1));
+            }
+        }
+    }
+
+    private static AppConfig Deserialize(string json, string path) =>
+        JsonSerializer.Deserialize<AppConfig>(json, JsonOptions)
         ?? throw new InvalidDataException($"config {path} is empty or corrupted");
 
     /// <summary>

@@ -27,6 +27,57 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void SaveReplacesTheFileInOneStepAndLeavesNoTempFile()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        var config = AppConfigStore.LoadOrCreate(_path);
+        config.Ui.Language = "ru";
+
+        AppConfigStore.Save(config, _path);
+
+        Assert.Equal("ru", AppConfigStore.LoadOrCreate(_path).Ui.Language);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(_path)!, Path.GetFileName(_path) + ".*.tmp"));
+    }
+
+    [Fact]
+    public void AFailedSaveKeepsThePreviousConfigIntact()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        var before = File.ReadAllText(_path);
+        // a directory squats on the target name: the final move fails after the temp file was written
+        var blocked = Path.Combine(Path.GetTempPath(), $"pnr-blocked-{Guid.NewGuid():N}.json");
+        Directory.CreateDirectory(blocked);
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => AppConfigStore.Save(new AppConfig(), blocked));
+            Assert.Empty(Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(blocked) + ".*.tmp"));
+            Assert.Equal(before, File.ReadAllText(_path));
+        }
+        finally
+        {
+            Directory.Delete(blocked);
+        }
+    }
+
+    [Fact]
+    public async Task LoadWaitsOutAShortSharingViolation()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        // a reader-hostile holder (no sharing at all) that lets go after a moment
+        var holder = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(150);
+            holder.Dispose();
+        });
+
+        var config = AppConfigStore.LoadOrCreate(_path);
+
+        Assert.NotNull(config);
+        await release;
+    }
+
+    [Fact]
     public void FirstRunFileKeepsEnvironmentVariablesUnexpanded()
     {
         var config = AppConfigStore.LoadOrCreate(_path);
