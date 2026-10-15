@@ -35,40 +35,81 @@ public sealed class WatchdogService(
             // ConfigureAwait: the worker host blocks a thread on this call (App OnStartup) — the
             // continuations must not land in its context (the Core start/stop rule)
             await _delay(idleWindow, ct).ConfigureAwait(false);
-            var reason = usage.GetInUseReason(idleWindow);
-            if (reason is not null)
+            try
             {
-                log.Debug($"watchdog: in use — {reason}");
-                if (reason != previousReason)
+                var outcome = await TickAsync(idleWindow, previousReason, progress, ct).ConfigureAwait(false);
+                if (outcome.Done)
                 {
-                    log.Info($"watchdog: in use — {reason}");
+                    return;
                 }
 
-                previousReason = reason;
-                continue;
+                previousReason = outcome.Reason;
             }
-
-            log.Info("watchdog: idle — stopping");
-            if (wslHost is null)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                log.Info("watchdog: no distros configured (wsl.distros), the WSL step is skipped");
+                throw;
             }
-            else
+            catch (Exception ex)
             {
-                try
-                {
-                    var result = await wslHost.StopAsync(ct).ConfigureAwait(false);
-                    log.Info($"watchdog: wsl host: {result.State} {result.Detail}");
-                }
-                catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
-                {
-                    log.Warn($"watchdog: WSL host stop failed: {ex.Message}");
-                }
+                // one failed tick (a probe or log I/O error, a declined UAC on the chain stop) must
+                // not end the stopper: it would leave the chain up with nobody watching — retry next tick
+                TryWarn($"watchdog: tick failed, will retry in {config.CheckSeconds}s: {ex.Message}");
             }
-
-            await chain.StopAsync(progress, ct).ConfigureAwait(false);
-            log.Info("watchdog: chain stopped, exiting");
-            return;
         }
     }
+
+    private async Task<TickOutcome> TickAsync(
+        TimeSpan idleWindow,
+        string? previousReason,
+        IProgress<ChainStep>? progress,
+        CancellationToken ct)
+    {
+        var reason = usage.GetInUseReason(idleWindow);
+        if (reason is not null)
+        {
+            log.Debug($"watchdog: in use — {reason}");
+            if (reason != previousReason)
+            {
+                log.Info($"watchdog: in use — {reason}");
+            }
+
+            return new TickOutcome(false, reason);
+        }
+
+        log.Info("watchdog: idle — stopping");
+        if (wslHost is null)
+        {
+            log.Info("watchdog: no distros configured (wsl.distros), the WSL step is skipped");
+        }
+        else
+        {
+            try
+            {
+                var result = await wslHost.StopAsync(ct).ConfigureAwait(false);
+                log.Info($"watchdog: wsl host: {result.State} {result.Detail}");
+            }
+            catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+            {
+                log.Warn($"watchdog: WSL host stop failed: {ex.Message}");
+            }
+        }
+
+        await chain.StopAsync(progress, ct).ConfigureAwait(false);
+        log.Info("watchdog: chain stopped, exiting");
+        return new TickOutcome(true, null);
+    }
+
+    private void TryWarn(string message)
+    {
+        try
+        {
+            log.Warn(message);
+        }
+        catch (Exception)
+        {
+            // the log itself is what failed: nothing left to report to
+        }
+    }
+
+    private sealed record TickOutcome(bool Done, string? Reason);
 }

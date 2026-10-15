@@ -68,15 +68,33 @@ public class WatchdogTests : IDisposable
     }
 
     [Fact]
-    public async Task ChainStopFailurePropagates()
+    public async Task FailedChainStopIsRetriedOnTheNextTick()
     {
         var events = new List<string>();
-        var chain = new FakeChain(events) { StopThrows = new ChainException("daemon", new IOException("UAC declined")) };
+        var chain = new FakeChain(events)
+        {
+            StopThrows = new ChainException("daemon", new IOException("UAC declined")),
+            StopFailures = 1,
+        };
         var watchdog = Create(usage: new FakeUsage(null), wsl: new FakeWsl(events), chain: chain);
 
-        await Assert.ThrowsAsync<ChainException>(() => watchdog.RunAsync(null, CancellationToken.None));
+        await watchdog.RunAsync(null, CancellationToken.None);
 
-        Assert.Equal(["wsl.stop:pnr-test", "chain.stop"], events); // the WSL host is shut down before the attempt to stop the chain
+        // the declined stop does not end the stopper: the second tick stops the chain and exits
+        Assert.Equal(["wsl.stop:pnr-test", "chain.stop", "wsl.stop:pnr-test", "chain.stop"], events);
+    }
+
+    [Fact]
+    public async Task ThrowingProbeDoesNotKillTheLoop()
+    {
+        var events = new List<string>();
+        var usage = new FakeUsage(null, throwOnFirst: true);
+        var watchdog = Create(usage: usage, wsl: null, chain: new FakeChain(events));
+
+        await watchdog.RunAsync(null, CancellationToken.None);
+
+        Assert.Equal(["chain.stop"], events);
+        Assert.Equal(2, usage.Checks);
     }
 
     [Fact]
@@ -329,7 +347,7 @@ public class WatchdogTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private sealed class FakeUsage(string? reason, bool thenNull = false, List<string>? events = null) : IClaudeUsageProbe
+    private sealed class FakeUsage(string? reason, bool thenNull = false, List<string>? events = null, bool throwOnFirst = false) : IClaudeUsageProbe
     {
         public int Checks { get; private set; }
 
@@ -337,6 +355,11 @@ public class WatchdogTests : IDisposable
         {
             Checks++;
             events?.Add("usage.check");
+            if (throwOnFirst && Checks == 1)
+            {
+                throw new UnauthorizedAccessException("marker denied");
+            }
+
             if (thenNull && Checks > 1)
             {
                 return null;
@@ -372,6 +395,11 @@ public class WatchdogTests : IDisposable
     {
         public ChainException? StopThrows { get; set; }
 
+        /// <summary>How many stops throw before they start succeeding; 0 — every stop throws.</summary>
+        public int StopFailures { get; set; }
+
+        private int _stopCalls;
+
         public Task<ChainState> GetStateAsync(CancellationToken ct) => Task.FromResult(new ChainState(false, false, false, null, false, false));
 
         public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct) => Task.CompletedTask;
@@ -379,7 +407,8 @@ public class WatchdogTests : IDisposable
         public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
         {
             events.Add("chain.stop");
-            if (StopThrows is not null)
+            _stopCalls++;
+            if (StopThrows is not null && (StopFailures == 0 || _stopCalls <= StopFailures))
             {
                 throw StopThrows;
             }
