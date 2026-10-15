@@ -2,6 +2,7 @@ using System.Diagnostics;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
 
@@ -937,6 +938,32 @@ public class ChainSupervisorTests : IDisposable
         Directory.Delete(stateDir, recursive: true);
         log.Dispose();
         File.Delete(logPath);
+    }
+
+    /// <summary>
+    /// A cancelled bring-up must surface as OperationCanceledException from the elevated runner
+    /// (never as a failed result that the chain wraps into a daemon failure), and it must not raise
+    /// the UAC prompt for an operation that is already cancelled.
+    /// </summary>
+    [Fact]
+    public async Task ElevatedRunnerCancellationSurfacesAsOperationCanceled()
+    {
+        if (WindowsPrivilege.IsElevated())
+        {
+            return; // an elevated process takes the in-process path, which has no wait to cancel
+        }
+
+        var stateDir = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}");
+        var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
+        using var log = new FileLog(logPath);
+        var runner = new ElevatedRunner(new ChainTailscaleConfig { StateDir = stateDir }, log);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => runner.RunAsync("--elevated-test-command", cts.Token));
+
+        Assert.False(Directory.Exists(stateDir)); // nothing was prepared for a helper
     }
 
     public void Dispose()

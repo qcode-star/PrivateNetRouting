@@ -189,6 +189,9 @@ public sealed class ElevatedRunner(
             return new ElevatedResult(code == 0, detail);
         }
 
+        // no UAC prompt for an operation that is already cancelled
+        ct.ThrowIfCancellationRequested();
+
         var resultPath = MakeResultPath(command, out var nonce);
         _ = nonce; // uniqueness is guaranteed by the file name
         var exe = Environment.ProcessPath
@@ -231,14 +234,9 @@ public sealed class ElevatedRunner(
                 }
             }
 
-            try
-            {
-                await Task.Delay(500, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return new ElevatedResult(false, "wait interrupted");
-            }
+            // a cancellation surfaces as OperationCanceledException (the chain contract), not as a
+            // failure of the helper
+            await Task.Delay(500, ct);
         }
 
         log.Error($"elevated {command}: UAC/start not confirmed within {config.UacWaitSeconds}s");
