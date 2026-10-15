@@ -60,8 +60,14 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     private readonly bool _passHostName;
 
     /// <summary>Per start: StopAsync cancels the token, and a fresh one is issued on the next
-    /// StartAsync — a reused token would kill the accept loop the moment it starts.</summary>
+    /// StartAsync — a reused token would kill the accept loop the moment it starts. Everything
+    /// that outlives the start call (accept loops, handlers, the WSL bind) works with the token
+    /// of its own start, never re-reads this field.</summary>
     private CancellationTokenSource _cts = new();
+
+    /// <summary>Serialises StartAsync/StopAsync/DisposeAsync: the token, the listener list and
+    /// the running flag change together.</summary>
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly List<TcpListener> _listeners = [];
     private readonly object _gate = new();
     private Task? _wslBindTask;
@@ -110,76 +116,124 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     public async Task StartAsync(CancellationToken ct)
     {
-        if (_running)
+        // ConfigureAwait is mandatory here and in StopAsync (see there)
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            return;
+            if (_running)
+            {
+                return;
+            }
+
+            var cts = new CancellationTokenSource();
+            var token = cts.Token;
+            var previous = _cts;
+            _cts = cts;
+            previous.Dispose(); // cancelled by its stop (or never used); handlers keep only its token
+
+            try
+            {
+                var listen = Socks5Client.ParseEndPoint(_config.Listen);
+                var listener = BindListener(listen, token)!;
+                _ = AcceptLoopAsync(listener, token);
+                _log.Info($"forward-proxy: listening on {listen}");
+
+                if (_config.BindWslGateway)
+                {
+                    _wslBindTask = Task.Run(() => WslBindWaitAsync(listen.Port, token), CancellationToken.None);
+                }
+            }
+            catch
+            {
+                await cts.CancelAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            _running = true;
         }
-
-        _cts = new CancellationTokenSource();
-        var listen = Socks5Client.ParseEndPoint(_config.Listen);
-        var listener = BindListener(listen);
-        _ = AcceptLoopAsync(listener);
-        _log.Info($"forward-proxy: listening on {listen}");
-
-        if (_config.BindWslGateway)
+        finally
         {
-            _wslBindTask = Task.Run(() => WslBindWaitAsync());
+            _lifecycle.Release();
         }
-
-        _running = true;
-        await Task.CompletedTask;
     }
 
     public async Task StopAsync()
     {
-        if (!_running)
-        {
-            return;
-        }
-
-        _running = false;
         // ConfigureAwait is mandatory: the shutdown is awaited blocking (OnExit GUI) under the
         // Dispatcher context — a captured context would deadlock the wait
-        await _cts.CancelAsync().ConfigureAwait(false);
-        lock (_gate)
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
         {
-            foreach (var listener in _listeners)
+            if (!_running)
             {
-                listener.Stop();
-            }
-
-            _listeners.Clear();
-        }
-
-        _log.Info("forward-proxy: stopped");
-    }
-
-    /// <summary>One-time bind on the WSL gateway: wait for the adapter with retries, bind, exit.</summary>
-    private async Task WslBindWaitAsync()
-    {
-        while (!_cts.IsCancellationRequested)
-        {
-            var gateway = WslGateway.FindIpv4();
-            if (gateway is not null)
-            {
-                try
-                {
-                    var listener = BindListener(new IPEndPoint(gateway, ((IPEndPoint)Socks5Client.ParseEndPoint(_config.Listen)).Port));
-                    _ = AcceptLoopAsync(listener);
-                    _log.Info($"forward-proxy: listening on WSL gateway {gateway} (one-time bind)");
-                }
-                catch (SocketException ex)
-                {
-                    _log.Error($"forward-proxy: bind on WSL gateway {gateway} failed: {ex.Message}");
-                }
-
                 return;
             }
 
-            _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
+            _running = false;
+            await _cts.CancelAsync().ConfigureAwait(false);
+            lock (_gate)
+            {
+                foreach (var listener in _listeners)
+                {
+                    listener.Stop();
+                }
+
+                _listeners.Clear();
+            }
+
+            _log.Info("forward-proxy: stopped");
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    /// <summary>
+    /// Bind on the WSL gateway: waits for the adapter with retries and retries a failed bind the
+    /// same way, until it succeeds or the start it belongs to is stopped.
+    /// </summary>
+    private async Task WslBindWaitAsync(int port, CancellationToken token)
+    {
+        string? lastFailure = null;
+        while (!token.IsCancellationRequested)
+        {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token).ConfigureAwait(false);
+                var gateway = WslGateway.FindIpv4();
+                if (gateway is not null)
+                {
+                    var listener = BindListener(new IPEndPoint(gateway, port), token);
+                    if (listener is null)
+                    {
+                        return; // the service was stopped meanwhile: nothing may be bound any more
+                    }
+
+                    _ = AcceptLoopAsync(listener, token);
+                    _log.Info($"forward-proxy: listening on WSL gateway {gateway} (one-time bind)");
+                    return;
+                }
+
+                _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // a failed bind or a failed adapter lookup is retried: the next attempt may succeed
+                var failure = $"WSL gateway bind failed: {ex.Message}";
+                if (failure == lastFailure)
+                {
+                    _log.Debug($"forward-proxy: {failure}, retrying in 30 s");
+                }
+                else
+                {
+                    _log.Warn($"forward-proxy: {failure}, retrying every 30 s");
+                    lastFailure = failure;
+                }
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -188,35 +242,40 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
     }
 
-    private TcpListener BindListener(IPEndPoint endpoint)
+    /// <summary>Null — the start this bind belongs to was stopped; a listener is never added after the stop cleared the list.</summary>
+    private TcpListener? BindListener(IPEndPoint endpoint, CancellationToken token)
     {
-        var listener = new TcpListener(endpoint);
-        listener.Start(backlog: 128);
         lock (_gate)
         {
-            _listeners.Add(listener);
-        }
+            if (token.IsCancellationRequested)
+            {
+                return null;
+            }
 
-        return listener;
+            var listener = new TcpListener(endpoint);
+            listener.Start(backlog: 128);
+            _listeners.Add(listener);
+            return listener;
+        }
     }
 
-    private async Task AcceptLoopAsync(TcpListener listener)
+    private async Task AcceptLoopAsync(TcpListener listener, CancellationToken token)
     {
-        while (!_cts.IsCancellationRequested)
+        while (!token.IsCancellationRequested)
         {
             TcpClient client;
             try
             {
                 // without capturing the caller's context: the accept loop must not depend
                 // on the liveness of the UI thread (continuations — to the pool)
-                client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
+                client = await listener.AcceptTcpClientAsync(token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
             {
                 // the listener was taken down by the service stop
                 return;
             }
-            catch (SocketException ex) when (_cts.IsCancellationRequested
+            catch (SocketException ex) when (token.IsCancellationRequested
                 || ex.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted or SocketError.Shutdown)
             {
                 // the listener was stopped under the pending accept
@@ -229,7 +288,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 _log.Warn($"forward-proxy: accept failed ({ex.SocketErrorCode}), continuing: {ex.Message}");
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(50), _cts.Token).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(50), token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -239,15 +298,16 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 continue;
             }
 
-            _ = Task.Run(() => HandleClientAsync(client));
+            _ = Task.Run(() => HandleClientAsync(client, token), CancellationToken.None);
         }
     }
 
-    private async Task HandleClientAsync(TcpClient client)
+    /// <summary>
+    /// <paramref name="stopToken"/> is the token of the start that accepted this client: a stop
+    /// must end its tunnels, and a later start must not hand them its fresh one.
+    /// </summary>
+    private async Task HandleClientAsync(TcpClient client, CancellationToken stopToken)
     {
-        // the token of the start that accepted this client: a stop must end its tunnels, and a
-        // later start must not hand them its fresh one
-        var stopToken = _cts.Token;
         using var _ = client;
         Interlocked.Increment(ref _totalConnections);
         Interlocked.Increment(ref _activeConnections);
@@ -255,17 +315,17 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         {
             var stream = client.GetStream();
 
-            using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
             headerCts.CancelAfter(TimeSpan.FromSeconds(_config.HeaderTimeoutSeconds));
-            var header = await ReadHeaderAsync(stream, headerCts.Token);
-            if (header is null)
+            var received = await ReadHeaderAsync(stream, headerCts.Token);
+            if (received is null)
             {
                 return;
             }
 
-            if (!ConnectRequestParser.TryParse(header, out var request, out var parseError))
+            if (!ConnectRequestParser.TryParse(received.Value.Header, out var request, out var parseError))
             {
-                await stream.WriteAsync(BadRequestResponse, _cts.Token);
+                await stream.WriteAsync(BadRequestResponse, stopToken);
                 _log.Warn($"forward-proxy: {client.Client.RemoteEndPoint}: {parseError}");
                 return;
             }
@@ -277,7 +337,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             {
                 // the socks5 mode: the name rides the CONNECT, the trusted upstream resolves
                 upstreamSocket = await _socks.ConnectAsync(
-                    target.Host, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), _cts.Token);
+                    target.Host, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), stopToken);
                 route = "upstream resolves";
             }
             else
@@ -286,14 +346,14 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                     ?? throw new InvalidOperationException("forward-proxy: no resolver configured for by-IP dialing");
                 var destination = IPAddress.TryParse(target.Host, out var literal)
                     ? new ResolveResult(literal, "literal", null)
-                    : await resolver.ResolveAsync(target.Host, _cts.Token);
+                    : await resolver.ResolveAsync(target.Host, stopToken);
                 upstreamSocket = await _socks.ConnectAsync(
-                    destination.Ip, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), _cts.Token);
+                    destination.Ip, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), stopToken);
                 route = $"{destination.Ip} ({destination.Source})";
             }
 
             using var upstreamClient = upstreamSocket;
-            await stream.WriteAsync(EstablishResponse, _cts.Token);
+            await stream.WriteAsync(EstablishResponse, stopToken);
             if (!target.IsProbe)
             {
                 _marker.Touch();
@@ -307,9 +367,18 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             EnableKeepAlive(upstreamClient);
 
             var upstreamStream = new NetworkStream(upstreamClient, ownsSocket: false);
+
+            // bytes the client sent right behind the CONNECT header (a pipelined ClientHello)
+            // belong to the tunnel: they were read together with the header
+            var pipelined = received.Value.Leftover;
+            if (pipelined.Length > 0)
+            {
+                await upstreamStream.WriteAsync(pipelined, stopToken);
+            }
+
             await TunnelAsync(stream, upstreamStream, stopToken);
         }
-        catch (OperationCanceledException) when (!_running)
+        catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
         {
             // service stop: close silently
         }
@@ -350,8 +419,10 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     }
 
     /// <summary>
-    /// Pumps bytes in both directions; the end of one direction shuts down both sockets, and so
-    /// does the cancellation of <paramref name="ct"/> (the service stop).
+    /// Pumps bytes in both directions until both have ended. A clean end of one direction is a
+    /// half-close: only the sending side of the peer is shut down, the other direction keeps
+    /// flowing. A failure or the cancellation of <paramref name="ct"/> (the service stop) shuts
+    /// both sockets down so that the opposite pump ends too.
     /// </summary>
     private static async Task TunnelAsync(NetworkStream client, NetworkStream upstream, CancellationToken ct)
     {
@@ -378,6 +449,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     private static async Task PumpAsync(NetworkStream from, NetworkStream to, CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
+        var cleanEnd = false;
         try
         {
             while (true)
@@ -385,6 +457,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 var read = await from.ReadAsync(buffer, ct);
                 if (read == 0)
                 {
+                    cleanEnd = true;
                     break;
                 }
 
@@ -406,20 +479,26 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         {
             if (to.Socket.Connected)
             {
-                to.Socket.Shutdown(SocketShutdown.Both);
+                to.Socket.Shutdown(cleanEnd ? SocketShutdown.Send : SocketShutdown.Both);
             }
         }
         catch (SocketException)
         {
         }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
-    /// <summary>Reads the header up to \r\n\r\n with a size limit; null — the client left silently.</summary>
-    private static async Task<byte[]?> ReadHeaderAsync(NetworkStream stream, CancellationToken ct)
+    /// <summary>
+    /// Reads the header up to \r\n\r\n with a size limit and returns it together with the bytes
+    /// that arrived behind it in the same reads; null — the client left silently or the header is too long.
+    /// </summary>
+    private static async Task<(byte[] Header, byte[] Leftover)?> ReadHeaderAsync(NetworkStream stream, CancellationToken ct)
     {
         var buffer = new MemoryStream();
         var chunk = new byte[8192];
-        while (!ContainsHeaderEnd(buffer.GetBuffer(), (int)buffer.Length))
+        while (true)
         {
             var read = await stream.ReadAsync(chunk, ct);
             if (read == 0)
@@ -428,24 +507,41 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             }
 
             buffer.Write(chunk, 0, read);
-            if (buffer.Length > ConnectRequestParser.MaxHeaderBytes)
+            var length = (int)buffer.Length;
+            var end = buffer.GetBuffer().AsSpan(0, length).IndexOf("\r\n\r\n"u8);
+            if (end >= 0)
+            {
+                var headerLength = end + 4;
+                if (headerLength > ConnectRequestParser.MaxHeaderBytes)
+                {
+                    return null;
+                }
+
+                var all = buffer.GetBuffer();
+                return (all[..headerLength], all[headerLength..length]);
+            }
+
+            if (length > ConnectRequestParser.MaxHeaderBytes)
             {
                 return null;
             }
         }
-
-        return buffer.ToArray();
-    }
-
-    private static bool ContainsHeaderEnd(byte[] buffer, int length)
-    {
-        var window = buffer.AsSpan(0, length);
-        return window.IndexOf("\r\n\r\n"u8) >= 0;
     }
 
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
-        _cts.Dispose();
+
+        // under the lifecycle lock: a start racing the dispose must not see a disposed source;
+        // handlers still alive hold only the (already cancelled) token, which stays usable
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _cts.Dispose();
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 }

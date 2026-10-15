@@ -42,7 +42,7 @@ public sealed class ForwardProxySupervisor(
         spawnWorker ?? ((commandLine, stdoutPath, stderrPath) => ProcessOps.StartViaCmd(commandLine, stdoutPath, stderrPath)?.Id ?? 0);
 
     private readonly Action<int> _killProcess =
-        killProcess ?? (pid => Process.GetProcessById(pid).Kill());
+        killProcess ?? (pid => Process.GetProcessById(pid).Kill(entireProcessTree: true));
 
     private readonly Func<string?> _currentExePath =
         currentExePath ?? (() => Environment.ProcessPath);
@@ -140,19 +140,52 @@ public sealed class ForwardProxySupervisor(
         var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker}", null, workerErrorLog);
         log.Info($"forward-proxy: worker spawned via cmd, pid={pid}");
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.WorkerStartWaitSeconds);
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            if (ports.IsListening(Port))
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.WorkerStartWaitSeconds);
+            while (DateTime.UtcNow < deadline)
             {
-                log.Info("forward-proxy: worker is listening");
-                return;
-            }
+                if (ports.IsListening(Port))
+                {
+                    log.Info("forward-proxy: worker is listening");
+                    return;
+                }
 
-            await Task.Delay(250, ct).ConfigureAwait(false);
+                await Task.Delay(250, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            KillSpawnedWorker(pid, "the start was cancelled");
+            throw;
         }
 
+        KillSpawnedWorker(pid, $"it did not start listening within {config.WorkerStartWaitSeconds}s");
         throw new IOException($"proxy worker did not start listening within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
+    }
+
+    /// <summary>
+    /// A worker whose start was abandoned (timeout, cancellation) must not bind the port later,
+    /// behind the back of a bring-up that already reported its failure. The spawned process is the
+    /// cmd wrapper, so the whole tree goes.
+    /// </summary>
+    private void KillSpawnedWorker(int? pid, string reason)
+    {
+        if (pid is not > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _killProcess(pid.Value);
+            log.Warn($"forward-proxy: killed the spawned worker pid={pid} — {reason}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // already gone (it exited on its own, e.g. on a busy port or a config error)
+            log.Debug($"forward-proxy: spawned worker pid={pid} was not killed: {ex.Message}");
+        }
     }
 
     /// <summary>

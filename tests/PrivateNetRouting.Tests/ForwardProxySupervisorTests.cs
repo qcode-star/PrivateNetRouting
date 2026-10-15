@@ -216,6 +216,71 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         Assert.Contains("did not start listening", error.Message);
     }
 
+    /// <summary>A worker that never listened must not bind the port after the bring-up failed.</summary>
+    [Fact]
+    public async Task Start_Detached_KillsTheSpawnedWorker_WhenItNeverListens()
+    {
+        var kills = new List<int>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Detached = true, WorkerStartWaitSeconds = 0 },
+            new FakeProxyInstance(),
+            new FakePortProbe(),
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (_, _, _) => 4242,
+            kill: kills.Add);
+
+        await Assert.ThrowsAsync<IOException>(() => supervisor.StartAsync(CancellationToken.None));
+
+        Assert.Equal([4242], kills);
+    }
+
+    [Fact]
+    public async Task Start_Detached_KillsTheSpawnedWorker_WhenCancelled()
+    {
+        var kills = new List<int>();
+        using var cts = new CancellationTokenSource();
+        var supervisor = Make(
+            new ForwardProxyConfig { Detached = true, WorkerStartWaitSeconds = 30 },
+            new FakeProxyInstance(),
+            new FakePortProbe(),
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (_, _, _) =>
+            {
+                cts.Cancel(); // the owner gives up while the worker is still starting
+                return 4242;
+            },
+            kill: kills.Add);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => supervisor.StartAsync(cts.Token));
+
+        Assert.Equal([4242], kills);
+    }
+
+    [Fact]
+    public async Task Start_Detached_DoesNotKillAWorkerThatListens()
+    {
+        var ports = new FakePortProbe();
+        var kills = new List<int>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Detached = true },
+            new FakeProxyInstance(),
+            ports,
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (_, _, _) =>
+            {
+                ports.Listening = true;
+                return 4242;
+            },
+            kill: kills.Add);
+
+        await supervisor.StartAsync(CancellationToken.None);
+
+        Assert.Empty(kills);
+    }
+
     [Fact]
     public async Task Detach_StopsInner_AndSpawnsWorker()
     {

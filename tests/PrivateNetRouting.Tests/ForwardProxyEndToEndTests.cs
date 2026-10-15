@@ -281,6 +281,112 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A client may send the first tunnel bytes (a TLS ClientHello) right behind the CONNECT
+    /// header, in the same segment; they were read with the header and must reach the origin.
+    /// </summary>
+    [Fact]
+    public async Task ForwardsBytesPipelinedBehindTheConnectHeader()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (_, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\nping"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var received = new List<byte>();
+        var buffer = new byte[64];
+        while (!Encoding.ASCII.GetString(received.ToArray()).EndsWith("pong", StringComparison.Ordinal))
+        {
+            var read = await stream.ReadAsync(buffer, timeout.Token);
+            Assert.True(read > 0, "the tunnel closed without answering the pipelined bytes");
+            received.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+
+        Assert.StartsWith("HTTP/1.1 200", Encoding.ASCII.GetString(received.ToArray()));
+    }
+
+    /// <summary>
+    /// The client finishing its side (FIN) must not cut the answer still on its way back: the
+    /// origin replies only after it has seen the end of the request.
+    /// </summary>
+    [Fact]
+    public async Task HalfCloseFromTheClientStillDeliversTheAnswer()
+    {
+        var origin = new TcpListener(IPAddress.Loopback, 0);
+        origin.Start();
+        _listeners.Add(origin);
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        _ = Task.Run(async () =>
+        {
+            using var session = await origin.AcceptTcpClientAsync();
+            var originStream = session.GetStream();
+            var drain = new byte[64];
+            while (await originStream.ReadAsync(drain) > 0)
+            {
+                // the request ends with the client's FIN
+            }
+
+            await originStream.WriteAsync("bye"u8.ToArray());
+            session.Client.Shutdown(SocketShutdown.Send);
+        });
+        var socksUpstream = await StartRelaySocksAsync();
+        var (_, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+        Assert.StartsWith("HTTP/1.1 200", await ReadLineAsync(stream, timeout.Token));
+
+        client.Client.Shutdown(SocketShutdown.Send);
+
+        var answer = new MemoryStream();
+        await stream.CopyToAsync(answer, timeout.Token); // until the proxy ends the tunnel
+        Assert.Equal("bye", Encoding.ASCII.GetString(answer.ToArray()));
+    }
+
+    /// <summary>
+    /// Start and stop calls racing each other must leave a consistent service: whatever the
+    /// order, the last stop leaves nothing bound and a following start serves again.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentStartAndStopLeaveNothingBound()
+    {
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, _) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+        await proxy.StopAsync();
+
+        for (var round = 0; round < 20; round++)
+        {
+            await Task.WhenAll(
+                Task.Run(() => proxy.StartAsync(CancellationToken.None)),
+                Task.Run(() => proxy.StopAsync()),
+                Task.Run(() => proxy.StartAsync(CancellationToken.None)),
+                Task.Run(() => proxy.StopAsync()));
+            await proxy.StopAsync();
+
+            Assert.False(proxy.IsRunning);
+            Assert.Empty(proxy.ListenerEndpoints);
+        }
+
+        await proxy.StartAsync(CancellationToken.None);
+        Assert.True(proxy.IsRunning);
+        Assert.Single(proxy.ListenerEndpoints);
+    }
+
+    /// <summary>
     /// Regression of the GUI deadlock on exit: OnExit synchronously waits for DisposeAsync under a
     /// SynchronizationContext whose thread is blocked by that same wait (Dispatcher).
     /// Stop await continuations must go to the pool, not to the captured context.
@@ -624,13 +730,15 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
                 var read = await from.ReadAsync(buffer);
                 if (read == 0)
                 {
+                    // a real SOCKS relay passes the end of one direction on as a half-close
+                    to.Socket.Shutdown(SocketShutdown.Send);
                     break;
                 }
 
                 await to.WriteAsync(buffer.AsMemory(0, read));
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
         {
         }
     }
