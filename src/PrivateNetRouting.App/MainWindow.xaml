@@ -364,7 +364,7 @@
 
                 <!-- Launch actions, one row: the Claude pair pinned left, the shared browser
                      button centred, the Codex pair pinned right. An app turned off in the config
-                     (apps.claude / apps.codex) takes its pair out of the row; the browser stays
+                     (claude.enabled / codex.enabled) takes its pair out of the row; the browser stays
                      and leans to the freed side (ApplyAppAvailability moves its column): without
                      Codex it takes the right edge, without Claude the left one, with both on or
                      both off it keeps the centre.

@@ -110,7 +110,7 @@
     <s:String x:Key="Main.Launch.RestartOfferFmt">{0} уже запущен (процессов: {1}) без прокси приложения, а новый запуск лишь активирует его окно. Закрыть его и запустить заново через прокси?</s:String>
     <s:String x:Key="Main.Launch.RestartDeclined">запуск отменён: запущенная копия работает без прокси</s:String>
     <s:String x:Key="Main.Launch.RestartedFmt">Claude перезапущен через прокси ({0} с)</s:String>
-    <s:String x:Key="Main.Launch.ClaudeDisabled">Claude отключён в конфиге (apps.claude = false) — запускать нечего</s:String>
+    <s:String x:Key="Main.Launch.ClaudeDisabled">Claude отключён в конфиге (claude.enabled = false) — запускать нечего</s:String>
 
     <!-- Профиль браузера: создаётся один раз диалогом, дальше запускается как есть -->
     <s:String x:Key="Main.Browser.Done">Браузер запущен со своим профилем (выход отвечает)</s:String>

@@ -110,7 +110,7 @@
     <s:String x:Key="Main.Launch.RestartOfferFmt">{0} is already running ({1} processes) without the application proxy, and a new start would only activate its window. Close it and start again through the proxy?</s:String>
     <s:String x:Key="Main.Launch.RestartDeclined">launch cancelled: the running copy works without the proxy</s:String>
     <s:String x:Key="Main.Launch.RestartedFmt">Claude restarted through the proxy ({0} s)</s:String>
-    <s:String x:Key="Main.Launch.ClaudeDisabled">Claude is turned off in the config (apps.claude = false) — nothing to launch</s:String>
+    <s:String x:Key="Main.Launch.ClaudeDisabled">Claude is turned off in the config (claude.enabled = false) — nothing to launch</s:String>
 
     <!-- Browser profile: created once through the dialog, then started as it is -->
     <s:String x:Key="Main.Browser.Done">Browser started with its own profile (the egress answers)</s:String>

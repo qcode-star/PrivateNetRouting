@@ -282,8 +282,8 @@ public partial class MainWindow : Window
     private void OnToggleChainCard(object sender, RoutedEventArgs e) => SetChainCardExpanded(!_chainCardExpanded, persist: true);
 
     /// <summary>
-    /// The launch/update buttons of an application turned off in the config (apps.claude /
-    /// apps.codex) leave the row: the owner sees only what they use. The browser button is
+    /// The launch/update buttons of an application turned off in the config (claude.enabled /
+    /// codex.enabled) leave the row: the owner sees only what they use. The browser button is
     /// shared and stays, leaning to the freed side: without Codex it takes the right edge,
     /// without Claude the left one, with both on or both off it keeps the centre.
     /// Follows a config reload.
@@ -1231,7 +1231,7 @@ public partial class MainWindow : Window
     /// Shortcut mode (App --launch instead of the Claude shortcut): Claude is already running — just
     /// show the window, without a second instance; not running — a normal launch whose bring-up is
     /// drawn in the chain card (tunnel start, checks, then Claude with proxy flags). Claude turned
-    /// off in the config (apps.claude=false) — the window only, like an already running Claude.
+    /// off in the config (claude.enabled=false) — the window only, like an already running Claude.
     /// </summary>
     public async void LaunchFromShortcut()
     {

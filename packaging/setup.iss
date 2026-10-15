@@ -29,6 +29,8 @@ OutputDir=..\artifacts
 OutputBaseFilename=PrivateNetRouting-{#AppVersion}-setup-win-x64
 Compression=lzma2
 SolidCompression=yes
+; 64-bit Windows only: the bundled runtime is win-x64 (x64compatible also covers Arm64 emulation)
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExe}
 ; A running GUI holds this mutex — the installer offers to close it instead of failing on locked files.
@@ -43,7 +45,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{group}\{#AppName} CLI"; Filename: "{app}\pnr.exe"
+; pnr.exe is a console tool and not on PATH: the shortcut opens a terminal in the install folder (the
+; current directory is searched first, so "pnr ..." works there) and prints the command list.
+Name: "{group}\{#AppName} CLI"; Filename: "{sys}\cmd.exe"; Parameters: "/k pnr.exe help"; WorkingDir: "{app}"; IconFilename: "{app}\pnr.exe"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 ; The user config (%APPDATA%\PrivateNetRouting) and the logs (%LOCALAPPDATA%\PrivateNetRouting)
@@ -54,27 +58,30 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
-// The background workers (PrivateNetRouting.App.exe / pnr.exe with --proxy-worker /
-// --watchdog-worker in the command line, plus any CLI process running from the install
-// directory, e.g. the foreground `pnr watchdog`) have no window, so the Restart Manager behind
-// CloseApplications cannot close them and the install stops on the "unable to automatically
-// close all applications" error. They are terminated here — before the files are copied and
-// before the uninstall — using the same identification the application's own supervisors use
-// (the marker in the command line). The GUI (a windowed process) is left to AppMutex and the
-// Restart Manager: it closes gracefully on session end and spawns nothing on that path.
+// The background workers (PrivateNetRouting.App.exe with --proxy-worker / --watchdog-worker in
+// the command line, and any pnr.exe — the CLI workers and a foreground `pnr watchdog`) have no
+// window, so the Restart Manager behind CloseApplications cannot close them and the install stops
+// on the "unable to automatically close all applications" error. They are terminated here —
+// before the files are copied and before the uninstall — using the same identification the
+// application's own supervisors use (the marker in the command line). Only processes whose
+// executable lives in the install directory are touched: the workers of a portable copy or a
+// dev build keep running. A worker of this very install does not survive an upgrade: its
+// executable is about to be replaced (a chain left up needs `pnr chain up` afterwards).
+// The GUI (a windowed process) is left to AppMutex and the Restart Manager: it closes
+// gracefully on session end and spawns nothing on that path.
 procedure TerminateBackgroundProcesses;
 var
-  cliPath, escapedCliPath, psCommand, params: String;
+  appDir, psCommand, params: String;
   resultCode: Integer;
 begin
-  cliPath := ExpandConstant('{app}\pnr.exe');
-  escapedCliPath := cliPath;
-  StringChangeEx(escapedCliPath, '''', '''''', True); // a PowerShell string literal: quotes doubled
+  appDir := ExpandConstant('{app}\');
+  StringChangeEx(appDir, '''', '''''', True); // a PowerShell string literal: quotes doubled
   psCommand :=
+    '$dir = ''' + appDir + '''; ' +
     'Get-CimInstance Win32_Process | Where-Object { ' +
-    '($_.Name -eq ''PrivateNetRouting.App.exe'' -or $_.Name -eq ''pnr.exe'') -and ' +
-    '($_.CommandLine -like ''*--proxy-worker*'' -or $_.CommandLine -like ''*--watchdog-worker*'' ' +
-    '-or $_.ExecutablePath -eq ''' + escapedCliPath + ''') } ' +
+    '$_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) -and ' +
+    '($_.Name -eq ''pnr.exe'' -or ($_.Name -eq ''PrivateNetRouting.App.exe'' -and ' +
+    '($_.CommandLine -like ''*--proxy-worker*'' -or $_.CommandLine -like ''*--watchdog-worker*''))) } ' +
     '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
   params := '-NoProfile -ExecutionPolicy Bypass -Command "' + psCommand + '"';
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), params, '',

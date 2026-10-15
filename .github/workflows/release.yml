@@ -1,25 +1,32 @@
 # Release build on a version tag: tests, then packaging/make-release.ps1 (a self-contained
 # publish of both projects, the portable zip, the Inno Setup installer), then a GitHub release
-# with both artifacts and auto-generated notes. The version in Directory.Build.props must
-# match the tag (vX.Y.Z).
+# with the artifacts, their SHA-256 sums and auto-generated notes. The version in
+# Directory.Build.props must match the tag (vX.Y.Z).
 name: release
 
 on:
   push:
     tags: ["v*"]
 
+# Read-only by default: the build and the tests run third-party packages; only the publishing
+# job gets write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
+      # the actions are pinned by commit (checkout v4.2.2, setup-dotnet v4.3.1,
+      # upload-artifact v4.6.2); the token is not left in .git/config
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          dotnet-version: 10.0.x
+          persist-credentials: false
+
+      # the SDK comes from global.json, the single pin
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          global-json-file: global.json
 
       - name: Check the tag against Directory.Build.props
         shell: pwsh
@@ -36,19 +43,49 @@ jobs:
         run: dotnet test
 
       - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+        run: choco install innosetup --version=6.7.1 -y --no-progress
 
       - name: Build the artifacts (zip + setup)
         shell: pwsh
         run: ./packaging/make-release.ps1
 
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content artifacts/SHA256SUMS -Encoding ascii
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release
+          path: |
+            artifacts/*.zip
+            artifacts/*-setup-win-x64.exe
+            artifacts/SHA256SUMS
+
+  publish:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      # download-artifact v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release
+          path: artifacts
+
       - name: Create the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $tag = $env:GITHUB_REF_NAME
           $n = $tag.Substring(1)
           gh release create $tag --title $tag --generate-notes `
             "artifacts/PrivateNetRouting-$n-win-x64.zip" `
-            "artifacts/PrivateNetRouting-$n-setup-win-x64.exe"
+            "artifacts/PrivateNetRouting-$n-setup-win-x64.exe" `
+            "artifacts/SHA256SUMS"

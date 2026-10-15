@@ -22,6 +22,9 @@ namespace PrivateNetRouting.Cli;
 /// </summary>
 internal static class Program
 {
+    /// <summary>Cancelled by the first Ctrl+C; the long-running commands take their token from here.</summary>
+    private static readonly CancellationTokenSource Interrupt = new();
+
     private static async Task<int> Main(string[] args)
     {
         var first = args.FirstOrDefault() ?? "help";
@@ -59,24 +62,52 @@ internal static class Program
                 : ElevatedChainCommands.Execute(first, resultFile, configPath);
         }
 
+        // the text carries em dashes, arrows and ellipses: an OEM code page would mangle them
+        try
+        {
+            Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        }
+        catch (IOException)
+        {
+            // no console attached: the redirected streams keep their default encoding
+        }
+
+        // one Ctrl+C handler for every command: the first press cancels the running operation through
+        // Interrupt, a second one (the operation did not stop) falls through to the default hard kill
+        Console.CancelKeyPress += (_, e) =>
+        {
+            if (!Interrupt.IsCancellationRequested)
+            {
+                e.Cancel = true;
+                Interrupt.Cancel();
+            }
+        };
+
         try
         {
             return first switch
             {
+                "--version" or "version" => Version(),
+                "help" or "--help" or "-h" or "-?" or "/?" => Help(),
                 "proxy" => await RunProxyAsync(args.Skip(1).ToList()),
                 "chain" => await RunChainAsync(args.Skip(1).ToList()),
-                "check" => await RunCheckAsync(),
-                "status" => await RunStatusAsync(),
+                "check" => await RunCheckAsync(args.Skip(1).ToList()),
+                "status" => await RunStatusAsync(args.Skip(1).ToList()),
                 "logs" => RunLogsCommand(args.Skip(1).ToList()),
                 "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
                 "browser" => await RunBrowserAsync(args.Skip(1).ToList()),
                 "codex" => await RunCodexAsync(args.Skip(1).ToList()),
                 "update" => await RunUpdateAsync(args.Skip(1).ToList()),
-                "watchdog" => await RunWatchdogAsync(),
+                "watchdog" => await RunWatchdogAsync(args.Skip(1).ToList()),
                 "guard" => await RunGuardAsync(args.Skip(1).ToList()),
                 "config" => ConfigCommand(args.Skip(1).ToList()),
-                _ => Help(),
+                _ => UnknownCommand(first),
             };
+        }
+        catch (OperationCanceledException) when (Interrupt.IsCancellationRequested)
+        {
+            Console.Error.WriteLine("cancelled");
+            return 130;
         }
         catch (Exception ex)
         {
@@ -139,33 +170,40 @@ internal static class Program
         }
 
         await using var consoleRuntime = ProxyRuntime.FromConfig(config);
-        using var stop = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+        try
         {
-            e.Cancel = true;
-            stop.Cancel();
-        };
+            await consoleRuntime.ProxyService!.StartAsync(Interrupt.Token);
+            Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyService.ListenerEndpoints)}");
+            Console.WriteLine($"log: {consoleRuntime.Log.FilePath}");
+            Console.WriteLine("Ctrl+C to stop");
+            await Task.Delay(Timeout.Infinite, Interrupt.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C is how this command is meant to end
+            Console.WriteLine("forward proxy: stopped");
+        }
 
-        await consoleRuntime.ProxyService!.StartAsync(stop.Token);
-        Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyService.ListenerEndpoints)}");
-        Console.WriteLine($"log: {consoleRuntime.Log.FilePath}");
-        Console.WriteLine("Ctrl+C to stop");
-        await Task.Delay(Timeout.Infinite, stop.Token);
         return 0;
     }
 
     private static async Task<int> RunChainAsync(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "status";
+        if (RejectExtraArguments("pnr chain status|up|down", rest, 1))
+        {
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         await using var runtime = ProxyRuntime.FromConfig(config);
-        var progress = new Progress<ChainStep>(step =>
+        var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
         switch (action)
         {
             case "status":
-                var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
+                var state = await runtime.Chain.GetStateAsync(Interrupt.Token);
                 var skipProxy = AppProxyEndpoint.IsSkipped(config);
                 if (config.Chain.EffectiveMode != ChainMode.Tailscale)
                 {
@@ -190,13 +228,13 @@ internal static class Program
                 return 0;
 
             case "up":
-                await runtime.Chain.EnsureRunningAsync(progress, CancellationToken.None);
+                await runtime.Chain.EnsureRunningAsync(progress, Interrupt.Token);
                 Console.WriteLine("chain is up");
                 await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
                 return await HandOverProxyAsync(runtime) ? 0 : 1;
 
             case "down":
-                await runtime.Chain.StopAsync(progress, CancellationToken.None);
+                await runtime.Chain.StopAsync(progress, Interrupt.Token);
                 Console.WriteLine("chain is stopped");
                 return 0;
 
@@ -228,8 +266,13 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunCheckAsync()
+    private static async Task<int> RunCheckAsync(List<string> rest)
     {
+        if (RejectExtraArguments("pnr check", rest, 0))
+        {
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         var fp = config.ForwardProxy;
         var endpoint = AppProxyEndpoint.EndPoint(config);
@@ -246,14 +289,19 @@ internal static class Program
     /// CONNECT roundtrip, policy and ban, watchdog liveness. A fully stopped chain —
     /// a short message: this is normal while Claude and Codex are not needed.
     /// </summary>
-    private static async Task<int> RunStatusAsync()
+    private static async Task<int> RunStatusAsync(List<string> rest)
     {
+        if (RejectExtraArguments("pnr status", rest, 0))
+        {
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         await using var runtime = ProxyRuntime.FromConfig(config);
-        var summary = await runtime.Diagnostics.GetSummaryAsync(CancellationToken.None);
+        var summary = await runtime.Diagnostics.GetSummaryAsync(Interrupt.Token);
         if (summary.ChainStopped)
         {
-            Console.WriteLine($"chain ({config.ForwardProxy.Listen}) is stopped — normal while Claude and Codex are not needed.");
+            Console.WriteLine($"chain ({AppProxyEndpoint.Address(config)}) is stopped — normal while Claude and Codex are not needed.");
             Console.WriteLine("Raise it: the Claude shortcut, pnr launch, or pnr chain up.");
             return 0;
         }
@@ -438,12 +486,12 @@ internal static class Program
         var config = AppConfigStore.LoadOrCreate();
         if (!config.Claude.Enabled)
         {
-            Console.WriteLine("Claude is disabled in config (apps.claude=false)");
-            return 0;
+            Console.Error.WriteLine("Claude is disabled in config (claude.enabled=false)");
+            return 1;
         }
 
         await using var runtime = ProxyRuntime.FromConfig(config);
-        var progress = new Progress<ChainStep>(step =>
+        var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
         var restart = false;
@@ -460,7 +508,7 @@ internal static class Program
             restart = answer.Value;
         }
 
-        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
+        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == LaunchOutcome.CheckOnly)
@@ -525,7 +573,7 @@ internal static class Program
         if (options.CheckOnly)
         {
             // read-only: the chain is not touched, use `pnr chain up` for that
-            var reachable = await runtime.Browser.IsEgressReachableAsync(CancellationToken.None);
+            var reachable = await runtime.Browser.IsEgressReachableAsync(Interrupt.Token);
             Console.WriteLine(reachable
                 ? $"OK: the egress {runtime.Browser.EgressUrl} responds"
                 : $"the egress {runtime.Browser.EgressUrl} is not responding");
@@ -542,6 +590,7 @@ internal static class Program
         // the default shape, the sidecar's listener in the tailscale mode) a confirmed answer raises the
         // chain (the launcher does that); over an external endpoint (the upstream of the socks5 or http mode) there is
         // nothing to raise — the question is only whether to start anyway.
+        var askedWithoutInput = false;
         Task<bool> ConfirmDeadEgress(CancellationToken ct)
         {
             var egress = runtime.Browser.EgressUrl;
@@ -550,24 +599,34 @@ internal static class Program
                 return Task.FromResult(true);
             }
 
+            if (Console.IsInputRedirected)
+            {
+                // the question could never be answered: a piped line would be taken as the answer
+                Console.Error.WriteLine(runtime.Browser.ChainOwnsEgress
+                    ? $"the browser egress {egress} is not responding; no interactive input — pass --yes to raise the chain and start the browser"
+                    : $"the upstream {egress} is not responding; no interactive input — pass --yes to start the browser anyway");
+                askedWithoutInput = true;
+                return Task.FromResult(false);
+            }
+
             Console.Write(runtime.Browser.ChainOwnsEgress
                 ? $"the browser egress {egress} is not responding. Raise the chain and start the browser? [y/N]: "
                 : $"the upstream {egress} is not responding. Start the browser anyway? [y/N]: ");
             return Task.FromResult(Console.ReadLine()?.Trim().ToLowerInvariant() is "y" or "yes");
         }
 
-        var progress = new Progress<ChainStep>(step =>
+        var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
         var result = await runtime.Browser.LaunchAsync(
             options with { ConfirmDeadEgress = ConfirmDeadEgress },
             progress,
-            CancellationToken.None);
+            Interrupt.Token);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == BrowserLaunchOutcome.Cancelled)
         {
             Console.WriteLine("launch cancelled: the egress is not responding");
-            return 0;
+            return askedWithoutInput ? 1 : 0;
         }
 
         Console.WriteLine(result.EgressResponded
@@ -587,7 +646,9 @@ internal static class Program
             case "update":
                 return await RunCodexUpdateAsync(options);
             default:
-                Console.WriteLine("""
+                // an unknown action is an error: the usage goes to stderr, only an asked-for help to stdout
+                var usage = action == "help" ? Console.Out : Console.Error;
+                usage.WriteLine("""
                     usage: pnr codex launch [--check-only] [--restart]
                            pnr codex update [--check]
 
@@ -625,12 +686,12 @@ internal static class Program
         var config = AppConfigStore.LoadOrCreate();
         if (!config.Codex.Enabled)
         {
-            Console.WriteLine("Codex is disabled in config (apps.codex=false)");
-            return 0;
+            Console.Error.WriteLine("Codex is disabled in config (codex.enabled=false)");
+            return 1;
         }
 
         await using var runtime = ProxyRuntime.FromConfig(config);
-        var progress = new Progress<ChainStep>(step =>
+        var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
         var restart = false;
@@ -647,7 +708,7 @@ internal static class Program
             restart = answer.Value;
         }
 
-        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, CancellationToken.None);
+        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token);
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == CodexLaunchOutcome.CheckOnly)
@@ -681,12 +742,12 @@ internal static class Program
         var config = AppConfigStore.LoadOrCreate();
         if (!config.Codex.Enabled)
         {
-            Console.WriteLine("Codex is disabled in config (apps.codex=false)");
-            return 0;
+            Console.Error.WriteLine("Codex is disabled in config (codex.enabled=false)");
+            return 1;
         }
 
         await using var runtime = ProxyRuntime.FromConfig(config);
-        var check = await runtime.CodexUpdater.CheckAsync(CancellationToken.None);
+        var check = await runtime.CodexUpdater.CheckAsync(Interrupt.Token);
         Console.WriteLine($"installed: {check.Installed.Version} (package {check.Installed.Name})");
         if (check.StoreUnavailable)
         {
@@ -708,27 +769,26 @@ internal static class Program
             return 0;
         }
 
-        var progress = new Progress<UpdateProgress>(p =>
+        var progress = new SyncProgress<UpdateProgress>(p =>
             Console.WriteLine($"[{p.Phase}] {p.Message}"));
-        var after = await runtime.CodexUpdater.UpdateAsync(progress, CancellationToken.None);
+        var after = await runtime.CodexUpdater.UpdateAsync(progress, Interrupt.Token);
         Console.WriteLine($"codex updated: {check.Installed.Version} -> {after.Version}");
         return 0;
     }
 
-    private static async Task<int> RunWatchdogAsync()
+    private static async Task<int> RunWatchdogAsync(List<string> rest)
     {
+        if (RejectExtraArguments("pnr watchdog", rest, 0))
+        {
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         await using var runtime = ProxyRuntime.FromConfig(config);
-        using var stop = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
-        {
-            e.Cancel = true;
-            stop.Cancel();
-        };
 
         // the stopper exists to stop a live chain: over a down one it would only wait forever
         // (the usage probe sees the running Claude and never reports idle)
-        var state = await runtime.Chain.GetStateAsync(CancellationToken.None);
+        var state = await runtime.Chain.GetStateAsync(Interrupt.Token);
         if (!state.IsFullyUp)
         {
             Console.WriteLine("watchdog: the chain is not up — nothing to stop; raise the chain first (pnr chain up)");
@@ -741,11 +801,11 @@ internal static class Program
             Console.WriteLine("watchdog: no distros configured (wsl.distros), the WSL step will be skipped on idle");
         }
 
-        var progress = new Progress<ChainStep>(step =>
+        var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
         try
         {
-            await runtime.Watchdog.RunAsync(progress, stop.Token);
+            await runtime.Watchdog.RunAsync(progress, Interrupt.Token);
         }
         catch (OperationCanceledException)
         {
@@ -787,7 +847,7 @@ internal static class Program
                     options = options with { KeepRunning = true };
                     break;
                 case "--url":
-                    if (i + 1 >= rest.Count)
+                    if (i + 1 >= rest.Count || rest[i + 1].StartsWith("--", StringComparison.Ordinal))
                     {
                         Console.Error.WriteLine("--url requires a value");
                         return 1;
@@ -796,7 +856,7 @@ internal static class Program
                     options = options with { ManualUrl = rest[++i] };
                     break;
                 case "--install-from":
-                    if (i + 1 >= rest.Count)
+                    if (i + 1 >= rest.Count || rest[i + 1].StartsWith("--", StringComparison.Ordinal))
                     {
                         Console.Error.WriteLine("--install-from requires a value");
                         return 1;
@@ -810,11 +870,18 @@ internal static class Program
             }
         }
 
+        if (checkOnly && installFrom is not null)
+        {
+            // --check is read-only: it must never turn into an installation
+            Console.Error.WriteLine("--check cannot be combined with --install-from");
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         if (!config.Claude.Enabled)
         {
-            Console.WriteLine("Claude is disabled in config (apps.claude=false)");
-            return 0;
+            Console.Error.WriteLine("Claude is disabled in config (claude.enabled=false)");
+            return 1;
         }
 
         await using var runtime = ProxyRuntime.FromConfig(config);
@@ -827,14 +894,14 @@ internal static class Program
 
         if (installFrom is not null)
         {
-            var after = await runtime.Updater.InstallAsync(installFrom, options, progress, CancellationToken.None);
+            var after = await runtime.Updater.InstallAsync(installFrom, options, progress, Interrupt.Token);
             Console.WriteLine($"installed: {after.Version}");
             return 0;
         }
 
         if (checkOnly)
         {
-            var check = await runtime.Updater.CheckAsync(options, CancellationToken.None);
+            var check = await runtime.Updater.CheckAsync(options, Interrupt.Token);
             if (check.Installed is null)
             {
                 Console.WriteLine("Claude Desktop is not installed as an MSIX package");
@@ -852,7 +919,7 @@ internal static class Program
             return 0;
         }
 
-        var result = await runtime.Updater.RunAsync(options, progress, chainProgress, CancellationToken.None);
+        var result = await runtime.Updater.RunAsync(options, progress, chainProgress, Interrupt.Token);
         switch (result.Outcome)
         {
             case UpdateOutcome.UpToDate:
@@ -880,6 +947,18 @@ internal static class Program
     {
         var action = rest.FirstOrDefault() ?? "status";
         rest = rest.Skip(1).ToList();
+        var extra = action switch
+        {
+            "status" => rest.Where(a => a != "--live").ToList(),
+            "settings" or "wsl" or "ban" or "policy" or "sysproxy" => rest.Skip(1).ToList(),
+            _ => [],
+        };
+        if (extra.Count > 0)
+        {
+            Console.Error.WriteLine($"unexpected argument: {extra[0]} (pnr guard {action}{(action == "status" ? " [--live]" : "")})");
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         await using var runtime = ProxyRuntime.FromConfig(config);
 
@@ -900,13 +979,15 @@ internal static class Program
                 }
 
                 Console.WriteLine();
-                var checks = await runtime.Guard.LiveChecksAsync(CancellationToken.None);
+                var checks = await runtime.Guard.LiveChecksAsync(Interrupt.Token);
                 Console.WriteLine(checks.DnsDetail);
                 Console.WriteLine(checks.DirectDetail);
                 Console.WriteLine(checks.ProxiedDetail);
-                // 0 only when the DNS layer is proven blocked and the direct probe did not find an open
-                // path; an unestablished verdict (offline, no probes) is not "blocked"
-                return checks.DnsBlocked == true && checks.DirectBlocked != false ? 0 : 1;
+                // the verdict follows the ban's own state: with the ban on, 0 only when the DNS layer is
+                // proven blocked and the direct probe found no open path (an unestablished verdict —
+                // offline, no probes — is not "blocked"); with the ban intentionally off there is
+                // nothing to hold against the probes
+                return snapshot[GuardKind.LocalBan].State != GuardState.On || BanHolds(checks) ? 0 : 1;
 
             case "ban":
                 bool? banOn = rest.FirstOrDefault() switch
@@ -926,7 +1007,8 @@ internal static class Program
                 Console.WriteLine(ban.Live.DnsDetail);
                 Console.WriteLine(ban.Live.DirectDetail);
                 Console.WriteLine(ban.Live.ProxiedDetail);
-                return 0;
+                // switching it on must leave the direct path closed, and the probes say whether it did
+                return banOn.Value && !BanHolds(ban.Live) ? 1 : 0;
 
             case "policy":
                 bool? policyOn = rest.FirstOrDefault() switch
@@ -1014,7 +1096,7 @@ internal static class Program
 
                 await runtime.Guard.SetSystemProxyAsync(sysOn.Value, CancellationToken.None);
                 Console.WriteLine(sysOn.Value
-                    ? $"system proxy enabled: {config.ForwardProxy.Listen} (bypass: corp domains + local ranges)"
+                    ? $"system proxy enabled: {AppProxyEndpoint.Address(config)} (bypass: corp domains + local ranges)"
                     : "system proxy disabled (direct access restored)");
                 return 0;
 
@@ -1046,6 +1128,11 @@ internal static class Program
     private static int ConfigCommand(List<string> rest)
     {
         var action = rest.FirstOrDefault() ?? "path";
+        if (RejectExtraArguments("pnr config path|init", rest, 1))
+        {
+            return 1;
+        }
+
         switch (action)
         {
             case "path":
@@ -1090,6 +1177,43 @@ internal static class Program
             }
         }
     }
+
+    /// <summary>The version of the running build (the part before "+" of the informational version is the release).</summary>
+    private static int Version()
+    {
+        var assembly = typeof(Program).Assembly;
+        var version = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .Cast<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .Select(a => a.InformationalVersion)
+            .FirstOrDefault() ?? assembly.GetName().Version?.ToString() ?? "unknown";
+        var plus = version.IndexOf('+', StringComparison.Ordinal);
+        Console.WriteLine($"pnr {(plus > 0 ? version[..plus] : version)}");
+        return 0;
+    }
+
+    private static int UnknownCommand(string command)
+    {
+        Console.Error.WriteLine($"unknown command: {command} (pnr help lists the commands)");
+        return 1;
+    }
+
+    /// <summary>
+    /// A command that takes at most <paramref name="allowed"/> positional arguments: anything past
+    /// them (a misspelled flag included) is an error instead of being silently ignored.
+    /// </summary>
+    private static bool RejectExtraArguments(string usage, List<string> rest, int allowed)
+    {
+        if (rest.Count <= allowed)
+        {
+            return false;
+        }
+
+        Console.Error.WriteLine($"unexpected argument: {rest[allowed]} ({usage})");
+        return true;
+    }
+
+    /// <summary>True when the live probes show the ban working: DNS proven blocked and no open direct path.</summary>
+    private static bool BanHolds(BanLiveChecks checks) => checks.DnsBlocked == true && checks.DirectBlocked != false;
 
     private static int Help()
     {
@@ -1175,6 +1299,7 @@ internal static class Program
                                  system WinINET proxy on the app's forward proxy (no UAC)
             pnr config path      user config path
             pnr config init      create the default config if missing
+            pnr --version        print the version
             """);
         return 0;
     }

@@ -97,7 +97,7 @@ internal sealed class TrayIcon : IDisposable
         _launchClaudeItem.Enabled = canLaunchClaude;
     }
 
-    /// <summary>Claude turned off in the config (apps.claude=false) — the launch item leaves the menu.</summary>
+    /// <summary>Claude turned off in the config (claude.enabled=false) — the launch item leaves the menu.</summary>
     public void ShowLaunchClaude(bool visible) => _launchClaudeItem.Visible = visible;
 
     private void ApplyStrings()
