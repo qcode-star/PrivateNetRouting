@@ -88,10 +88,6 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     public bool IsRunning => _running;
 
-    /// <summary>The section the service was built with. ReloadConfig swaps the sections in the
-    /// shared AppConfig, so the loaded proxy values differ from these until the process restarts.</summary>
-    public ForwardProxyConfig CapturedConfig => _config;
-
     public IReadOnlyList<string> ListenerEndpoints
     {
         get

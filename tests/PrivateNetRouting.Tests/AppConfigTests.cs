@@ -124,6 +124,40 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ReloadKeepsTheRunningProxyAndChainButCopiesTheWatchdogInPlace()
+    {
+        var running = AppConfigStore.LoadOrCreate(_path);
+        var watchdog = running.Watchdog;
+        var forwardProxy = running.ForwardProxy;
+        var chain = running.Chain;
+        File.WriteAllText(_path, """
+            { "forwardProxy": { "listen": "127.0.0.1:19999" },
+              "chain": { "mode": "socks5" },
+              "watchdog": { "autoStart": false, "checkSeconds": 77 },
+              "ui": { "language": "ru" } }
+            """);
+
+        var restartRequired = AppConfigStore.ReloadInto(running, _path);
+
+        Assert.True(restartRequired);
+        Assert.Same(forwardProxy, running.ForwardProxy);
+        Assert.Same(chain, running.Chain);
+        Assert.Equal("127.0.0.1:18081", running.ForwardProxy.Listen);
+        Assert.Same(watchdog, running.Watchdog); // the stopper supervisor holds this very object
+        Assert.False(running.Watchdog.AutoStart);
+        Assert.Equal(77, running.Watchdog.CheckSeconds);
+        Assert.Equal("ru", running.Ui.Language);
+    }
+
+    [Fact]
+    public void ReloadOfAnUnchangedProxyAndChainNeedsNoRestart()
+    {
+        var running = AppConfigStore.LoadOrCreate(_path);
+
+        Assert.False(AppConfigStore.ReloadInto(running, _path));
+    }
+
+    [Fact]
     public void TheDefaultConfigIsValid()
         => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));
 

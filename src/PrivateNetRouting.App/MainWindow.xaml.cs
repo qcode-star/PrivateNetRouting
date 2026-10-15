@@ -1133,9 +1133,9 @@ public partial class MainWindow : Window
     /// <summary>
     /// Re-reads the edited config: the sections are swapped in the shared object, so the
     /// launchers, guards, updater and the next idle stopper start see the fresh values; the
-    /// UI language re-applies immediately. The running proxy service keeps the section it was
-    /// built with — when the loaded proxy values differ, the result line says so and the
-    /// application restart applies them.
+    /// UI language re-applies immediately. The forwardProxy and chain sections stay as the
+    /// process was built with — when the file holds different values, the result line says so
+    /// and the application restart applies them.
     /// </summary>
     private void OnConfigReload(object sender, RoutedEventArgs e)
     {

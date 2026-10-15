@@ -207,13 +207,19 @@ public static class AppConfigStore
     /// <summary>
     /// Re-reads the user file into an existing config object (the chain card "Reload" button):
     /// the sections are replaced wholesale, so everything that holds the root AppConfig (the
-    /// launchers, the guard, the updater, the next idle stopper start) sees the fresh values.
-    /// Values already snapshotted by running components (the proxy and the chain listeners)
-    /// apply after the application restart.
+    /// launchers, the guard, the updater) sees the fresh values; the watchdog section is copied
+    /// into the existing object, because the idle stopper supervisor and the service hold that
+    /// very instance. The forwardProxy and chain sections are NOT replaced: the running proxy,
+    /// the chain and every endpoint the launchers and guards derive (AppProxyEndpoint, the chain
+    /// mode) stay one consistent snapshot until the application restarts. Returns true when the
+    /// file holds different values for those two sections, i.e. a restart is needed to apply them.
     /// </summary>
-    public static void ReloadInto(AppConfig target, string? path = null)
+    public static bool ReloadInto(AppConfig target, string? path = null)
     {
         var fresh = LoadOrCreate(path);
+        var restartRequired = SectionDiffers(target.ForwardProxy, fresh.ForwardProxy)
+            || SectionDiffers(target.Chain, fresh.Chain);
+        CopyProperties(fresh.Watchdog, target.Watchdog);
         target.BypassDomains = fresh.BypassDomains;
         target.DirectTlds = fresh.DirectTlds;
         target.RestartGraceSeconds = fresh.RestartGraceSeconds;
@@ -224,12 +230,25 @@ public static class AppConfigStore
         target.Logging = fresh.Logging;
         target.Claude = fresh.Claude;
         target.Codex = fresh.Codex;
-        target.ForwardProxy = fresh.ForwardProxy;
-        target.Chain = fresh.Chain;
         target.Wsl = fresh.Wsl;
-        target.Watchdog = fresh.Watchdog;
         target.Browser = fresh.Browser;
         target.Guard = fresh.Guard;
+        return restartRequired;
+    }
+
+    private static bool SectionDiffers<T>(T current, T fresh) =>
+        JsonSerializer.Serialize(current, JsonOptions) != JsonSerializer.Serialize(fresh, JsonOptions);
+
+    /// <summary>Copies every public settable property of a flat section into an existing instance.</summary>
+    private static void CopyProperties<T>(T from, T to) where T : class
+    {
+        foreach (var property in typeof(T).GetProperties())
+        {
+            if (property.CanRead && property.CanWrite)
+            {
+                property.SetValue(to, property.GetValue(from));
+            }
+        }
     }
 }
 

@@ -101,7 +101,6 @@ public sealed class ProxyRuntime : IAsyncDisposable
         Log = log;
         DohPool = pool;
         ProxyService = proxy;
-        _builtProxyConfig = config.ForwardProxy;
         ProxyControl = proxyControl;
         Chain = chain;
         _chainLog = chainLog;
@@ -444,26 +443,15 @@ public sealed class ProxyRuntime : IAsyncDisposable
     public Task StopAsync() => ProxyControl.StopAsync();
 
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
-    public void ReloadConfig() => AppConfigStore.ReloadInto(Config);
+    public void ReloadConfig() => ProxyConfigNeedsRestart = AppConfigStore.ReloadInto(Config);
 
     /// <summary>
-    /// Whether the freshly loaded proxy section has drifted from the one the running proxy
-    /// service was built with: ReloadConfig swaps the sections in the shared AppConfig, and
-    /// the service keeps its captured section until the process restarts. In the skipped
-    /// shape there is no running service — the flag just compares the loaded section against
-    /// the one the process was built with.
+    /// Whether the user file holds forwardProxy or chain values that differ from the ones this
+    /// process runs with. ReloadConfig keeps those two sections as built (the proxy, the chain
+    /// and every derived endpoint stay consistent), so the flag stays true until the file
+    /// matches the running values again or the application restarts.
     /// </summary>
-    public bool ProxyConfigNeedsRestart
-    {
-        get
-        {
-            var captured = ProxyService?.CapturedConfig ?? _builtProxyConfig;
-            return captured is null || !SameProxyConfig(captured, Config.ForwardProxy);
-        }
-    }
-
-    /// <summary>The proxy section this runtime was built from (kept for the skipped shape, where no service captures it).</summary>
-    private readonly ForwardProxyConfig? _builtProxyConfig;
+    public bool ProxyConfigNeedsRestart { get; private set; }
 
     /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
     /// trusted proxy from chain.socks5 (with its RFC 1929 credentials); in the tailscale
@@ -478,11 +466,6 @@ public sealed class ProxyRuntime : IAsyncDisposable
                 config.Chain.Socks5.User,
                 config.Chain.Socks5.Password)
             : (config.Chain.Tailscale.SocksListen, "", "");
-
-    internal static bool SameProxyConfig(ForwardProxyConfig a, ForwardProxyConfig b) =>
-        JsonSerializer.Serialize(a, ConfigComparisonOptions) == JsonSerializer.Serialize(b, ConfigComparisonOptions);
-
-    private static readonly JsonSerializerOptions ConfigComparisonOptions = new();
 
     public Task<bool> CheckHealthAsync(TimeSpan timeout, CancellationToken ct = default)
     {
