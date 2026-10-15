@@ -348,12 +348,24 @@ public sealed class ChainSupervisor(
 
     public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
+        // every step runs even when an earlier one failed: a daemon that refuses to die must not
+        // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end
+        var failures = new List<(string Component, Exception Error)>();
+
         // the skipped shape has no local proxy to stop; the external upstream is not ours
         if (!_skipProxy)
         {
             Report(progress, "Proxy", ChainStepStatus.Active, "stopping");
-            await proxy.StopAsync();
-            Report(progress, "Proxy", ChainStepStatus.Done, "stopped");
+            try
+            {
+                await proxy.StopAsync();
+                Report(progress, "Proxy", ChainStepStatus.Done, "stopped");
+            }
+            catch (Exception ex)
+            {
+                Report(progress, "Proxy", ChainStepStatus.Failed, ex.Message);
+                failures.Add(("proxy", ex));
+            }
         }
 
         // external-upstream egress: the external upstream is not ours — nothing to bring down past the proxy
@@ -380,12 +392,30 @@ public sealed class ChainSupervisor(
             catch (Exception ex)
             {
                 Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
-                throw new ChainException("daemon", ex);
+                failures.Add(("daemon", ex));
             }
 
             Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
-            await keeper.KillAsync(ct);
-            Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
+            try
+            {
+                await keeper.KillAsync(ct);
+                Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
+            }
+            catch (Exception ex)
+            {
+                Report(progress, "Keeper", ChainStepStatus.Failed, ex.Message);
+                failures.Add(("keeper", ex));
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            foreach (var (component, error) in failures.Skip(1))
+            {
+                log.Warn($"chain: stop: {component} failed too: {error.Message}");
+            }
+
+            throw new ChainException(failures[0].Component, failures[0].Error);
         }
 
         log.Info("chain: stopped");

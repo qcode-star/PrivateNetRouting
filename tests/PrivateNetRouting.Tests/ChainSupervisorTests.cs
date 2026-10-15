@@ -422,6 +422,20 @@ public class ChainSupervisorTests : IDisposable
         Assert.False(stopped);
     }
 
+    /// <summary>A daemon that refuses to die must not leave the keeper behind: every stop step still runs.</summary>
+    [Fact]
+    public async Task FailedDaemonKillStillStopsTheKeeper()
+    {
+        var daemon = new FakeDaemon(_calls) { KillThrows = new IOException("access denied") };
+        var supervisor = Create(daemon: daemon);
+
+        var error = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.StopAsync(null, CancellationToken.None));
+
+        Assert.Contains("daemon", error.Message);
+        Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+    }
+
     /// <summary>socks5 egress: instead of the three tailscale links, one check of the provided upstream.</summary>
     [Fact]
     public async Task Socks5ColdStartChecksEgressThenStartsProxy()
