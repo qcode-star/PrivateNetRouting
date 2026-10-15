@@ -1106,6 +1106,24 @@ public class GuardTests : IDisposable
         Assert.Equal(WslBootPlan.AdoptForeignCommand, WslConfigGuard.PlanBootLayer(runnerPath, "docker start things", WslBootRunnerState.Missing));
         Assert.Equal(WslBootPlan.AdoptForeignCommand, WslConfigGuard.PlanBootLayer(runnerPath, "docker start things", WslBootRunnerState.Ours));
 
+        // a command that only references the runner (a wrapper, a background or redirected
+        // form) already runs it: adopting it as 00-user-boot-command.sh would make the runner
+        // call itself at every boot
+        foreach (var command in new[]
+        {
+            $"bash {runnerPath}",
+            $"sh {runnerPath}",
+            $"{runnerPath} &",
+            $"{runnerPath} >/dev/null 2>&1",
+            $"\"{runnerPath}\"",
+            $"docker start things; {runnerPath}",
+        })
+        {
+            Assert.Equal(WslBootPlan.AlreadyOurs, WslConfigGuard.PlanBootLayer(runnerPath, command, WslBootRunnerState.Ours));
+            Assert.Equal(WslBootPlan.TakeoverRunner, WslConfigGuard.PlanBootLayer(runnerPath, command, WslBootRunnerState.Foreign));
+            Assert.Equal(WslBootPlan.TakeoverRunner, WslConfigGuard.PlanBootLayer(runnerPath, command, WslBootRunnerState.Missing));
+        }
+
         // extraction: quoted and unquoted, case-insensitive; wrong section and comments ignored
         Assert.Equal(runnerPath, WslConfigGuard.ExtractBootCommand("[boot]\ncommand=\"/etc/wsl.d/startup.sh\"\n"));
         Assert.Equal(runnerPath, WslConfigGuard.ExtractBootCommand("[BOOT]\nCOMMAND = /etc/wsl.d/startup.sh\n"));

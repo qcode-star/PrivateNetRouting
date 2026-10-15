@@ -860,7 +860,11 @@ public sealed class WslConfigGuard(
     /// <summary>The boot-layer plan for one distro from the state read inside it.</summary>
     internal static WslBootPlan PlanBootLayer(string runnerPath, string? bootCommand, WslBootRunnerState runnerState)
     {
-        if (bootCommand == runnerPath)
+        // A command that merely mentions the runner (`bash /etc/wsl.d/startup.sh`, `… &`,
+        // `… >/dev/null`, a quoted path) already runs it: adopting it would preserve it as
+        // 00-user-boot-command.sh, which the runner executes first — it would call the runner
+        // again at every boot, endlessly. Such a command is left exactly as the owner wrote it.
+        if (bootCommand is not null && bootCommand.Contains(runnerPath, StringComparison.Ordinal))
         {
             return runnerState == WslBootRunnerState.Ours ? WslBootPlan.AlreadyOurs : WslBootPlan.TakeoverRunner;
         }
