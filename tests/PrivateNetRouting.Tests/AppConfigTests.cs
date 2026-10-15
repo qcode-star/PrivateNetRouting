@@ -350,6 +350,21 @@ public class AppConfigTests : IDisposable
         Assert.Empty(config.DirectTlds);
         Assert.Equal(["www.anthropic.com", "www.openai.com"], config.Guard.BanProbes);
         Assert.Equal("api.anthropic.com", config.ForwardProxy.HealthCheckHost);
+
+        // every key of the template must land in the model: a misplaced key is silently ignored
+        // by the default deserialization and its tuning would never take effect
+        var strict = new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+            UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+        };
+        var text = File.ReadAllText(Path.Combine(directory.FullName, "config", "appsettings.example.json"));
+        var strictConfig = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(text, strict);
+        Assert.NotNull(strictConfig);
+        Assert.Equal(25, strictConfig.CloseWaitSeconds);
     }
 
     public void Dispose()
