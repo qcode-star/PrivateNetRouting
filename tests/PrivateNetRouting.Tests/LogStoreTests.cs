@@ -185,29 +185,56 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
-    public void FileLogPostponesSizeRotationWhileChainIsHeld()
+    public void AnotherFileLogNeverBlocksTheRotation()
     {
+        // writers keep no handle between records (and share Delete), so a long-lived second
+        // process cannot pin the file against the rotation any more
         var path = Path.Combine(_tempDir, "watchdog.log");
-        using (var holder = new FileLog(path))
-        {
-            using var writer = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2);
-            writer.Info(new string('b', 60)); // over the threshold, but .1 is impossible — holder keeps the file
-            writer.Info("appended anyway");
+        using var other = new FileLog(path);
+        other.Info("from the other writer");
+        using var writer = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2);
 
-            var text = ReadShared(path); // no rotation — writing continues to the same file
-            Assert.Contains(new string('b', 60), text);
-            Assert.Contains("appended anyway", text);
-            Assert.False(File.Exists(path + ".1"));
-        }
-
-        using (var retry = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2))
-        {
-            retry.Info("again"); // a new process start retries the postponed rotation
-        }
+        writer.Info(new string('b', 60));
+        writer.Info("after rotation");
 
         Assert.True(File.Exists(path + ".1"));
+        Assert.Contains("after rotation", ReadShared(path));
+        other.Info("the other writer follows the new file");
+        Assert.Contains("the other writer follows the new file", ReadShared(path));
+        Assert.DoesNotContain("the other writer follows the new file", ReadShared(path + ".1"));
     }
 
+    [Fact]
+    public void FileLogRetriesAPostponedRotationOnALaterRecord()
+    {
+        var path = Path.Combine(_tempDir, "chain.log");
+        using var writer = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2, rotationRetryInterval: TimeSpan.Zero);
+        var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); // a viewer without Delete sharing
+        writer.Info(new string('c', 60)); // over the threshold, the rename is refused
+        writer.Info("still the same file");
+        Assert.False(File.Exists(path + ".1"));
+        Assert.Contains("still the same file", ReadShared(path));
+
+        holder.Dispose();
+        writer.Info("after the holder let go");
+
+        Assert.True(File.Exists(path + ".1")); // not given up on for the process lifetime
+        Assert.Contains("after the holder let go", ReadShared(path));
+    }
+
+    [Fact]
+    public void RotateNowReportsAHeldFile()
+    {
+        var path = Path.Combine(_tempDir, "held.log");
+        using var log = new FileLog(path);
+        log.Info("x");
+        using (var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            Assert.False(log.RotateNow());
+        }
+
+        Assert.True(log.RotateNow());
+    }
     /// <summary>Read a file opened by a writer (FileLog grants only FileShare.Read).</summary>
     private static string ReadShared(string path)
     {

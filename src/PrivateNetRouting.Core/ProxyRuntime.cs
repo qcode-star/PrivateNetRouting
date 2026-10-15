@@ -506,7 +506,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
         var live = _allLogs.FirstOrDefault(l => Path.GetFileName(l.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase));
         if (live is not null)
         {
-            live.RotateNow();
+            if (!live.RotateNow())
+            {
+                return new LogRotationResult(fileName, false, "locked by another process");
+            }
+
             live.Info("log: rotated manually");
             return LogRotationResult.Done(fileName);
         }
