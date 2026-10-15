@@ -1053,25 +1053,45 @@ public sealed class WslConfigGuard(
         fi
 
         mkdir -p "$USER_HOME/.claude"
-        python3 - "$SETTINGS" "$PROXY" <<'PYEOF'
+        # An existing settings.json that cannot be parsed is never rewritten: it holds the
+        # owner's permissions, hooks and model, and a boot-time writer has no way to ask.
+        # The file is replaced through a temp file, so a failure never leaves it half written.
+        if python3 - "$SETTINGS" "$PROXY" <<'PYEOF'
         import json, os, sys
         path, proxy = sys.argv[1], sys.argv[2]
+        real = os.path.realpath(path)
         data = {}
-        if os.path.exists(path):
+        if os.path.exists(real):
             try:
-                with open(path, encoding='utf-8') as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
+                # utf-8-sig: a BOM from a Windows editor is not a parse error
+                with open(real, encoding='utf-8-sig') as f:
+                    text = f.read()
+                if text.strip():
+                    data = json.loads(text)
+                if not isinstance(data, dict) or not isinstance(data.get('env', {}), dict):
+                    raise ValueError('the top level or "env" is not an object')
+            except Exception as e:
+                print('cannot parse %s (%s)' % (path, e))
+                sys.exit(3)
         env = data.setdefault('env', {})
         env['HTTPS_PROXY'] = proxy
         env['HTTP_PROXY'] = proxy
-        with open(path, 'w', encoding='utf-8') as f:
+        tmp = real + '.pnr-tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        if os.path.exists(real):
+            st = os.stat(real)
+            os.chmod(tmp, st.st_mode & 0o7777)
+            os.chown(tmp, st.st_uid, st.st_gid)
+        os.replace(tmp, real)
         PYEOF
-
-        chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
-        echo "$TAG proxy $PROXY written to $SETTINGS"
+        then
+            chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
+            echo "$TAG proxy $PROXY written to $SETTINGS"
+        else
+            echo "$TAG $SETTINGS left untouched - fix it by hand, the next WSL start retries"
+            exit 1
+        fi
         """);
 
     private static GuardState Aggregate(IReadOnlyList<WslDistroStatus> distros)

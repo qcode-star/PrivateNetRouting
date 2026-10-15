@@ -947,6 +947,14 @@ public class GuardTests : IDisposable
         Assert.Contains("env['HTTPS_PROXY'] = proxy", script);
         Assert.DoesNotContain("env['NO_PROXY']", script); // the startup script does not touch NO_PROXY (mentioned only in a comment)
 
+        // the boot-time writer must never wipe an unparseable settings.json: it reads with a
+        // BOM-tolerant codec, refuses on a parse error (non-zero exit, file untouched) and
+        // replaces the file through a temp file
+        Assert.Contains("encoding='utf-8-sig'", script);
+        Assert.Contains("sys.exit(3)", script);
+        Assert.Contains("os.replace(tmp, real)", script);
+        Assert.DoesNotContain("data = {}\n            except", script);
+
         // codex proxy env contents: the marker, the port and the bypass zones of the config
         var envPass = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("ENVFILE="));
         Assert.Contains("pnr_bak \"$ENVFILE\" BACKUP", envPass.Script);
