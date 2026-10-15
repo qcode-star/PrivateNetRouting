@@ -337,7 +337,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
             config,
             new PowerShellAppxPackageSource(powershell, codexUpdaterLog),
             new StoreUpdateSource(),
-            new RunningClaudeProcessSource(),
+            // the OpenAI ChatGPT app shares the executable name: only the Codex package's own
+            // processes (by the install path) may be closed and killed for the update
+            new RunningClaudeProcessSource(RunningApp.PackageInstallMarker(config.Codex.PackageName)),
             new CodexVersionManifest(updaterHttp, config.Codex.Update, codexUpdaterLog),
             codexUpdaterLog);
 
