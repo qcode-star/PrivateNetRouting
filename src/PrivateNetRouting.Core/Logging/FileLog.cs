@@ -10,18 +10,40 @@ internal static class LogRotation
     public static void Shift(string path, int keep)
     {
         var full = Path.GetFullPath(path);
-        for (var i = keep - 1; i > 0; i--)
-        {
-            var older = $"{full}.{i}";
-            if (File.Exists(older))
-            {
-                File.Move(older, $"{full}.{i + 1}", overwrite: true);
-            }
-        }
 
+        // The current file goes first: a file held by another process fails here, before any
+        // age file is touched, so a failed rotation never destroys the existing chain.
+        string? staged = null;
         if (File.Exists(full))
         {
-            File.Move(full, $"{full}.1", overwrite: true);
+            staged = $"{full}.rotating";
+            File.Move(full, staged, overwrite: true);
+        }
+
+        try
+        {
+            for (var i = keep - 1; i > 0; i--)
+            {
+                var older = $"{full}.{i}";
+                if (File.Exists(older))
+                {
+                    File.Move(older, $"{full}.{i + 1}", overwrite: true);
+                }
+            }
+
+            if (staged is not null)
+            {
+                File.Move(staged, $"{full}.1", overwrite: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (staged is not null && File.Exists(staged) && !File.Exists(full))
+            {
+                File.Move(staged, full);
+            }
+
+            throw;
         }
     }
 

@@ -83,6 +83,23 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
+    public void RotateOfAHeldFileLeavesTheAgeChainIntact()
+    {
+        var path = Path.Combine(_tempDir, "app.log");
+        File.WriteAllText(path, "held");
+        File.WriteAllText(path + ".1", "one");
+        File.WriteAllText(path + ".2", "two");
+        using var holder = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read);
+
+        var result = new LogStore(_tempDir).Rotate("app.log", keep: 3);
+
+        Assert.False(result.Ok);
+        Assert.Equal("one", File.ReadAllText(path + ".1"));
+        Assert.Equal("two", File.ReadAllText(path + ".2"));
+        Assert.False(File.Exists(path + ".3"));
+    }
+
+    [Fact]
     public void ResolveRejectsPathsOutsideTheLogDirectory()
     {
         var result = new LogStore(_tempDir).Rotate("..\\other.log", keep: 2);
