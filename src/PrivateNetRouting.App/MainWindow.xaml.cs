@@ -1275,6 +1275,29 @@ public partial class MainWindow : Window
     private bool ConfirmRestartOfRunningApp(RunningAppInfo running, string appNameKey) =>
         LaunchPrompts.ConfirmRestart(this, running, appNameKey);
 
+    /// <summary>The chain as it is right before a launch raises it (null when the snapshot fails).</summary>
+    private async Task<ChainState?> SnapshotChainAsync()
+    {
+        try
+        {
+            return await _runtime.Chain.GetStateAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _runtime.Log.Warn($"chain snapshot before the launch failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A cancelled launch extinguishes only what it raised itself: with a snapshot, the links that
+    /// were already up stay; without one (the snapshot failed) the whole chain goes down.
+    /// </summary>
+    private Task RollBackRaisedChainAsync(ChainState? before) =>
+        before is null
+            ? _runtime.Chain.StopAsync(null, CancellationToken.None)
+            : _runtime.Chain.StopRaisedAsync(before, null, CancellationToken.None);
+
     private async Task RunLaunchAsync()
     {
         if (_launchBusy)
@@ -1286,6 +1309,7 @@ public partial class MainWindow : Window
         _viewModel.SetLaunchBusy(true);
         var success = false;
         var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1302,6 +1326,7 @@ public partial class MainWindow : Window
             chainWasDown = !healthy;
             if (!healthy)
             {
+                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
             }
 
@@ -1320,7 +1345,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                    await RollBackRaisedChainAsync(chainBefore);
                 }
                 catch (Exception stopEx)
                 {
@@ -1406,6 +1431,7 @@ public partial class MainWindow : Window
         _viewModel.SetLaunchBusy(true);
         var success = false;
         var chainWasDown = false; // set by the confirmation: the launch raises the chain only then
+        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1440,6 +1466,7 @@ public partial class MainWindow : Window
                     return false;
                 }
 
+                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
                 chainWasDown = true;
                 await _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct);
@@ -1470,7 +1497,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                    await RollBackRaisedChainAsync(chainBefore);
                 }
                 catch (Exception stopEx)
                 {
@@ -1550,6 +1577,7 @@ public partial class MainWindow : Window
         _viewModel.SetLaunchBusy(true);
         var success = false;
         var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
+        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1566,6 +1594,7 @@ public partial class MainWindow : Window
             chainWasDown = !healthy;
             if (!healthy)
             {
+                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
             }
 
@@ -1584,7 +1613,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    await _runtime.Chain.StopAsync(null, CancellationToken.None);
+                    await RollBackRaisedChainAsync(chainBefore);
                 }
                 catch (Exception stopEx)
                 {

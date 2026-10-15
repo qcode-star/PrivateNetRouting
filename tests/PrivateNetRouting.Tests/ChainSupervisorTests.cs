@@ -415,6 +415,52 @@ public class ChainSupervisorTests : IDisposable
             _calls);
     }
 
+    [Fact]
+    public async Task StopRaisedLeavesTheLinksThatWereUpBefore()
+    {
+        var stoppedHooks = 0;
+        var supervisor = Create(chainStopped: _ =>
+        {
+            stoppedHooks++;
+            return Task.CompletedTask;
+        });
+        // daemon, keeper and node were up before the launch; only the proxy was missing
+        var before = new ChainState(true, true, true, "Running", ProxyRunning: false, ProxyHealthy: false);
+
+        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+
+        Assert.Equal(["proxy.stop"], _calls);
+        Assert.Equal(0, stoppedHooks); // the chain is still partly up — its idle stopper stays
+    }
+
+    [Fact]
+    public async Task StopRaisedOfAChainThatWasFullyDownIsTheFullStop()
+    {
+        var stoppedHooks = 0;
+        var supervisor = Create(chainStopped: _ =>
+        {
+            stoppedHooks++;
+            return Task.CompletedTask;
+        });
+        var before = new ChainState(false, false, false, null, ProxyRunning: false, ProxyHealthy: false);
+
+        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+
+        Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+        Assert.Equal(1, stoppedHooks);
+    }
+
+    [Fact]
+    public async Task StopRaisedOfAChainThatWasFullyUpDoesNothing()
+    {
+        var supervisor = Create();
+        var before = new ChainState(true, true, true, "Running", ProxyRunning: true, ProxyHealthy: true);
+
+        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+
+        Assert.Empty(_calls);
+    }
+
     /// <summary>
     /// A completed stop ends with the chain-stopped hook — the idle stopper is taken down through
     /// it, in both modes. The hook runs even when the caller's token is already cancelled (a

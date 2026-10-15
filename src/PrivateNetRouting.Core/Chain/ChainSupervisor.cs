@@ -82,6 +82,14 @@ public interface IChainSupervisor
     Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct);
 
     Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct);
+
+    /// <summary>
+    /// Stops only the links that were down in <paramref name="before"/> - the snapshot taken
+    /// before an operation raised the chain - so a cancelled launch extinguishes what it raised
+    /// itself and leaves the links that already existed alone. The default is the full stop.
+    /// </summary>
+    Task StopRaisedAsync(ChainState before, IProgress<ChainStep>? progress, CancellationToken ct) =>
+        StopAsync(progress, ct);
 }
 
 /// <summary>
@@ -213,14 +221,17 @@ public sealed class ChainSupervisor(
     public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct) =>
         Task.Run(() => StopSerializedAsync(progress, ct));
 
-    private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    public Task StopRaisedAsync(ChainState before, IProgress<ChainStep>? progress, CancellationToken ct) =>
+        Task.Run(() => StopSerializedAsync(progress, ct, before));
+
+    private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainState? raisedFrom = null)
     {
         // a stop is never abandoned while it waits for its turn (the steps run to the end even on
         // a cancelled token): the bring-up in flight is cancelled by its own owner and lets go
         await _operation.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            await StopCoreAsync(progress, ct).ConfigureAwait(false);
+            await StopCoreAsync(progress, ct, raisedFrom).ConfigureAwait(false);
         }
         finally
         {
@@ -401,14 +412,25 @@ public sealed class ChainSupervisor(
         throw new ChainException("egress", new IOException($"the provided {kind} upstream does not pass the CONNECT check"));
     }
 
-    private async Task StopCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    /// <summary>
+    /// raisedFrom - the snapshot before the operation being rolled back: only the links that were
+    /// down then are stopped (null - every link). The chain-stopped hook runs only when the whole
+    /// chain went down, because the idle stopper belongs to a chain that is still partly up.
+    /// </summary>
+    private async Task StopCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainState? raisedFrom = null)
     {
+        var stopProxy = raisedFrom is null || raisedFrom.ProxyRunning != true;
+        var stopNode = raisedFrom is null || raisedFrom.BackendState != "Running";
+        var stopDaemon = raisedFrom is null || !raisedFrom.DaemonProcessAlive;
+        var stopKeeper = raisedFrom is null || !raisedFrom.KeeperRunning;
+        var wholeChain = stopProxy && (_external || (stopNode && stopDaemon && stopKeeper));
+
         // every step runs even when an earlier one failed: a daemon that refuses to die must not
         // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end
         var failures = new List<(string Component, Exception Error)>();
 
         // the skipped shape has no local proxy to stop; the external upstream is not ours
-        if (!_skipProxy)
+        if (!_skipProxy && stopProxy)
         {
             Report(progress, "Proxy", ChainStepStatus.Active, "stopping");
             try
@@ -426,40 +448,49 @@ public sealed class ChainSupervisor(
         // external-upstream egress: the external upstream is not ours — nothing to bring down past the proxy
         if (!_external)
         {
-            Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
-            try
+            if (stopNode)
             {
-                await cli.DownAsync(ct);
-                Report(progress, "Node", ChainStepStatus.Done, "down");
-            }
-            catch (Exception ex)
-            {
-                Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
-                log.Warn($"chain: down failed: {ex.Message}");
-            }
-
-            Report(progress, "Daemon", ChainStepStatus.Active, "stopping");
-            try
-            {
-                await daemon.KillAsync(ct);
-                Report(progress, "Daemon", ChainStepStatus.Done, "stopped");
-            }
-            catch (Exception ex)
-            {
-                Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
-                failures.Add(("daemon", ex));
+                Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
+                try
+                {
+                    await cli.DownAsync(ct);
+                    Report(progress, "Node", ChainStepStatus.Done, "down");
+                }
+                catch (Exception ex)
+                {
+                    Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
+                    log.Warn($"chain: down failed: {ex.Message}");
+                }
             }
 
-            Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
-            try
+            if (stopDaemon)
             {
-                await keeper.KillAsync(ct);
-                Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
+                Report(progress, "Daemon", ChainStepStatus.Active, "stopping");
+                try
+                {
+                    await daemon.KillAsync(ct);
+                    Report(progress, "Daemon", ChainStepStatus.Done, "stopped");
+                }
+                catch (Exception ex)
+                {
+                    Report(progress, "Daemon", ChainStepStatus.Failed, ex.Message);
+                    failures.Add(("daemon", ex));
+                }
             }
-            catch (Exception ex)
+
+            if (stopKeeper)
             {
-                Report(progress, "Keeper", ChainStepStatus.Failed, ex.Message);
-                failures.Add(("keeper", ex));
+                Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
+                try
+                {
+                    await keeper.KillAsync(ct);
+                    Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
+                }
+                catch (Exception ex)
+                {
+                    Report(progress, "Keeper", ChainStepStatus.Failed, ex.Message);
+                    failures.Add(("keeper", ex));
+                }
             }
         }
 
@@ -473,11 +504,11 @@ public sealed class ChainSupervisor(
             throw new ChainException(failures[0].Component, failures[0].Error);
         }
 
-        log.Info("chain: stopped");
+        log.Info(wholeChain ? "chain: stopped" : "chain: stopped the links this operation raised, the links that were up before are left running");
 
         // the idle stopper exists only over a live chain: the stop is its end too. Its own token
         // is not trusted here — a cancelled chain stop must still take the stoppers down
-        if (chainStopped is not null)
+        if (wholeChain && chainStopped is not null)
         {
             await chainStopped(CancellationToken.None);
         }
