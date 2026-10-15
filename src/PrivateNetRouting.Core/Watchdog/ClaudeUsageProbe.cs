@@ -37,7 +37,7 @@ public interface IClaudeUsageProbe
 
 /// <param name="proxyPort">Port of the applications proxy endpoint (its clients are counted here).</param>
 /// <param name="activityMarkerPath">Activity marker file; null — the shape has no local proxy to touch it (skipped socks5).</param>
-/// <param name="egressPort">Local port of the chain's own egress listener (chain.daemonSocksListen); 0 — the mode has no local egress to guard (socks5).</param>
+/// <param name="egressPort">Local port of the chain's own egress listener (chain.tailscale.socksListen); 0 — the mode has no local egress to guard (socks5).</param>
 public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
     IEstablishedConnectionCounter connections,

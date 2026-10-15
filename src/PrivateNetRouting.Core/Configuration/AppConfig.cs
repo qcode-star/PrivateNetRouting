@@ -123,7 +123,8 @@ public sealed class ClaudeConfig
 
     /// <summary>
     /// settings.json of Claude Code on Windows: the settings sync keeps the proxy env
-    /// (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) there; surgical edits, .pnr-bak-* backups.
+    /// (HTTPS_PROXY/HTTP_PROXY/NO_PROXY) there; only the env keys change, every other key survives,
+    /// but the file is re-serialised (comments and formatting are not kept); .pnr-bak-* backups.
     /// </summary>
     public string SettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
 
@@ -466,9 +467,11 @@ public sealed class BrowserConfig
 {
     /// <summary>
     /// Which egress the profile points at: "forward-proxy" (the application's proxy — HTTP
-    /// CONNECT, names resolved on its side over DoH; default) or "chain" (the chain's final
-    /// SOCKS5: tailscale — chain.tailscale.socksListen, socks5 — chain.socks5.upstream; the
-    /// browser then needs no application process). An unknown value — forward-proxy.
+    /// CONNECT, names resolved on its side over DoH, or on the external upstream's side when the
+    /// local proxy does not run; default) or "chain" (the chain's final egress: tailscale —
+    /// SOCKS5 at chain.tailscale.socksListen, socks5 — SOCKS5 at chain.socks5.upstream, http —
+    /// HTTP CONNECT at chain.http.upstream; the browser then needs no application process).
+    /// An unknown value — forward-proxy.
     /// </summary>
     public string Egress { get; set; } = "forward-proxy";
 
@@ -535,7 +538,7 @@ public enum BrowserEgressMode
     /// <summary>The application's own forward proxy (forwardProxy.listen): HTTP CONNECT, names resolved on its side over DoH.</summary>
     ForwardProxy = 0,
 
-    /// <summary>The chain's final SOCKS5: the sidecar's listener in the tailscale mode, the external upstream in the socks5 one.</summary>
+    /// <summary>The chain's final egress: the sidecar's SOCKS5 listener in the tailscale mode, the external upstream in the socks5 (SOCKS5) and http (HTTP CONNECT) modes.</summary>
     Chain = 1,
 }
 

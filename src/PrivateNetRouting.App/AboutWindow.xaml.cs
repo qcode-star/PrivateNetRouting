@@ -7,7 +7,8 @@ namespace PrivateNetRouting.App;
 
 /// <summary>
 /// About: the application name and version, one line of what it is, and the project's site on
-/// GitHub. Modal, holds no state — closed by the button or the title bar.
+/// GitHub. Modeless (owned by the main window, one at a time), holds no state — closed by the
+/// button or the title bar.
 /// </summary>
 public partial class AboutWindow : Window
 {

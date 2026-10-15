@@ -8,7 +8,7 @@ namespace PrivateNetRouting.Core.Watchdog;
 /// (PrivateNetRouting.App --watchdog-worker; the argument is handled before everything else —
 /// in App before the single-instance mutex and before the UI). It waits for the idle, stops
 /// the WSL Claude host and the chain (the daemon shutdown may raise UAC per
-/// chain.daemonElevation), and exits by itself; the log is watchdog-worker.log (shared with
+/// chain.tailscale.elevation), and exits by itself; the log is watchdog-worker.log (shared with
 /// the GUI and other writers — everyone writes to the same single file).
 /// </summary>
 public static class WatchdogWorker

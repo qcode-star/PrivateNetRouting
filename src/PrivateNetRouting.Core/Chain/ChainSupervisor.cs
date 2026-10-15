@@ -255,7 +255,7 @@ public sealed class ChainSupervisor(
         }
         else
         {
-            // 1. daemon (UAC only in the elevated mode: chain.daemonElevation=always
+            // 1. daemon (UAC only in the elevated mode: chain.tailscale.elevation=always
             // or an old tailscale under auto)
             if (daemon.IsHttpListening && daemon.IsProcessAlive)
             {

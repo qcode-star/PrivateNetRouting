@@ -472,7 +472,7 @@ public partial class MainWindow : Window
     /// A step from the orchestrator — a bring-up (the card's or a launch's) or the card's stop:
     /// the rail runs live instead of waiting for the next poll, the current step's detail sits
     /// under it, and the UAC hint appears with the daemon only when the start actually goes
-    /// through elevation (chain.daemonElevation). A stop speaks its own vocabulary and paints its
+    /// through elevation (chain.tailscale.elevation). A stop speaks its own vocabulary and paints its
     /// finished stages neutral: a grey "stopped" must not read as the green of a running stage.
     /// </summary>
     private void OnChainStep(ChainStep step)

@@ -264,8 +264,9 @@ internal static class Program
 
     /// <summary>
     /// Viewing and rotation of logs in the logging.directory directory (read-only plus file
-    /// shifting; nothing is started and no config is created). A file opened by the application is rotated
-    /// from its diagnostics window — here it will be marked as locked.
+    /// shifting; nothing is started). The config is read with LoadOrCreate, so a missing one is created
+    /// from the defaults. A file held by another process (the application's live log) is reported as
+    /// locked.
     /// </summary>
     private static int RunLogsCommand(List<string> rest)
     {
@@ -530,8 +531,8 @@ internal static class Program
         }
 
         // A dead egress: when the egress is ours to raise (ChainOwnsEgress — the forward proxy in
-        // both modes, the sidecar's listener in the tailscale one) a confirmed answer raises the
-        // chain (the launcher does that); over the external upstream of the socks5 mode there is
+        // the default shape, the sidecar's listener in the tailscale mode) a confirmed answer raises the
+        // chain (the launcher does that); over an external endpoint (the upstream of the socks5 or http mode) there is
         // nothing to raise — the question is only whether to start anyway.
         Task<bool> ConfirmDeadEgress(CancellationToken ct)
         {
@@ -1093,13 +1094,16 @@ internal static class Program
                                  returns — the worker survives this command
                                  (forwardProxy.detached)
             pnr chain status     chain state; tailscale mode: daemon/keeper/node/proxy/health,
-                                 socks5 mode: upstream/proxy/health (chain.mode)
+                                 socks5 and http modes: upstream/proxy/health (chain.mode)
             pnr chain up         bring the chain up (tailscale: daemon -> keeper -> node -> proxy;
                                  socks5: egress check -> proxy, or straight to the health check
-                                 when forwardProxy.enabled=false; UAC only in the tailscale mode)
-            pnr chain down       stop the chain (down -> daemon -> keeper -> proxy; UAC; in the
-                                 socks5 mode only the proxy stops, in the skipped shape nothing
-                                 of ours is running)
+                                 when forwardProxy.enabled=false; http: egress check -> health
+                                 check, no local proxy; UAC only in the tailscale mode and only
+                                 when the daemon runs elevated, see chain.tailscale.elevation)
+            pnr chain down       stop the chain (tailscale: down -> daemon -> keeper -> proxy, UAC
+                                 only for an elevated daemon; in the socks5 mode only the proxy
+                                 stops, in the skipped shapes (http, or socks5 with
+                                 forwardProxy.enabled=false) nothing of ours is running)
             pnr check            check the chain with a CONNECT-roundtrip
             pnr status           read-only state summary:
                                  chain processes and port owners (pid), WSL bind, proxy
@@ -1119,12 +1123,13 @@ internal static class Program
                                  and starts it again through the proxy
             pnr browser [--check-only] [--private] [--yes] [--url <url>]
                                  start the browser with the profile created once through the
-                                 application ("?" -> "Create browser profile..."): it goes straight
-                                 to the chain's own egress (browser.* config), not through the
-                                 application proxy, so the browser works without the application
-                                 (the chain has to be up); --check-only only reports whether the
-                                 egress answers (exit code 1 when it does not), --yes raises the
-                                 chain / starts anyway without the console question
+                                 application ("?" -> "Create browser profile..."); the traffic
+                                 goes through the egress chosen by browser.egress: forward-proxy
+                                 (default, the applications proxy endpoint over HTTP CONNECT) or
+                                 chain (the chain's final egress, independent of the application
+                                 process); --check-only only reports whether the egress answers
+                                 (exit code 1 when it does not), --yes raises the chain / starts
+                                 anyway without the console question
             pnr codex launch [--check-only] [--restart]
                                  start the Codex desktop app (OpenAI, Microsoft Store MSIX)
                                  with --proxy-server/--proxy-bypass-list and the proxy env
@@ -1152,10 +1157,12 @@ internal static class Program
             pnr guard policy on|off
                                  managed policy egressProxyUrl + disableWslSessions=0 (UAC)
             pnr guard settings sync
-                                 write env (proxy + NO_PROXY) into Claude Code settings.json
-                                 and [features] respect_system_proxy into Codex config.toml
-            pnr guard wsl sync   update the WSL startup script and settings.json env in
-                                 the distro (guard.wslDistro/guard.wslUser)
+                                 write env (proxy + NO_PROXY) into Claude Code settings.json,
+                                 [features] respect_system_proxy into Codex config.toml and
+                                 the proxy env into the .env of CODEX_HOME
+            pnr guard wsl sync   update the WSL layer of the distros (wsl.distros): the startup
+                                 script, settings.json env, the Codex proxy env snippet and
+                                 the boot runner in /etc/wsl.conf
             pnr guard sysproxy on|off
                                  system WinINET proxy on the app's forward proxy (no UAC)
             pnr config path      user config path

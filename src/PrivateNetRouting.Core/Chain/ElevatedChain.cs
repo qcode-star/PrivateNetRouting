@@ -8,7 +8,7 @@ namespace PrivateNetRouting.Core.Chain;
 
 /// <summary>
 /// Elevated application commands (the chain on an old tailscale or with
-/// chain.daemonElevation=always; the guards): self-launch via runas (UAC).
+/// chain.tailscale.elevation=always; the guards): self-launch via runas (UAC).
 /// </summary>
 public static class ElevatedChainCommands
 {

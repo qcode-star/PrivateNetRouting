@@ -1102,7 +1102,7 @@ public sealed class WslConfigGuard(
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
     internal static string BuildStartupScript(string user, int port, string? fixedHost = null) => NormalizeLf($$"""
         #!/bin/bash
-        # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy
+        # Managed by PrivateNetRouting (wsl.startupScriptPath). Keeps the Claude Code proxy
         # env pointing at the Windows side of the WSL NAT gateway, where the application's
         # forward proxy listens. Runs from /etc/wsl.d/startup.sh at WSL start (as root);
         # safe to run by hand. Idempotent: NO_PROXY is not touched (it is synced from

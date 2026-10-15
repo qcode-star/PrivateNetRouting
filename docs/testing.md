@@ -43,8 +43,8 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
   **and** filter `ControlType == Window` with a non-empty `Name` — otherwise you catch a
   floating tooltip or the tray overflow flyout and wonder why `LanguageBox` is "not found".
 - **UIA driver, targeting**: prefer `AutomationId` (the XAML `x:Name`) over `Name` — the
-  title-bar buttons share captions with in-app controls («Свернуть» is both Minimize and the
-  chain card's collapse chevron; «Развернуть» is both Maximize and the guards toggle).
+  title-bar buttons share captions with in-app controls (in the ru UI the Minimize caption is
+  also the chain card's collapse chevron, and the Maximize caption is also the guards toggle).
   Buttons with compound content (a StackPanel with a dot, like the update button) have an
   **empty automation name** — find the inner text element and walk up with
   `TreeWalker.ControlViewWalker` to the Button. Combo items are `ListItem` elements whose
@@ -79,9 +79,9 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
   wait `watchdog.checkSeconds`, and confirm in the logs: the WSL Claude host stop, the chain
   stop, the worker exiting by itself. The auto-rearm must fire after every raise — from the
   window, from `pnr chain up`, and from the update flow alike.
-- Bring-up and cancel: the rail lights the active stage, "Поднять" grays out, "Остановить"
+- Bring-up and cancel: the rail lights the active stage, the card's Start grays out, Stop
   stays enabled as the cancel; a cancelled bring-up extinguishes what got raised
-  ("поднятие отменено — цепочка остановлена"). The idle-stop Start button is enabled only
+  (the "bring-up cancelled — chain is stopped" line). The idle-stop Start button is enabled only
   over a fully up chain — the gate itself is a test case.
 - Launches: `claude.exe` must carry `--proxy-server=http://127.0.0.1:18081` and the full
   `--proxy-bypass-list` (fixed local entries + both spellings of every configured zone);
@@ -92,16 +92,21 @@ Machine-specific real values live in `.secret.agents.md`; nothing here needs the
   plus the `codex-launcher` log line.
 - Browser profile (two phases): the dialog from the "?" menu writes the profile and the
   desktop shortcut (its command line carries the same profile and, for Chrome, the egress);
-  the files to check are Firefox's `user.js` (the chain's egress as
-  `network.proxy.socks`/`socks_port`, `socks_remote_dns`, `failover_direct=false`,
+  the files to check are Firefox's `user.js` (the egress from `browser.egress`: for
+  `forward-proxy` — and for the http mode's chain egress — the `network.proxy.http`/`ssl`
+  prefs of an HTTP CONNECT proxy, for the other `chain` egresses `network.proxy.socks`/
+  `socks_port` with `socks_remote_dns`; always `failover_direct=false`,
   `browser.startup.page=3`, WebRTC off) and Chrome's `Default/Preferences`
   (`webrtc.ip_handling_policy`); Chrome's proxy and the restored session live on its
-  command line (`socks5://`, `--restore-last-session`). Then the launch: a first click with
-  no profile shows the warning + the offer; a click with a live egress starts the browser and
-  the connections are visible on the egress port (18083), not on 18081; a click with the
-  chain down asks about raising it, and the bring-up is drawn in the chain card. The
-  shortcut must start the browser with the chain up and the application closed. A second
-  click reports "already running" without duplicating.
+  command line (`--proxy-server=http://` or `socks5://` by the egress,
+  `--restore-last-session`). Then the launch: a first click with no profile shows the
+  warning + the offer; a click with a live egress starts the browser and the connections are
+  visible on the egress port — 18081 for `forward-proxy`, the chain's egress port (18083 by
+  default in the tailscale mode) for `chain`; a click with the chain down asks about raising
+  it (not over an external endpoint — there the question is only whether to start anyway),
+  and the bring-up is drawn in the chain card. The shortcut must start the browser with the
+  chain up and, for the `chain` egress, the application closed. A second click reports
+  "already running" without duplicating.
 - The update window: with no chain it asks to raise one (a modal Yes/No — this is by
   design). While a MessageBox waits, the elapsed timer keeps ticking — that is not a hang.
   A full run against the live chain ends in "up to date" or a real offer; do not let a
@@ -157,8 +162,8 @@ limitation belongs to this test setup, not to the mode. For a green-path test se
 `forwardProxy.healthCheckHost` to a non-banned HTTPS host for the run and restore it (the
 health host drives both the egress check and the CONNECT health probe).
 
-Socks5-mode checklist: the rail has three stages (Выход / Локальный прокси / Проверка
-CONNECT), the upstream row shows the address with its reachability word, `pnr chain status`
+Socks5-mode checklist: the rail has three stages (Egress / Forward proxy / CONNECT
+check), the upstream row shows the address with its reachability word, `pnr chain status`
 prints the `upstream:` line, real traffic passes through 18081, the log carries
 `upstream resolves` and no DoH activity, and chain down stops only the proxy.
 
@@ -171,10 +176,10 @@ tailscale mode afterwards.
 - Build + tests from the repository, then publish **both** projects self-contained into the
   install directory — the running exe locks the folder, so stop the application first and
   start it again after (hard kill is the sanctioned path).
-- `pnr chain up` from a CLI process leaves a proxy-less chain (the in-process proxy dies
-  with the command) — the GUI then honestly shows a partial chain. That is designed
-  behavior; use the window, `--launch`, or `forwardProxy.detached` for a persistent proxy.
+- `pnr chain up` and the other CLI commands that leave a client behind hand the in-process
+  proxy over to a detached worker before they exit, so the chain stays whole afterwards;
+  `forwardProxy.detached` hosts the proxy in a worker from the start.
 - Before every commit check the **staged** diff (`git diff --cached`) — not just `git diff`
   — and the untracked list: `git add -A` sweeps whatever the test scripts created in the
-  working tree (a real incident: daemon logs with machine-specific data reached a pushed
-  commit and took a force-push scrub). Keep scratch scripts and captures in `%TEMP%`.
+  working tree (daemon logs, for one, carry machine-specific data).
+  Keep scratch scripts and captures in `%TEMP%`.

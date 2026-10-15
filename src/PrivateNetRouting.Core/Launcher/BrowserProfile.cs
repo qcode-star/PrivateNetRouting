@@ -15,7 +15,7 @@ namespace PrivateNetRouting.Core.Launcher;
 /// ride the CONNECT and are resolved on the proxy side — the local ban cannot poison them; in
 /// the default shape the proxy process (the GUI in the tray or the detached worker) has to be
 /// running, in a skipped shape the external upstream does. "chain": the chain's final egress —
-/// the sidecar's own SOCKS5 listener (chain.daemonSocksListen) in the tailscale mode, the
+/// the sidecar's own SOCKS5 listener (chain.tailscale.socksListen) in the tailscale mode, the
 /// external upstream (chain.socks5.upstream as SOCKS5, chain.http.upstream as HTTP CONNECT) in
 /// the external modes; the profile then works on its own (its desktop shortcut needs no
 /// application process), but the tailscale sidecar resolves names with the system resolver, and

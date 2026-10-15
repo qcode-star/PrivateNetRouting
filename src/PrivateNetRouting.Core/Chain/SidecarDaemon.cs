@@ -16,7 +16,7 @@ public interface ISidecarDaemon
     /// <summary>Idempotent start: already alive — skip; stale — kill; start and wait for the listener.</summary>
     Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct);
 
-    /// <summary>Kills the daemon processes (elevated or direct, by chain.daemonElevation).</summary>
+    /// <summary>Kills the daemon processes (elevated or direct, by chain.tailscale.elevation).</summary>
     Task KillAsync(CancellationToken ct);
 
     /// <summary>Whether starting the daemon now goes through the elevated helper (a UAC prompt is possible).</summary>
@@ -28,7 +28,7 @@ public interface ISidecarDaemon
 /// or DNS in the OS. On tailscale 1.104.1+ the daemon pipe no longer names Administrators as
 /// its owner, so a non-elevated start works with --windows-mode=dev (the pipe is owned by the
 /// current user); older builds cannot create the pipe and are started through the elevated
-/// runas copy. chain.daemonElevation picks: auto (by the daemon version) / never / always;
+/// runas copy. chain.tailscale.elevation picks: auto (by the daemon version) / never / always;
 /// the modes are version-locked — a 1.104.1+ daemon refuses a custom socket without the dev
 /// flag even elevated, and an older daemon refuses to listen without elevation.
 /// </summary>
@@ -49,7 +49,7 @@ public sealed class SidecarDaemon(
 
     /// <summary>
     /// Daemon liveness = responsiveness of its named pipe. For an elevated daemon
-    /// (chain.daemonElevation=always, or an old tailscale in auto) the command line is not visible
+    /// (chain.tailscale.elevation=always, or an old tailscale in auto) the command line is not visible
     /// to a non-elevated WMI reader (Windows 11 24H2+ returns an empty CommandLine), so identifying
     /// "our" processes by statedir in the cmdline does not work for status; the pipe with our name,
     /// though, can only be held by a daemon started with our --socket (the Tailscale system
