@@ -54,6 +54,23 @@ public class RuntimePiecesTests : IDisposable
     }
 
     [Fact]
+    public async Task NegativeAnswerIsCachedBrieflyThenAsksAgain()
+    {
+        var time = new ManualTimeProvider();
+        var inner = new FakeResolver(_ => throw new DnsNegativeAnswerException("nxdomain"));
+        var resolver = new CachingDnsResolver(
+            inner, ttlMin: TimeSpan.FromSeconds(60), ttlMax: TimeSpan.FromSeconds(3600), time: time);
+
+        await Assert.ThrowsAsync<DnsNegativeAnswerException>(() => resolver.ResolveAsync("typo.example", CancellationToken.None));
+        await Assert.ThrowsAsync<DnsNegativeAnswerException>(() => resolver.ResolveAsync("typo.example", CancellationToken.None));
+        Assert.Equal(1, inner.Calls); // the second miss comes from the negative cache
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        await Assert.ThrowsAsync<DnsNegativeAnswerException>(() => resolver.ResolveAsync("typo.example", CancellationToken.None));
+        Assert.Equal(2, inner.Calls);
+    }
+
+    [Fact]
     public async Task CacheClampsLongTtl()
     {
         var time = new ManualTimeProvider();

@@ -37,7 +37,7 @@ public class DohClientTests
     public void ThrowsWhenAnswerEmpty()
     {
         var raw = Head(200).Concat(BuildResponse(ip: null, ttl: 60)).ToArray();
-        Assert.Throws<FormatException>(() => DohClient.ParseHttpResponse(raw));
+        Assert.Throws<DnsNegativeAnswerException>(() => DohClient.ParseHttpResponse(raw));
     }
 
     [Fact]

@@ -77,13 +77,13 @@ public class DnsWireTests
     }
 
     [Fact]
-    public void ThrowsOnNonZeroRcode()
+    public void NxdomainIsANegativeAnswer()
     {
         var writer = new MemoryStream();
         writer.Write([0xAB, 0xCD, 0x81, 0x83, 0, 1, 0, 0, 0, 0, 0, 0]); // rcode=3 NXDOMAIN
         WriteQuestion(writer, "gone.example");
 
-        Assert.Throws<FormatException>(() => DnsWire.ParseResponse(writer.ToArray()));
+        Assert.Throws<DnsNegativeAnswerException>(() => DnsWire.ParseResponse(writer.ToArray()));
     }
 
     [Fact]

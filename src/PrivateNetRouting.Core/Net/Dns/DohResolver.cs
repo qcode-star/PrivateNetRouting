@@ -24,6 +24,12 @@ public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSp
                 pool.MarkAlive(endpoint);
                 return new ResolveResult(answer.Ips[0], endpoint.ToString(), answer.MinTtl);
             }
+            catch (DnsNegativeAnswerException)
+            {
+                // the endpoint answered: the name simply has no address, so it stays alive
+                pool.MarkAlive(endpoint);
+                throw;
+            }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 // any endpoint failure (including a bad certificate) fails over to the next one;
@@ -47,7 +53,9 @@ public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, Time
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
+    private static readonly TimeSpan NegativeTtl = TimeSpan.FromSeconds(10);
     private readonly Dictionary<string, (ResolveResult Result, DateTimeOffset Expires)> _cache = [];
+    private readonly Dictionary<string, (DnsNegativeAnswerException Error, DateTimeOffset Expires)> _negative = [];
 
     public async Task<ResolveResult> ResolveAsync(string host, CancellationToken ct)
     {
@@ -58,9 +66,33 @@ public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, Time
             {
                 return hit.Result;
             }
+
+            if (_negative.TryGetValue(host, out var miss) && miss.Expires > now)
+            {
+                throw new DnsNegativeAnswerException(miss.Error.Message);
+            }
         }
 
-        var resolved = await inner.ResolveAsync(host, ct);
+        ResolveResult resolved;
+        try
+        {
+            resolved = await inner.ResolveAsync(host, ct);
+        }
+        catch (DnsNegativeAnswerException ex)
+        {
+            lock (_gate)
+            {
+                if (_negative.Count >= 1024)
+                {
+                    _negative.Clear();
+                }
+
+                _negative[host] = (ex, now + NegativeTtl);
+            }
+
+            throw;
+        }
+
         var ttl = resolved.TtlSeconds is { } seconds
             ? TimeSpan.FromSeconds(Math.Clamp(seconds, (long)ttlMin.TotalSeconds, (long)ttlMax.TotalSeconds))
             : ttlMin;

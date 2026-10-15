@@ -106,7 +106,7 @@ public static class DohClient
         var answer = DnsWire.ParseResponse(body);
         if (answer.Ips.Count == 0)
         {
-            throw new FormatException("doh: empty response");
+            throw new DnsNegativeAnswerException("doh: no A record (NODATA)");
         }
 
         return answer;

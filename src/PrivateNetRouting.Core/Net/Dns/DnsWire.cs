@@ -11,6 +11,7 @@ namespace PrivateNetRouting.Core.Net.Dns;
 public static class DnsWire
 {
     public const ushort QtypeA = 1;
+    private const int RcodeNameError = 3;
 
     /// <summary>Builds a single-record query (RD=1, QDCOUNT=1).</summary>
     public static byte[] BuildQuery(string name, ushort qtype = QtypeA, ushort id = 0xABCD)
@@ -51,6 +52,11 @@ public static class DnsWire
         }
 
         var rcode = data[3] & 0x0F;
+        if (rcode == RcodeNameError)
+        {
+            throw new DnsNegativeAnswerException("dns: no such name (NXDOMAIN)");
+        }
+
         if (rcode != 0)
         {
             throw new FormatException($"dns: server returned rcode {rcode}");
@@ -123,6 +129,12 @@ public static class DnsWire
         }
     }
 }
+
+/// <summary>
+/// A valid negative answer — the name does not exist (NXDOMAIN) or has no A record (NODATA). The
+/// endpoint worked: it must not be marked dead, and the answer is cached for a short time.
+/// </summary>
+public sealed class DnsNegativeAnswerException(string message) : FormatException(message);
 
 /// <summary>Parsed response: A addresses and the minimum TTL (sec), if addresses are present.</summary>
 public sealed record DnsAnswer(IReadOnlyList<IPAddress> Ips, uint? MinTtl);
