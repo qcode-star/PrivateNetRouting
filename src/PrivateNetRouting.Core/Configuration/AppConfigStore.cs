@@ -43,6 +43,8 @@ public static class AppConfigStore
         if (File.Exists(path))
         {
             var config = Deserialize(ReadShared(path), path);
+            // per-key messages now, instead of a FormatException from deep inside the composition
+            AppConfigValidator.ThrowIfInvalid(config, path);
             config.ExpandEnvironmentVariables();
             return config;
         }

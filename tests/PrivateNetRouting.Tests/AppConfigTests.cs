@@ -75,6 +75,58 @@ public class AppConfigTests : IDisposable
         Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_path))!["chain"]);
     }
 
+    // ----- validation: per-key messages instead of a crash deep in the composition -----
+
+    private string LoadError(string json)
+    {
+        File.WriteAllText(_path, json);
+        return Assert.Throws<InvalidDataException>(() => AppConfigStore.LoadOrCreate(_path)).Message;
+    }
+
+    [Fact]
+    public void ValidationNamesTheKeyOfAHostNameWherePortAndIpAreParsed()
+    {
+        var message = LoadError("""{ "forwardProxy": { "listen": "localhost:18081" } }""");
+
+        Assert.Contains("forwardProxy.listen", message);
+        Assert.Contains("IP:port", message);
+    }
+
+    [Fact]
+    public void ValidationRejectsPortsOutOfRangeAndTheEmptyHttpUpstreamOfTheHttpMode()
+    {
+        Assert.Contains("chain.socks5.upstream", LoadError("""{ "chain": { "mode": "socks5", "socks5": { "upstream": "127.0.0.1:99999" } } }"""));
+        var http = LoadError("""{ "chain": { "mode": "http" } }""");
+        Assert.Contains("chain.http.upstream", http);
+        Assert.DoesNotContain("socks5", http); // the error is about the http mode, not "socks5: upstream must be an IP"
+    }
+
+    [Fact]
+    public void ValidationChecksOnlyTheEndpointsOfTheModeInUse()
+    {
+        // the template's empty HTTP upstream does not matter to a socks5 setup
+        File.WriteAllText(_path, """{ "chain": { "mode": "socks5" } }""");
+
+        Assert.Equal(ChainMode.Socks5, AppConfigStore.LoadOrCreate(_path).Chain.EffectiveMode);
+    }
+
+    [Fact]
+    public void ValidationRejectsNullSectionsAndListsAndNonsenseTimings()
+    {
+        Assert.Contains("ui: must not be null", LoadError("""{ "ui": null }"""));
+        Assert.Contains("bypassDomains: must not be null", LoadError("""{ "bypassDomains": null }"""));
+        Assert.Contains("forwardProxy.dohSeed: must not be null", LoadError("""{ "forwardProxy": { "dohSeed": null } }"""));
+
+        var timings = LoadError("""{ "watchdog": { "checkSeconds": 0 }, "claude": { "update": { "chunkBytes": 0 } }, "restartGraceSeconds": 0 }""");
+        Assert.Contains("watchdog.checkSeconds", timings);
+        Assert.Contains("claude.update.chunkBytes", timings);
+        Assert.Contains("restartGraceSeconds", timings); // every problem at once, not one per start
+    }
+
+    [Fact]
+    public void TheDefaultConfigIsValid()
+        => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));
+
     [Fact]
     public void SaveReplacesTheFileInOneStepAndLeavesNoTempFile()
     {
@@ -297,7 +349,7 @@ public class AppConfigTests : IDisposable
 
         File.WriteAllText(_path, """
             {
-              "chain": { "mode": "http" }
+              "chain": { "mode": "http", "http": { "upstream": "192.0.2.10:3128" } }
             }
             """);
         Assert.Equal(ChainMode.Http, AppConfigStore.LoadOrCreate(_path).Chain.EffectiveMode);
