@@ -22,6 +22,12 @@ public static class ElevatedChainCommands
     /// </summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
     {
+        // an administrator must not write wherever the caller points: only our own result file shape
+        if (!ElevatedHelperTrust.IsValidResultFile(resultFile))
+        {
+            return 1;
+        }
+
         try
         {
             var config = AppConfigStore.LoadOrCreate(configPath);

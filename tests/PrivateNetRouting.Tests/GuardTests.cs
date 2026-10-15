@@ -1313,6 +1313,54 @@ public class GuardTests : IDisposable
         Assert.Equal("/etc/wsl.d/startup/00-user-boot-command.sh", WslConfigGuard.UserCommandPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\u\AppData\Local\PrivateNetRouting\sidecar\elevated-guard-ban-on=0a1b2c3d.result", true)]
+    [InlineData(@"C:\x\elevated-start-daemon=ffffffff.result", true)]
+    [InlineData(@"C:\Windows\System32\drivers\etc\hosts", false)]
+    [InlineData(@"C:\x\elevated-guard-ban-on=0a1b2c3d.txt", false)]
+    [InlineData(@"C:\x\result", false)]
+    [InlineData(@"C:\x\=0a1b2c3d.result", false)]
+    [InlineData(@"..\elevated-guard-ban-on=0a1b2c3d.result", false)]
+    [InlineData("", false)]
+    public void ElevatedHelperWritesOnlyTheResultFileShapeItCreates(string path, bool expected)
+        => Assert.Equal(expected, ElevatedHelperTrust.IsValidResultFile(path));
+
+    [Fact]
+    public void ElevatedGuardHelperRefusesAForeignResultFileWithoutTouchingIt()
+    {
+        var target = Path.Combine(Path.GetTempPath(), $"pnr-victim-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(target, "precious");
+        try
+        {
+            var code = GuardElevatedCommands.Execute(GuardElevatedCommands.BanOn, target);
+
+            Assert.Equal(1, code);
+            Assert.Equal("precious", File.ReadAllText(target));
+        }
+        finally
+        {
+            File.Delete(target);
+        }
+    }
+
+    [Fact]
+    public void ElevatedHelperPinsPowerShellAndHostsToTheSystem()
+    {
+        var config = new AppConfig { PowerShellPath = @"C:\Users\u\evil\powershell.exe" };
+        config.Guard.HostsFile = @"C:\Users\u\anywhere\hosts";
+        var logPath = Path.Combine(Path.GetTempPath(), $"pnr-pin-{Guid.NewGuid():N}.log");
+        using (var log = new FileLog(logPath))
+        {
+            GuardElevatedCommands.PinSystemLocations(config, log);
+        }
+
+        File.Delete(logPath);
+        Assert.Equal(ElevatedHelperTrust.SystemPowerShell(), config.PowerShellPath);
+        Assert.Equal(ElevatedHelperTrust.SystemHostsFile(), config.Guard.HostsFile);
+        Assert.EndsWith(@"WindowsPowerShell\v1.0\powershell.exe", config.PowerShellPath, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(@"drivers\etc\hosts", config.Guard.HostsFile, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task WslProbeResolvesTheUsersRealHome()
     {

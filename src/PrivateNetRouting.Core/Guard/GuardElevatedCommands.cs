@@ -26,12 +26,22 @@ public static class GuardElevatedCommands
     /// <summary>Runs in an already elevated process (App or pnr); returns the exit code.</summary>
     public static int Execute(string command, string resultFile, string? configPath = null)
     {
+        // an administrator must not write wherever the caller points: only our own result file shape
+        if (!ElevatedHelperTrust.IsValidResultFile(resultFile))
+        {
+            return 1;
+        }
+
         try
         {
             var config = AppConfigStore.LoadOrCreate(configPath);
             var log = new FileLog(
                 Path.Combine(config.Logging.Directory, "guard-elevated.log"),
                 config.Logging.EffectiveLevel);
+
+            // the config is writable by any process of the user; what runs and is overwritten as
+            // administrator is pinned to the system locations instead of read from it
+            PinSystemLocations(config, log);
             var powershell = new PowerShellRunner(config.PowerShellPath);
             var detail = command switch
             {
@@ -59,6 +69,25 @@ public static class GuardElevatedCommands
 
             return 1;
         }
+    }
+
+    /// <summary>Overrides the config's PowerShell and hosts file with the system ones (logged when they differed).</summary>
+    internal static void PinSystemLocations(AppConfig config, FileLog log)
+    {
+        var powershell = ElevatedHelperTrust.SystemPowerShell();
+        if (!string.Equals(Path.GetFullPath(config.PowerShellPath), powershell, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Warn($"elevated helper: powerShellPath '{config.PowerShellPath}' ignored, using the system PowerShell");
+        }
+
+        var hosts = ElevatedHelperTrust.SystemHostsFile();
+        if (!string.Equals(Path.GetFullPath(config.Guard.HostsFile), hosts, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Warn($"elevated helper: guard.hostsFile '{config.Guard.HostsFile}' ignored, using the system hosts file");
+        }
+
+        config.PowerShellPath = powershell;
+        config.Guard.HostsFile = hosts;
     }
 
     /// <summary>
