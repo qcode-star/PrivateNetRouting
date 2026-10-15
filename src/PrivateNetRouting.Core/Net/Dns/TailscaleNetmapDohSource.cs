@@ -25,6 +25,9 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
     /// <summary>Hard limit of one netmap call.</summary>
     private static readonly TimeSpan NetmapTimeout = TimeSpan.FromSeconds(40);
 
+    /// <summary>Resolver-host problems already reported at Warn: discovery repeats on a timer, a repeat is Debug.</summary>
+    private readonly HashSet<string> _reported = [];
+
     [GeneratedRegex(@"(https?)://(?<host>[A-Za-z0-9._-]+|\[[0-9a-fA-F:]+\])(?::(?<port>\d+))?/dns-query")]
     private static partial Regex DohRouteRegex();
 
@@ -70,7 +73,7 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
             KillIfRunning(process);
         }
 
-        return await ParseEndpointsAsync(stdout, ResolveHostAsync, ct, log);
+        return await ParseEndpointsAsync(stdout, ResolveHostAsync, ct, log, _reported);
     }
 
     /// <summary>A hung or abandoned child must not outlive the call (timeout, cancellation).</summary>
@@ -100,7 +103,8 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
         string netmap,
         Func<string, CancellationToken, Task<IPAddress?>> resolveHost,
         CancellationToken ct,
-        FileLog? log = null)
+        FileLog? log = null,
+        ISet<string>? reported = null)
     {
         var found = new List<DohEndpoint>();
         foreach (var match in DohRouteRegex().Matches(netmap).Cast<Match>())
@@ -136,12 +140,12 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
                     }
                     else
                     {
-                        log?.Warn($"doh: discovery: resolver host {host} has no IPv4 address, skipped");
+                        Report(log, reported, $"doh: discovery: resolver host {host} has no IPv4 address, skipped");
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    log?.Warn($"doh: discovery: resolver host {host} did not resolve, skipped: {ex.Message}");
+                    Report(log, reported, $"doh: discovery: resolver host {host} did not resolve, skipped: {ex.Message}");
                 }
             }
 
@@ -158,6 +162,32 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
         }
 
         return found;
+    }
+
+    /// <summary>Warn the first time a message is seen, Debug for its repeats (the discovery is periodic).</summary>
+    private static void Report(FileLog? log, ISet<string>? reported, string message)
+    {
+        bool first;
+        if (reported is null)
+        {
+            first = true;
+        }
+        else
+        {
+            lock (reported)
+            {
+                first = reported.Add(message);
+            }
+        }
+
+        if (first)
+        {
+            log?.Warn(message);
+        }
+        else
+        {
+            log?.Debug(message);
+        }
     }
 
     private static async Task<IPAddress?> ResolveHostAsync(string host, CancellationToken ct)

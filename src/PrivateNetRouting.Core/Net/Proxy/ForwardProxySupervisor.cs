@@ -33,7 +33,8 @@ public sealed class ForwardProxySupervisor(
     bool skipped = false,
     string? skippedAppsEndpoint = null,
     string? skippedReason = null,
-    IProxyStopChannel? stopChannel = null) : IProxyControl, IProxyStatistics
+    IProxyStopChannel? stopChannel = null,
+    Func<int, bool>? processAlive = null) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
@@ -43,6 +44,9 @@ public sealed class ForwardProxySupervisor(
 
     private readonly Action<int> _killProcess =
         killProcess ?? (pid => Process.GetProcessById(pid).Kill(entireProcessTree: true));
+
+    /// <summary>Whether the spawned process (the cmd wrapper, which lives as long as the worker does) still runs.</summary>
+    private readonly Func<int, bool> _processAlive = processAlive ?? IsProcessAlive;
 
     private readonly Func<string?> _currentExePath =
         currentExePath ?? (() => Environment.ProcessPath);
@@ -154,6 +158,13 @@ public sealed class ForwardProxySupervisor(
                     return;
                 }
 
+                ct.ThrowIfCancellationRequested();
+                if (pid is > 0 && !_processAlive(pid.Value))
+                {
+                    // a config error or a busy port: waiting out the deadline would only delay the bad news
+                    throw new IOException($"proxy worker exited before it started listening; log: {workerErrorLog}");
+                }
+
                 await Task.Delay(250, ct).ConfigureAwait(false);
             }
         }
@@ -165,6 +176,19 @@ public sealed class ForwardProxySupervisor(
 
         KillSpawnedWorker(pid, $"it did not start listening within {config.WorkerStartWaitSeconds}s");
         throw new IOException($"proxy worker did not start listening within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>

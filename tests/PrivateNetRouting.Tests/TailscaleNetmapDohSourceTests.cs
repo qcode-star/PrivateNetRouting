@@ -1,4 +1,5 @@
 using System.Net;
+using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Dns;
 
 namespace PrivateNetRouting.Tests;
@@ -30,6 +31,31 @@ public class TailscaleNetmapDohSourceTests
                 new DohEndpoint(IPAddress.Parse("203.0.113.11"), 8443, Secure: true),
             ],
             endpoints);
+    }
+
+    /// <summary>Discovery repeats on a timer: an unresolvable resolver host is a Warn the first time only.</summary>
+    [Fact]
+    public async Task UnresolvableHostIsWarnedOnceAcrossRepeatedDiscoveries()
+    {
+        const string netmap = """{"Resolvers":[{"Addr":"https://gone.example.test/dns-query"}]}""";
+        var logPath = Path.Combine(Path.GetTempPath(), $"pnr-netmap-{Guid.NewGuid():N}.log");
+        try
+        {
+            using (var log = new FileLog(logPath))
+            {
+                var reported = new HashSet<string>();
+                for (var round = 0; round < 3; round++)
+                {
+                    await TailscaleNetmapDohSource.ParseEndpointsAsync(netmap, ResolveAsync, CancellationToken.None, log, reported);
+                }
+            }
+
+            Assert.Equal(1, File.ReadAllText(logPath).Split("has no IPv4 address").Length - 1);
+        }
+        finally
+        {
+            File.Delete(logPath);
+        }
     }
 
     [Fact]

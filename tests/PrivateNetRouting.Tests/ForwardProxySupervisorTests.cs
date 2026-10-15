@@ -95,7 +95,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         Func<string, string?, string, int?>? spawn = null,
         Action<int>? kill = null,
         string exePath = @"C:\app\pnr.exe",
-        IProxyStopChannel? channel = null) =>
+        IProxyStopChannel? channel = null,
+        Func<int, bool>? alive = null) =>
         new(
             config,
             inner,
@@ -106,7 +107,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             spawn,
             kill,
             () => exePath,
-            stopChannel: channel);
+            stopChannel: channel,
+            processAlive: alive ?? (_ => true));
 
     [Fact]
     public async Task Start_InProcess_WhenDetachedOffAndPortFree()
@@ -214,6 +216,26 @@ public sealed class ForwardProxySupervisorTests : IDisposable
 
         var error = await Assert.ThrowsAsync<IOException>(() => supervisor.StartAsync(CancellationToken.None));
         Assert.Contains("did not start listening", error.Message);
+    }
+
+    /// <summary>A worker that died at once (config error, busy port) is reported without waiting out the deadline.</summary>
+    [Fact]
+    public async Task Start_Detached_Fails_AtOnce_WhenTheWorkerExitsEarly()
+    {
+        var started = DateTime.UtcNow;
+        var supervisor = Make(
+            new ForwardProxyConfig { Detached = true, WorkerStartWaitSeconds = 30 },
+            new FakeProxyInstance(),
+            new FakePortProbe(),
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (_, _, _) => 4242,
+            alive: _ => false);
+
+        var error = await Assert.ThrowsAsync<IOException>(() => supervisor.StartAsync(CancellationToken.None));
+
+        Assert.Contains("exited before it started listening", error.Message);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
     }
 
     /// <summary>A worker that never listened must not bind the port after the bring-up failed.</summary>

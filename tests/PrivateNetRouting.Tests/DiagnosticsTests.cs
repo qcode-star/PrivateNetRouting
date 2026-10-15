@@ -79,6 +79,31 @@ public class DiagnosticsTests : IDisposable
     // ----- summary: full chain -----
 
     [Fact]
+    public async Task WslBindThatIsNotTheCurrentGatewayIsFlaggedAsStale()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out var guardCore);
+        var proxyPort = ParsePort(config.ForwardProxy.Listen);
+        proxy.IsRunning = true;
+        table.Listeners[proxyPort] =
+        [
+            new TcpListenerEntry(IPAddress.Loopback, proxyPort, Environment.ProcessId, "testhost"),
+            new TcpListenerEntry(IPAddress.Parse("192.0.2.1"), proxyPort, Environment.ProcessId, "testhost"),
+        ];
+        probe.Result = HealthProbeResult.OkIn(10, "HTTP/1.1 200 Connection Established");
+        guardCore.Status = (
+            new LocalBanStatus(GuardState.On, 38, true, 1, ["claude.ai"], 3, ["160.79.104.0/21"]),
+            new EgressPolicyStatus(GuardState.On, "http://127.0.0.1:18082", "http://127.0.0.1:18082", 0));
+        _gateway = IPAddress.Parse("192.0.2.77");
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        var line = Section(summary, "proxy").Single(l => l.Name == "WSL bind");
+        Assert.Equal(DiagMark.Warn, line.Mark);
+        Assert.Contains("stale", line.Value);
+        Assert.Contains("192.0.2.77", line.Value);
+    }
+
+    [Fact]
     public async Task FullChainShowsOwnersKeeperNodeMarkerAndGuards()
     {
         var marker = Path.Combine(_tempDir, "marker");
@@ -408,6 +433,9 @@ public class DiagnosticsTests : IDisposable
 
     // ----- helpers -----
 
+    /// <summary>What the WSL adapter reports as the gateway address right now.</summary>
+    private IPAddress? _gateway = IPAddress.Parse("192.0.2.1");
+
     private DiagnosticsService MakeService(
         out AppConfig config,
         out FakeProxyStats proxy,
@@ -451,7 +479,8 @@ public class DiagnosticsTests : IDisposable
             finder,
             ct => probeFixture.Next(ct),
             ct => guardFixture.Next(ct),
-            new LogStore(_tempDir));
+            new LogStore(_tempDir),
+            wslGateway: () => _gateway);
     }
 
     private static int ParsePort(string listen) => IPEndPoint.Parse(listen).Port;

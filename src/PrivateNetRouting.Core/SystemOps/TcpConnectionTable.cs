@@ -25,61 +25,72 @@ public sealed class TcpConnectionTable : ITcpConnectionTable
     private const int AfInet = 2;
     private const int TcpTableOwnerPidListener = 3;
     private const int TcpStateListen = 2;
+    private const int ErrorInsufficientBuffer = 122;
+    private const int MaxAttempts = 5;
 
     public IReadOnlyList<TcpListenerEntry> GetListeners(int port)
     {
+        // the table can grow between the size query and the fill (ERROR_INSUFFICIENT_BUFFER): ask
+        // again with the size the call reported, a few times
         var size = 0;
         _ = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AfInet, TcpTableOwnerPidListener, 0);
-        if (size <= 0)
+        for (var attempt = 0; attempt < MaxAttempts && size > 0; attempt++)
         {
-            return [];
-        }
-
-        var buffer = Marshal.AllocHGlobal(size);
-        try
-        {
-            if (GetExtendedTcpTable(buffer, ref size, true, AfInet, TcpTableOwnerPidListener, 0) != 0)
+            var buffer = Marshal.AllocHGlobal(size);
+            try
             {
-                return [];
-            }
-
-            // MIB_TCPTABLE_OWNER_PID: dwNumEntries, then rows of 6 DWORDs:
-            // state, localAddr, localPort, remoteAddr, remotePort, owningPid (network byte order)
-            var entries = new List<TcpListenerEntry>();
-            var count = Marshal.ReadInt32(buffer, 0);
-            const int rowBytes = 24;
-            for (var i = 0; i < count; i++)
-            {
-                var row = buffer + 4 + i * rowBytes;
-                if (Marshal.ReadInt32(row, 0) != TcpStateListen)
+                var result = GetExtendedTcpTable(buffer, ref size, true, AfInet, TcpTableOwnerPidListener, 0);
+                if (result == ErrorInsufficientBuffer)
                 {
-                    continue;
+                    continue; // size now holds the required length
                 }
 
-                var localPort = ntohs((ushort)Marshal.ReadInt32(row, 8));
-                if (localPort != port)
-                {
-                    continue;
-                }
+                return result == 0 ? ReadListeners(buffer, port) : [];
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
 
-                var address = (uint)Marshal.ReadInt32(row, 4);
-                var pid = Marshal.ReadInt32(row, 20);
-                entries.Add(new TcpListenerEntry(new IPAddress(address), localPort, pid, ProcessNameOf(pid)));
+        return [];
+    }
+
+    private static List<TcpListenerEntry> ReadListeners(IntPtr buffer, int port)
+    {
+        // MIB_TCPTABLE_OWNER_PID: dwNumEntries, then rows of 6 DWORDs:
+        // state, localAddr, localPort, remoteAddr, remotePort, owningPid (network byte order)
+        var entries = new List<TcpListenerEntry>();
+        var count = Marshal.ReadInt32(buffer, 0);
+        const int rowBytes = 24;
+        for (var i = 0; i < count; i++)
+        {
+            var row = buffer + 4 + i * rowBytes;
+            if (Marshal.ReadInt32(row, 0) != TcpStateListen)
+            {
+                continue;
             }
 
-            return entries;
+            var localPort = ntohs((ushort)Marshal.ReadInt32(row, 8));
+            if (localPort != port)
+            {
+                continue;
+            }
+
+            var address = (uint)Marshal.ReadInt32(row, 4);
+            var pid = Marshal.ReadInt32(row, 20);
+            entries.Add(new TcpListenerEntry(new IPAddress(address), localPort, pid, ProcessNameOf(pid)));
         }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
+
+        return entries;
     }
 
     private static string? ProcessNameOf(int pid)
     {
         try
         {
-            return System.Diagnostics.Process.GetProcessById(pid).ProcessName;
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return process.ProcessName;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {

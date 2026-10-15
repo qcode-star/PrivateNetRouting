@@ -102,6 +102,21 @@ public class DohEndpointPoolTests : IDisposable
         Assert.Equal([seed], pool.SnapshotAlive());
     }
 
+    /// <summary>The refresh is periodic: a discovery failure that repeats verbatim is one Warn, not one per round.</summary>
+    [Fact]
+    public async Task RepeatedDiscoveryFailureIsWarnedOnce()
+    {
+        var time = new ManualTimeProvider();
+        using var pool = CreatePool([Ep(1)], (_, _) => Task.FromResult(true), time, new ThrowingSource());
+
+        await pool.RefreshAsync(CancellationToken.None);
+        await pool.RefreshAsync(CancellationToken.None);
+        await pool.RefreshAsync(CancellationToken.None);
+
+        var text = File.ReadAllText(_logPath);
+        Assert.Equal(1, text.Split("discovery failed").Length - 1);
+    }
+
     [Fact]
     public async Task EmptyPoolRefreshesOnDemandOnceTheChainIsUp()
     {

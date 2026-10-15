@@ -1,4 +1,5 @@
 using System.Net;
+using PrivateNetRouting.Core.Net;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
@@ -47,9 +48,11 @@ public sealed class DiagnosticsService(
     Func<CancellationToken, Task<HealthProbeResult>> healthProbe,
     Func<CancellationToken, Task<(LocalBanStatus Ban, EgressPolicyStatus Policy)>> guardCore,
     LogStore logs,
-    TimeProvider? time = null)
+    TimeProvider? time = null,
+    Func<IPAddress?>? wslGateway = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Func<IPAddress?> _wslGateway = wslGateway ?? WslGateway.FindIpv4;
 
     public async Task<DiagnosticsSummary> GetSummaryAsync(CancellationToken ct)
     {
@@ -92,6 +95,31 @@ public sealed class DiagnosticsService(
             LogsSection(),
         };
         return new DiagnosticsSummary(ChainStopped: false, Sections: sections);
+    }
+
+    /// <summary>The WSL bind of the proxy; a bind that is not the current gateway address is stale
+    /// (the WSL network was recreated) — WSL clients cannot reach the proxy through it.</summary>
+    private DiagLine WslBindLine(IReadOnlyList<IPAddress> bound)
+    {
+        if (bound.Count == 0)
+        {
+            return new DiagLine("WSL bind", "-", DiagMark.Neutral);
+        }
+
+        var value = string.Join(", ", bound);
+        IPAddress? gateway;
+        try
+        {
+            gateway = _wslGateway();
+        }
+        catch (Exception ex) when (ex is System.Net.NetworkInformation.NetworkInformationException or InvalidOperationException)
+        {
+            return new DiagLine("WSL bind", value, DiagMark.Good);
+        }
+
+        return gateway is not null && !bound.Contains(gateway)
+            ? new DiagLine("WSL bind", $"{value} (stale: the WSL gateway is now {gateway})", DiagMark.Warn)
+            : new DiagLine("WSL bind", value, DiagMark.Good);
     }
 
     /// <summary>External-upstream egress (socks5/http): the configured upstream (the socks5 one with
@@ -187,10 +215,7 @@ public sealed class DiagnosticsService(
             new(
                 "listeners",
                 proxy.ListenerEndpoints.Count > 0 ? string.Join(", ", proxy.ListenerEndpoints) : "-"),
-            new(
-                "WSL bind",
-                wslBind.Count > 0 ? string.Join(", ", wslBind) : "-",
-                wslBind.Count > 0 ? DiagMark.Good : DiagMark.Neutral),
+            WslBindLine(wslBind),
             new(
                 "connections",
                 proxy.IsRunning

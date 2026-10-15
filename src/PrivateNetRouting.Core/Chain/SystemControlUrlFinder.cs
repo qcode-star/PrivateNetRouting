@@ -48,14 +48,22 @@ public sealed partial class SystemControlUrlFinder(ChainTailscaleConfig config, 
                 return null;
             }
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await process.WaitForExitAsync(timeoutCts.Token);
-            var url = ParseControlUrl(await stdoutTask + await stderrTask);
-            log.Debug(url is null
-                ? "system tailscale: no ControlURL in the prefs (the daemon is not running, or the output is unexpected)"
-                : "system tailscale: control server picked up from the prefs");
-            return url;
+            try
+            {
+                var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+                var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token);
+                var url = ParseControlUrl(await stdoutTask + await stderrTask);
+                log.Debug(url is null
+                    ? "system tailscale: no ControlURL in the prefs (the daemon is not running, or the output is unexpected)"
+                    : "system tailscale: control server picked up from the prefs");
+                return url;
+            }
+            finally
+            {
+                // a hung CLI (the limit, a cancellation) must not outlive the call
+                KillIfRunning(process);
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -67,6 +75,21 @@ public sealed partial class SystemControlUrlFinder(ChainTailscaleConfig config, 
         {
             log.Debug($"system tailscale: control server lookup failed: {ex.Message}");
             return null;
+        }
+    }
+
+    private static void KillIfRunning(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // it exited on its own in the meantime
         }
     }
 

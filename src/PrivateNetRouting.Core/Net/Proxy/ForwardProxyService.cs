@@ -37,8 +37,8 @@ public interface IForwardProxyInstance : IProxyControl, IProxyStatistics
 /// upstream — system resolution is not used (it is overridden by the bans) — and dials by IP
 /// over the same SOCKS5. In the socks5 mode the trusted external upstream resolves on its side:
 /// the target name rides the CONNECT itself (ATYP=3, no DoH machinery exists in that mode at
-/// all). It binds to the primary address from the config and once on the WSL NAT gateway when
-/// the adapter appears. Normal mode — silence in the log: start/stop, warnings, errors;
+/// all). It binds to the primary address from the config and on the WSL NAT gateway once the
+/// adapter appears, following the gateway address if the WSL network is recreated. Normal mode — silence in the log: start/stop, warnings, errors;
 /// per-request tracing — Debug.
 /// </summary>
 public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposable
@@ -198,31 +198,48 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
     }
 
     /// <summary>
-    /// Bind on the WSL gateway: waits for the adapter with retries and retries a failed bind the
-    /// same way, until it succeeds or the start it belongs to is stopped.
+    /// Bind on the WSL gateway and keep it that way: waits for the adapter with retries, retries a
+    /// failed bind the same way and follows the address — a recreated WSL NAT network (wsl
+    /// --shutdown, a Windows update, a network reset) gets a new gateway, the old listener is
+    /// dropped and a new one bound — until the start this belongs to is stopped.
     /// </summary>
     private async Task WslBindWaitAsync(int port, CancellationToken token)
     {
         string? lastFailure = null;
+        TcpListener? bound = null;
+        IPAddress? boundAddress = null;
         while (!token.IsCancellationRequested)
         {
             try
             {
                 var gateway = WslGateway.FindIpv4();
-                if (gateway is not null)
+                if (bound is not null && !Equals(gateway, boundAddress))
                 {
-                    var listener = BindListener(new IPEndPoint(gateway, port), token);
-                    if (listener is null)
+                    _log.Warn(gateway is null
+                        ? $"forward-proxy: WSL gateway {boundAddress} is gone, its listener is dropped"
+                        : $"forward-proxy: WSL gateway moved from {boundAddress} to {gateway}, rebinding");
+                    UnbindListener(bound);
+                    bound = null;
+                    boundAddress = null;
+                }
+
+                if (bound is null && gateway is not null)
+                {
+                    bound = BindListener(new IPEndPoint(gateway, port), token);
+                    if (bound is null)
                     {
                         return; // the service was stopped meanwhile: nothing may be bound any more
                     }
 
-                    _ = AcceptLoopAsync(listener, token);
-                    _log.Info($"forward-proxy: listening on WSL gateway {gateway} (one-time bind)");
-                    return;
+                    boundAddress = gateway;
+                    lastFailure = null;
+                    _ = AcceptLoopAsync(bound, token);
+                    _log.Info($"forward-proxy: listening on WSL gateway {gateway}");
                 }
-
-                _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
+                else if (bound is null)
+                {
+                    _log.Debug("forward-proxy: WSL gateway adapter not found, retrying in 30 s");
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -247,6 +264,16 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             {
                 return;
             }
+        }
+    }
+
+    /// <summary>Takes a listener of the WSL bind down; its accept loop ends on the stopped socket.</summary>
+    private void UnbindListener(TcpListener listener)
+    {
+        lock (_gate)
+        {
+            _listeners.Remove(listener);
+            listener.Stop();
         }
     }
 

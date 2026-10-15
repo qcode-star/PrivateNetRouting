@@ -26,13 +26,43 @@ public sealed partial class TailscaleVersionProbe(string tailscaledPath) : ITail
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
             }) ?? throw new IOException($"failed to start {tailscaledPath}");
-            var line = process.StandardOutput.ReadLine();
-            process.WaitForExit(5000);
-            return ParseVersion(line);
+            try
+            {
+                // the first line is read under the same limit as the exit: a hung binary must not block the caller
+                var read = process.StandardOutput.ReadLineAsync();
+                if (!read.Wait(Limit))
+                {
+                    return null;
+                }
+
+                process.WaitForExit(Limit);
+                return ParseVersion(read.Result);
+            }
+            finally
+            {
+                KillIfRunning(process);
+            }
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or AggregateException)
         {
             return null;
+        }
+    }
+
+    private static readonly TimeSpan Limit = TimeSpan.FromSeconds(5);
+
+    private static void KillIfRunning(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // it exited on its own in the meantime
         }
     }
 

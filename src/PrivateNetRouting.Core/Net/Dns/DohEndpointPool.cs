@@ -34,6 +34,9 @@ public sealed partial class DohEndpointPool : IDisposable
     private readonly CancellationToken _stopToken;
     private List<DohEndpoint> _pool;
     private List<DohEndpoint>? _lastLive;
+
+    /// <summary>Message of the last discovery failure (refreshes are single-flight): a repeat stays out of the Warn level.</summary>
+    private string? _lastDiscoveryFailure;
     private Task? _inflight;
     private DateTimeOffset _lastAttempt = DateTimeOffset.MinValue;
 
@@ -273,11 +276,25 @@ public sealed partial class DohEndpointPool : IDisposable
     {
         try
         {
-            return [.. await _source!.GetEndpointsAsync(ct)];
+            var found = new List<DohEndpoint>(await _source!.GetEndpointsAsync(ct));
+            _lastDiscoveryFailure = null;
+            return found;
         }
         catch (Exception ex)
         {
-            _log.Warn($"doh pool: discovery failed, keeping the seed set: {ex.Message}");
+            // the refresh is periodic: a failure that repeats verbatim is Debug, only the first
+            // one (or a changed one) is a Warn
+            var failure = ex.Message;
+            if (failure == _lastDiscoveryFailure)
+            {
+                _log.Debug($"doh pool: discovery failed again, keeping the seed set: {failure}");
+            }
+            else
+            {
+                _log.Warn($"doh pool: discovery failed, keeping the seed set: {failure}");
+                _lastDiscoveryFailure = failure;
+            }
+
             return [];
         }
     }
