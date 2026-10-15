@@ -1286,6 +1286,21 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task WslProbeResolvesTheUsersRealHome()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => WslProbeInSync("root") };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "root")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.ReadAsync(CancellationToken.None);
+
+        var probe = Assert.Single(runner.Probes).Script;
+        Assert.Contains("getent passwd 'root'", probe);
+        Assert.Contains("\"$PNR_HOME/.claude/settings.json\"", probe);
+        Assert.DoesNotContain("/home/root/.claude", probe); // root's home is /root
+        Assert.Contains("USER_HOME=$(getent passwd \"$USER_NAME\"", WslConfigGuard.BuildStartupScript("root", 18081));
+    }
+
+    [Fact]
     public async Task WslProbeOmitsTheProxyEnvBlockForAnEmptyPath()
     {
         // `[ -f  ]` is true and a file-less `grep -E` reads the rest of the probe from stdin

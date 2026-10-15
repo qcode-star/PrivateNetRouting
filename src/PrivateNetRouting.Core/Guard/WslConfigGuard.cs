@@ -556,7 +556,9 @@ public sealed class WslConfigGuard(
     {
         var scriptPath = config.Wsl.StartupScriptPath;
         var envPath = config.Wsl.ProxyEnvPath;
-        var settingsPath = $"/home/{distro.User}/.claude/settings.json";
+        // the user's real home (root, or one outside /home), not /home/<user>: the sync writes
+        // through $HOME as that user, so the read has to look at the same file
+        const string settingsPath = "\"$PNR_HOME/.claude/settings.json\"";
         var runnerPath = BootRunnerPath(scriptPath);
 
         // An empty path would make `[ -f  ]` true and `grep -E …` with no file read the rest of
@@ -573,6 +575,8 @@ public sealed class WslConfigGuard(
             fi
             """;
         var probe = NormalizeLf($"""
+            PNR_HOME=$(getent passwd '{distro.User}' | cut -d: -f6)
+            [ -n "$PNR_HOME" ] || PNR_HOME="/home/{distro.User}"
             if [ -f {scriptPath} ]; then
                 echo SCRIPT=present
                 grep -E '^PORT=' {scriptPath} 2>/dev/null || true
@@ -1086,7 +1090,8 @@ public sealed class WslConfigGuard(
         # Windows by the app), only HTTPS_PROXY/HTTP_PROXY are refreshed.
         TAG="[10-claude-proxy]"
         USER_NAME='{{user}}'
-        USER_HOME="/home/$USER_NAME"
+        USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+        [ -n "$USER_HOME" ] || USER_HOME="/home/$USER_NAME"
         SETTINGS="$USER_HOME/.claude/settings.json"
         PORT={{port}}
         {{(fixedHost is null ? "" : $"PNR_PROXY_HOST='{fixedHost}'")}}
