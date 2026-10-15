@@ -70,7 +70,7 @@ public partial class DiagnosticsWindow : Window
         BtnRefresh.IsEnabled = false;
         try
         {
-            _lastSummary = await _runtime.Diagnostics.GetSummaryAsync(CancellationToken.None);
+            _lastSummary = await Task.Run(() => _runtime.Diagnostics.GetSummaryAsync(CancellationToken.None));
             RenderSummary(_lastSummary);
             StatusText.Text = "";
         }

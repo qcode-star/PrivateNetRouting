@@ -131,7 +131,15 @@ public sealed class ChainSupervisor(
     private readonly Func<CancellationToken, Task<string?>> _systemControlUrl =
         systemControlUrl ?? (_ => Task.FromResult<string?>(null));
 
-    public async Task<ChainState> GetStateAsync(CancellationToken ct)
+    /// <summary>
+    /// The state snapshot runs on the thread pool: it connects to the daemon pipe (a blocking
+    /// connect that spins for ~500 ms when the daemon is down), reads the WMI process list and
+    /// spawns the CLI - none of it may run on a caller's UI thread, and the awaits inside must
+    /// not capture its context.
+    /// </summary>
+    public Task<ChainState> GetStateAsync(CancellationToken ct) => Task.Run(() => GetStateCoreAsync(ct));
+
+    private async Task<ChainState> GetStateCoreAsync(CancellationToken ct)
     {
         if (_external)
         {
@@ -181,7 +189,15 @@ public sealed class ChainSupervisor(
     /// </summary>
     private readonly SemaphoreSlim _operation = new(1, 1);
 
-    public async Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    /// <summary>
+    /// Bring-up and stop hop to the thread pool before touching anything: the synchronous prefix
+    /// (elevation probe, pipe connect, WMI) must not run on a UI thread, and the awaits inside
+    /// must not capture its context (a blocking wait on that thread would deadlock them).
+    /// </summary>
+    public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct) =>
+        Task.Run(() => EnsureRunningSerializedAsync(progress, ct));
+
+    private async Task EnsureRunningSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
         await _operation.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -194,7 +210,10 @@ public sealed class ChainSupervisor(
         }
     }
 
-    public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct) =>
+        Task.Run(() => StopSerializedAsync(progress, ct));
+
+    private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
         // a stop is never abandoned while it waits for its turn (the steps run to the end even on
         // a cancelled token): the bring-up in flight is cancelled by its own owner and lets go

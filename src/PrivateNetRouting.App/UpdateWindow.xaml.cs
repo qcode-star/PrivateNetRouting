@@ -257,7 +257,7 @@ public partial class UpdateWindow : Window
             SetDetailKey("Update.Verify.OkFmt", identity.Version, identity.Publisher);
 
             // Pause before installation — only if Claude is running (it will be closed)
-            if (_runtime.Updater.IsClaudeRunning())
+            if (await Task.Run(() => _runtime.Updater.IsClaudeRunning()))
             {
                 ShowProgress(false);
                 SetDetailKey("Update.Pause.Message");
@@ -614,7 +614,7 @@ public partial class UpdateWindow : Window
         {
             // A copy that survived the update without our proxy would swallow the new start
             // (single instance): the same offer as in the main window.
-            var running = _runtime.Launcher.InspectRunning();
+            var running = await Task.Run(() => _runtime.Launcher.InspectRunning());
             if (!LaunchPrompts.ConfirmRestart(this, running, "App.Name.Claude"))
             {
                 _runtime.Launcher.NoteRestartDeclined();

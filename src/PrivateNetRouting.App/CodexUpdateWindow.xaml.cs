@@ -176,7 +176,7 @@ public partial class CodexUpdateWindow : Window
             }
 
             // The app holds the old package registration — it must go before the Store can replace it
-            if (_runtime.CodexUpdater.IsCodexRunning())
+            if (await Task.Run(() => _runtime.CodexUpdater.IsCodexRunning()))
             {
                 var answer = MessageBox.Show(
                     this,

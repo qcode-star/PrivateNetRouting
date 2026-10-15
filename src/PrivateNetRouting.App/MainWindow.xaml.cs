@@ -1191,7 +1191,7 @@ public partial class MainWindow : Window
         bool claudeRunning;
         try
         {
-            claudeRunning = _runtime.Updater.IsClaudeRunning();
+            claudeRunning = await Task.Run(() => _runtime.Updater.IsClaudeRunning());
         }
         catch (Exception ex)
         {
@@ -1249,7 +1249,7 @@ public partial class MainWindow : Window
         _operationCts = cts;
         try
         {
-            var running = _runtime.Launcher.InspectRunning();
+            var running = await Task.Run(() => _runtime.Launcher.InspectRunning());
             if (running.State == RunningAppState.WithoutProxy && !ConfirmRestartOfRunningApp(running, "App.Name.Claude"))
             {
                 _runtime.Launcher.NoteRestartDeclined();
@@ -1347,7 +1347,7 @@ public partial class MainWindow : Window
         bool browserRunning;
         try
         {
-            browserRunning = _runtime.Browser.IsOurBrowserRunning();
+            browserRunning = await Task.Run(() => _runtime.Browser.IsOurBrowserRunning());
         }
         catch (Exception ex)
         {
@@ -1513,7 +1513,7 @@ public partial class MainWindow : Window
         _operationCts = cts;
         try
         {
-            var running = _runtime.CodexLauncher.InspectRunning();
+            var running = await Task.Run(() => _runtime.CodexLauncher.InspectRunning());
             if (running.State == RunningAppState.WithoutProxy && !ConfirmRestartOfRunningApp(running, "App.Name.Codex"))
             {
                 _runtime.CodexLauncher.NoteRestartDeclined();

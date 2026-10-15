@@ -66,6 +66,51 @@ public class ChainSupervisorTests : IDisposable
         Assert.True(state.IsFullyUp);
     }
 
+#pragma warning disable xUnit1031 // the point of the test is a blocking wait on a "UI thread"
+    [Fact]
+    public void ChainOperationsDoNotRunOrCaptureOnTheCallersSynchronizationContext()
+    {
+        var previous = SynchronizationContext.Current;
+        var trapped = new TrappedContext();
+        SynchronizationContext.SetSynchronizationContext(trapped);
+        try
+        {
+            var callerThread = Environment.CurrentManagedThreadId;
+            var healthThreads = new List<int>();
+            var healthContexts = new List<SynchronizationContext?>();
+            var supervisor = Create(
+                proxy: new FakeProxy(_calls) { IsRunning = true },
+                health: _ =>
+                {
+                    healthThreads.Add(Environment.CurrentManagedThreadId);
+                    healthContexts.Add(SynchronizationContext.Current);
+                    return Task.FromResult(true);
+                });
+
+            // blocking waits on the "UI thread": a continuation posted to the trapped context would deadlock them
+            Assert.True(supervisor.GetStateAsync(CancellationToken.None).Wait(TimeSpan.FromSeconds(10)), "GetStateAsync deadlocked");
+            Assert.True(supervisor.EnsureRunningAsync(null, CancellationToken.None).Wait(TimeSpan.FromSeconds(10)), "EnsureRunningAsync deadlocked");
+            Assert.True(supervisor.StopAsync(null, CancellationToken.None).Wait(TimeSpan.FromSeconds(10)), "StopAsync deadlocked");
+
+            Assert.NotEmpty(healthThreads);
+            Assert.All(healthThreads, id => Assert.NotEqual(callerThread, id));
+            Assert.All(healthContexts, Assert.Null);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+#pragma warning restore xUnit1031
+
+    /// <summary>"Blocked dispatcher" context: Post is swallowed, so any captured continuation never runs.</summary>
+    private sealed class TrappedContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+        }
+    }
+
     [Fact]
     public async Task ColdChainStateIsStoppedNotPartial()
     {
