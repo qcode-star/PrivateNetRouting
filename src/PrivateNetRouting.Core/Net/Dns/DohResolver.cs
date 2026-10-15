@@ -11,6 +11,10 @@ public sealed class DohResolver(Socks5Client socks, DohEndpointPool pool, TimeSp
 {
     public async Task<ResolveResult> ResolveAsync(string host, CancellationToken ct)
     {
+        // a pool built before the chain came up (or refreshed over a down chain) holds nothing
+        // answering: refresh it now instead of waiting for the next timer tick
+        await pool.EnsureLiveAsync(ct).ConfigureAwait(false);
+
         Exception? lastError = null;
         foreach (var endpoint in pool.SnapshotAlive())
         {

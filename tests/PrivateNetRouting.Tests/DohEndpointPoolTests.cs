@@ -102,6 +102,57 @@ public class DohEndpointPoolTests : IDisposable
         Assert.Equal([seed], pool.SnapshotAlive());
     }
 
+    [Fact]
+    public async Task EmptyPoolRefreshesOnDemandOnceTheChainIsUp()
+    {
+        var time = new ManualTimeProvider();
+        var source = new SwitchableSource();
+        using var pool = CreatePool([], (_, _) => Task.FromResult(true), time, source);
+
+        // built before the chain: discovery fails, nothing is live
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.False(pool.HasLive);
+        Assert.Empty(pool.SnapshotAlive());
+        var callsWhileDown = source.Calls;
+
+        // the chain comes up; a second ask right away is throttled …
+        source.Endpoints = [Ep(9)];
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.Equal(callsWhileDown, source.Calls);
+        Assert.False(pool.HasLive);
+
+        // … and after the minimum gap the pool refreshes itself on demand
+        time.Advance(TimeSpan.FromSeconds(10));
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.True(pool.HasLive);
+        Assert.Equal([Ep(9)], pool.SnapshotAlive());
+
+        // a live pool is left alone
+        var callsWhenLive = source.Calls;
+        time.Advance(TimeSpan.FromMinutes(1));
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.Equal(callsWhenLive, source.Calls);
+    }
+
+    [Fact]
+    public async Task FailedDiscoveryKeepsPreviouslyDiscoveredEndpoints()
+    {
+        var time = new ManualTimeProvider();
+        var seed = Ep(1);
+        var found = Ep(9);
+        var source = new SwitchableSource { Endpoints = [found] };
+        using var pool = CreatePool([seed], (_, _) => Task.FromResult(true), time, source);
+
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Contains(found, pool.SnapshotAlive());
+
+        // the chain went down: discovery fails, the discovered endpoint must survive the refresh
+        source.Endpoints = null;
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Contains(found, pool.SnapshotAlive());
+        Assert.Contains(seed, pool.SnapshotAlive());
+    }
+
     private static async Task UntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
@@ -115,6 +166,24 @@ public class DohEndpointPoolTests : IDisposable
     {
         public Task<IReadOnlyList<DohEndpoint>> GetEndpointsAsync(CancellationToken ct) =>
             Task.FromResult(endpoints);
+    }
+
+    /// <summary>A discovery source that fails (null endpoints — the sidecar is down) or answers, switchable mid-test.</summary>
+    private sealed class SwitchableSource : IDohEndpointSource
+    {
+        private int _calls;
+
+        public IReadOnlyList<DohEndpoint>? Endpoints { get; set; }
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<IReadOnlyList<DohEndpoint>> GetEndpointsAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _calls);
+            return Endpoints is { } endpoints
+                ? Task.FromResult(endpoints)
+                : throw new IOException("netmap unavailable");
+        }
     }
 
     private sealed class ThrowingSource : IDohEndpointSource

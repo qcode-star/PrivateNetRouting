@@ -47,6 +47,11 @@ public sealed partial class TailscaleNetmapDohSource(ChainTailscaleConfig tailsc
 
         var stdout = await process.StandardOutput.ReadToEndAsync(cts.Token);
         await process.WaitForExitAsync(cts.Token);
+        if (process.ExitCode != 0)
+        {
+            // a dead sidecar pipe: the pool keeps what it has instead of reading "no resolvers"
+            throw new IOException($"{tailscale.CliPath} debug netmap exited with code {process.ExitCode}");
+        }
 
         return await ParseEndpointsAsync(stdout, ResolveHostAsync, ct, log);
     }
