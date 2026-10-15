@@ -253,7 +253,10 @@ src/
                              # the logs-folder button);
                              # the shared application icon
                              # (AppIcons + Assets/app.ico, the tray is a WinForms NotifyIcon);
-                             # elevated helper arguments are handled before the UI
+                             # the windowless roles (the detached proxy worker, the idle stopper,
+                             # the elevated helper commands) run from Program.Main through
+                             # HeadlessHost, before WPF starts — no Application, no dispatcher; the
+                             # helper gets the asking user's config through --config
     LanguageFlag.cs          # the language selector's option data (LanguageOption) and the drawn
                              # mark of a language: the Union Jack / three stripes
     Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary

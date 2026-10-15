@@ -6,6 +6,7 @@ using PrivateNetRouting.Core.Guard;
 using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Proxy;
 using PrivateNetRouting.Core.Net.Socks;
+using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
 using PrivateNetRouting.Core.Watchdog;
 
@@ -42,13 +43,20 @@ internal static class Program
             return await Task.Run(() => WatchdogWorker.RunAsync(CancellationToken.None));
         }
 
-        if (first is ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain || GuardElevatedCommands.IsCommand(first))
+        if (ElevatedHelperArguments.IsHelperCommand(first))
         {
-            var resultFile = ParseOption(args, "--result-file")
-                ?? throw new ArgumentException("elevated helper requires --result-file");
+            var resultFile = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ResultFileOption);
+            if (resultFile is null)
+            {
+                Console.Error.WriteLine($"error: {first} is an internal helper command and requires {ElevatedHelperArguments.ResultFileOption}");
+                return 2;
+            }
+
+            // the config of the user who asked: this process may run as another account (over-the-shoulder UAC)
+            var configPath = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ConfigOption);
             return GuardElevatedCommands.IsCommand(first)
-                ? GuardElevatedCommands.Execute(first, resultFile)
-                : ElevatedChainCommands.Execute(first, resultFile);
+                ? GuardElevatedCommands.Execute(first, resultFile, configPath)
+                : ElevatedChainCommands.Execute(first, resultFile, configPath);
         }
 
         try

@@ -205,10 +205,16 @@ public sealed class SidecarDaemon(
 
     private void KillProcesses()
     {
-        foreach (var found in processes.Find("tailscaled.exe", config.StateDir))
+        foreach (var found in processes.FindByArgument("tailscaled.exe", config.StateDir))
         {
             try
             {
+                if (!processes.StillCarriesArgument(found, config.StateDir))
+                {
+                    log.Debug($"daemon: pid={found.Id} is gone or no longer ours, not killed");
+                    continue;
+                }
+
                 Process.GetProcessById(found.Id).Kill();
                 log.Info($"daemon: killed pid={found.Id}");
             }

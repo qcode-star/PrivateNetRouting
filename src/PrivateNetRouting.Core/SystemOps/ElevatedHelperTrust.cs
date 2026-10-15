@@ -25,6 +25,23 @@ public static partial class ElevatedHelperTrust
         return ResultFileName().IsMatch(Path.GetFileName(path));
     }
 
+    /// <summary>The config the helper loads: an absolute path to a .json file (what the application itself passes).</summary>
+    public static bool IsValidConfigPath(string path) =>
+        !string.IsNullOrWhiteSpace(path)
+        && Path.IsPathFullyQualified(path)
+        && path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Writes a result file so that the waiting parent never sees half of it: a temp file next to
+    /// it, then a rename over the target.
+    /// </summary>
+    public static void WriteResultFile(string path, string text)
+    {
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, text);
+        File.Move(temp, path, overwrite: true);
+    }
+
     /// <summary>Windows PowerShell of the system directory — the one the cmdlets of the ban layers belong to.</summary>
     public static string SystemPowerShell() =>
         Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");

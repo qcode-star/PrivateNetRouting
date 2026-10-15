@@ -165,7 +165,7 @@ public sealed class DiagnosticsService(
     private DiagLine KeeperLine()
     {
         var keepers = processes
-            .Find("tailscale.exe", config.Chain.Tailscale.Socket)
+            .FindByArgument("tailscale.exe", config.Chain.Tailscale.Socket)
             .Where(p => p.CommandLine.Contains("watch-ipn", StringComparison.OrdinalIgnoreCase))
             .ToList();
         return keepers.Count > 0

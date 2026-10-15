@@ -13,12 +13,10 @@ using PrivateNetRouting.Core.Watchdog;
 namespace PrivateNetRouting.App;
 
 /// <summary>
-/// Entry point for GUI modes: normal (window + tray), shortcut mode (--launch: if Claude is
-/// already running — window only, otherwise a window with the chain/Claude launch process) and
-/// elevated helper commands (--elevated-*, executed before everything else and immediately
-/// terminating the process — they are started by ElevatedRunner via runas), as well as the body
-/// of the detached proxy worker (--proxy-worker, before the single-instance mutex and before the
-/// UI — this is a second process). Single instance — mutex + activation event: a repeated launch
+/// The GUI modes: normal (window + tray) and shortcut mode (--launch: if Claude is already
+/// running — window only, otherwise a window with the chain/Claude launch process). The windowless
+/// roles of the exe (the detached proxy worker, the idle stopper, the elevated helper commands)
+/// never get here: Program.Main runs them through HeadlessHost before WPF starts. Single instance — mutex + activation event: a repeated launch
 /// shows the already open (or minimized to tray) window. Closing and minimizing the window hides
 /// the application to the tray; the real exit is only from the tray menu: "Exit" leaves the chain
 /// running in the background (the in-process proxy is handed to a detached worker, the next start
@@ -47,32 +45,6 @@ public partial class App : Application
     {
         base.OnStartup(e);
         InstallGlobalExceptionHandlers();
-
-        // detached proxy worker (spawned by the chain supervisor): no UI and no
-        // single instance — lives until the chain shutdown kills it
-        if (e.Args.Contains(ForwardProxySupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
-        {
-            Shutdown(ProxyWorker.RunAsync(CancellationToken.None, e.Args).GetAwaiter().GetResult());
-            return;
-        }
-
-        // detached idle-stop worker (spawned by the watchdog supervisor): no UI and no single
-        // instance — waits for the idle, stops the WSL Claude host and the chain, exits by itself;
-        // it outlives the application that started it (the chain card toggle)
-        if (e.Args.Contains(WatchdogSupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
-        {
-            // on the pool, without the Dispatcher context: the worker's awaits (the watchdog loop,
-            // the runtime disposal) must not land in the dispatcher queue while the UI thread is
-            // blocking here — the same pattern as the runtime start below
-            Shutdown(Task.Run(() => WatchdogWorker.RunAsync(CancellationToken.None)).GetAwaiter().GetResult());
-            return;
-        }
-
-        if (TryRunElevatedHelper(e.Args, out var helperCode))
-        {
-            Shutdown(helperCode);
-            return;
-        }
 
         var launchOnStart = e.Args.Contains("--launch", StringComparer.OrdinalIgnoreCase);
         var launchBrowserOnStart = e.Args.Contains("--launch-browser", StringComparer.OrdinalIgnoreCase);
@@ -202,44 +174,6 @@ public partial class App : Application
         _ = RunStartupAppUpdateCheckAsync(window);
     }
 
-    private static bool TryRunElevatedHelper(string[] args, out int exitCode)
-    {
-        exitCode = 0;
-        var command = args.FirstOrDefault() ?? "";
-        if (command is not (ElevatedChainCommands.StartDaemon or ElevatedChainCommands.StopChain)
-            && !GuardElevatedCommands.IsCommand(command))
-        {
-            return false;
-        }
-
-        string? resultFile = null;
-        for (var i = 1; i < args.Length - 1; i++)
-        {
-            if (args[i] == "--result-file")
-            {
-                resultFile = args[i + 1];
-                break;
-            }
-        }
-
-        if (resultFile is null)
-        {
-            return false;
-        }
-
-        // on the pool, without the Dispatcher context: the guard command awaits PowerShell
-        // (NRPT/firewall) and the chain command awaits the sidecar CLI — their continuations must
-        // not land in this blocked dispatcher queue (the same pattern as the runtime start below);
-        // a blocking wait on the UI thread + a captured dispatcher context = a deadlock and an
-        // eternally alive helper that never writes the result file
-        var command1 = command;
-        exitCode = Task.Run(() => GuardElevatedCommands.IsCommand(command1)
-                ? GuardElevatedCommands.Execute(command1, resultFile)
-                : ElevatedChainCommands.Execute(command1, resultFile))
-            .GetAwaiter().GetResult();
-        return true;
-    }
-
     /// <summary>
     /// Safety net for everything a handler does not catch itself. An exception escaping a UI
     /// handler would otherwise end the process — together with the in-process forward proxy (all
@@ -307,10 +241,7 @@ public partial class App : Application
                 return;
             }
 
-            var folder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrivateNetRouting", "logs");
-            Directory.CreateDirectory(folder);
-            File.AppendAllText(Path.Combine(folder, "app-crash.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}");
+            HeadlessHost.LogCrash(source, ex);
         }
         catch (Exception)
         {

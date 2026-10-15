@@ -28,10 +28,16 @@ public static class ElevatedChainCommands
             return 1;
         }
 
+        FileLog? log = null;
         try
         {
+            if (configPath is not null && !ElevatedHelperTrust.IsValidConfigPath(configPath))
+            {
+                throw new InvalidOperationException("the config path of the elevated helper is not an absolute .json path");
+            }
+
             var config = AppConfigStore.LoadOrCreate(configPath);
-            var log = new FileLog(
+            log = new FileLog(
                 Path.Combine(config.Logging.Directory, "chain-elevated.log"),
                 config.Logging.EffectiveLevel);
             var stateDir = config.Chain.Tailscale.StateDir;
@@ -43,14 +49,15 @@ public static class ElevatedChainCommands
                 StopChain => StopChainCore(config, log),
                 _ => $"unknown command: {command}",
             };
-            File.WriteAllText(resultFile, $"ok {detail}");
+            ElevatedHelperTrust.WriteResultFile(resultFile, $"ok {detail}");
             return 0;
         }
         catch (Exception ex)
         {
+            log?.Error($"elevated {command}: failed: {ex.Message}");
             try
             {
-                File.WriteAllText(resultFile, $"fail {ex.Message}");
+                ElevatedHelperTrust.WriteResultFile(resultFile, $"fail {ex.Message}");
             }
             catch (IOException)
             {
@@ -115,10 +122,17 @@ public static class ElevatedChainCommands
                      ("tailscale.exe", chain.Tailscale.Socket),
                  })
         {
-            foreach (var found in new WmiProcessFinder().Find(name, pattern))
+            var finder = new WmiProcessFinder();
+            foreach (var found in finder.FindByArgument(name, pattern))
             {
                 try
                 {
+                    if (!finder.StillCarriesArgument(found, pattern))
+                    {
+                        log.Debug($"elevated: {name} pid={found.Id} is gone or no longer ours, not killed");
+                        continue;
+                    }
+
                     Process.GetProcessById(found.Id).Kill();
                     log.Info($"elevated: killed {name} pid={found.Id}");
                     killed++;
@@ -172,17 +186,33 @@ public sealed class ElevatedRunner(
     ChainTailscaleConfig config,
     FileLog log,
     bool elevatedBypass = false,
-    Func<string, string, int>? executor = null) : IElevatedCommandRunner
+    Func<string, string, int>? executor = null,
+    string? configPath = null) : IElevatedCommandRunner
 {
+    /// <summary>Results older than this are leftovers of a helper that outlived its parent's wait.</summary>
+    private static readonly TimeSpan StaleResultAge = TimeSpan.FromDays(1);
+
     private readonly Func<string, string, int> _executor =
         executor ?? ((command, resultFile) => ElevatedChainCommands.Execute(command, resultFile));
+
+    /// <summary>The config this process runs with — handed to the helper, which may run as another account.</summary>
+    private readonly string _configPath = configPath ?? AppConfigStore.GetDefaultConfigPath();
 
     public async Task<ElevatedResult> RunAsync(string command, CancellationToken ct)
     {
         if (elevatedBypass || WindowsPrivilege.IsElevated())
         {
-            var code = _executor(command, MakeResultPath(command, out _));
-            var detail = code == 0 ? "executed in the current process" : "failed (see log)";
+            ct.ThrowIfCancellationRequested();
+            var bypassResult = MakeResultPath(command, out _);
+            // off the caller's thread: the command polls with sleeps and waits on the sidecar CLI,
+            // and the caller may be the UI thread of an elevated GUI
+            var code = await Task.Run(() => _executor(command, bypassResult), CancellationToken.None).ConfigureAwait(false);
+            // the helper reports the detail through the same result file; what it wrote is what is shown
+            var reported = ReadResult(bypassResult);
+            DeleteQuietly(bypassResult);
+            var detail = reported is not null && reported.Detail.Length > 0
+                ? reported.Detail
+                : code == 0 ? "executed in the current process" : "failed (see log)";
             if (code == 0)
             {
                 log.Info($"elevated {command}: {detail}");
@@ -209,7 +239,7 @@ public sealed class ElevatedRunner(
             {
                 UseShellExecute = true,
                 Verb = "runas",
-                Arguments = $"{command} --result-file {ProcessOps.Quote(resultPath)}",
+                Arguments = ElevatedHelperArguments.Build(command, resultPath, _configPath),
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
         }
@@ -222,22 +252,19 @@ public sealed class ElevatedRunner(
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.UacWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
-            if (File.Exists(resultPath))
+            if (ReadResult(resultPath) is { } result)
             {
-                var text = File.ReadAllText(resultPath).Trim();
-                if (text.StartsWith("ok", StringComparison.Ordinal))
+                DeleteQuietly(resultPath);
+                if (result.Ok)
                 {
-                    File.Delete(resultPath);
-                    log.Info($"elevated {command}: {text[2..].Trim()}");
-                    return new ElevatedResult(true, text[2..].Trim());
+                    log.Info($"elevated {command}: {result.Detail}");
+                }
+                else
+                {
+                    log.Error($"elevated {command}: {result.Detail}");
                 }
 
-                if (text.StartsWith("fail", StringComparison.Ordinal))
-                {
-                    File.Delete(resultPath);
-                    log.Error($"elevated {command}: {text[4..].Trim()}");
-                    return new ElevatedResult(false, text[4..].Trim());
-                }
+                return result;
             }
 
             // a cancellation surfaces as OperationCanceledException (the chain contract), not as a
@@ -249,6 +276,47 @@ public sealed class ElevatedRunner(
         return new ElevatedResult(false, $"UAC/start not confirmed within {config.UacWaitSeconds}s");
     }
 
+    /// <summary>
+    /// The result the helper wrote; null - not there yet, unfinished, or the file is momentarily
+    /// held by the writer (the wait goes on instead of failing on a sharing violation).
+    /// </summary>
+    internal static ElevatedResult? ReadResult(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var text = File.ReadAllText(path).Trim();
+            if (text.StartsWith("ok", StringComparison.Ordinal))
+            {
+                return new ElevatedResult(true, text[2..].Trim());
+            }
+
+            return text.StartsWith("fail", StringComparison.Ordinal)
+                ? new ElevatedResult(false, text[4..].Trim())
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static void DeleteQuietly(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // a leftover is swept with the stale ones at the next run
+        }
+    }
+
     private string MakeResultPath(string command, out string nonce)
     {
         nonce = Guid.NewGuid().ToString("N")[..8];
@@ -256,6 +324,26 @@ public sealed class ElevatedRunner(
         // the result file must have where to appear even if the daemon (the usual creator of the
         // statedir) has never run — otherwise the helper cannot report even a failure
         Directory.CreateDirectory(config.StateDir);
+        SweepStaleResults();
         return path;
+    }
+
+    /// <summary>Result files of earlier runs that nobody collected (a timed-out wait, a failed delete).</summary>
+    private void SweepStaleResults()
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(config.StateDir, "*.result"))
+            {
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > StaleResultAge)
+                {
+                    DeleteQuietly(file);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // housekeeping only
+        }
     }
 }

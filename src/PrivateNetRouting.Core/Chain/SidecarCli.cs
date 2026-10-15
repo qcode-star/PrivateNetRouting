@@ -167,15 +167,21 @@ public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCl
             {
                 while (await reader.ReadLineAsync(timeoutCts.Token) is { } line)
                 {
+                    string? announce = null;
                     lock (gate)
                     {
+                        // both pumps share the output, the extractor and the url: one at a time
                         output.AppendLine(line);
+                        if (authUrl is null && extractor.Feed(line) is { } found)
+                        {
+                            authUrl = found;
+                            announce = found;
+                        }
                     }
 
-                    if (authUrl is null && extractor.Feed(line) is { } found)
+                    if (announce is not null)
                     {
-                        authUrl = found;
-                        onAuthUrl?.Invoke(found);
+                        onAuthUrl?.Invoke(announce); // outside the lock: the callback may take its time
                     }
                 }
             }
@@ -183,7 +189,10 @@ public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCl
             var pumps = Task.WhenAll(Pump(process.StandardOutput), Pump(process.StandardError));
             await process.WaitForExitAsync(timeoutCts.Token);
             await pumps;
-            return new CliResult(process.ExitCode, output.ToString().Trim(), authUrl);
+            lock (gate)
+            {
+                return new CliResult(process.ExitCode, output.ToString().Trim(), authUrl);
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

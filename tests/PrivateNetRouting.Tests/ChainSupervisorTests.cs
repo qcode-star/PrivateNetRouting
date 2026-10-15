@@ -1042,9 +1042,10 @@ public class ChainSupervisorTests : IDisposable
         var result = await runner.RunAsync("--elevated-test-command", CancellationToken.None);
 
         Assert.True(result.Ok);
+        Assert.Equal("test", result.Detail); // the helper's own detail, not a canned one
         Assert.NotNull(writtenTo);
         Assert.True(Directory.Exists(stateDir));
-        Assert.Equal("ok test", File.ReadAllText(writtenTo).Trim());
+        Assert.False(File.Exists(writtenTo)); // the collected result is removed
         Directory.Delete(stateDir, recursive: true);
         log.Dispose();
         File.Delete(logPath);

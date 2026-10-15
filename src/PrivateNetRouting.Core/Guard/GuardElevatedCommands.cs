@@ -32,10 +32,16 @@ public static class GuardElevatedCommands
             return 1;
         }
 
+        FileLog? log = null;
         try
         {
+            if (configPath is not null && !ElevatedHelperTrust.IsValidConfigPath(configPath))
+            {
+                throw new InvalidOperationException("the config path of the elevated helper is not an absolute .json path");
+            }
+
             var config = AppConfigStore.LoadOrCreate(configPath);
-            var log = new FileLog(
+            log = new FileLog(
                 Path.Combine(config.Logging.Directory, "guard-elevated.log"),
                 config.Logging.EffectiveLevel);
 
@@ -54,14 +60,15 @@ public static class GuardElevatedCommands
                 _ => $"unknown command: {command}",
             };
             log.Info($"elevated {command}: {detail}");
-            File.WriteAllText(resultFile, $"ok {detail}");
+            ElevatedHelperTrust.WriteResultFile(resultFile, $"ok {detail}");
             return 0;
         }
         catch (Exception ex)
         {
+            log?.Error($"elevated {command}: failed: {ex.Message}");
             try
             {
-                File.WriteAllText(resultFile, $"fail {ex.Message}");
+                ElevatedHelperTrust.WriteResultFile(resultFile, $"fail {ex.Message}");
             }
             catch (IOException)
             {

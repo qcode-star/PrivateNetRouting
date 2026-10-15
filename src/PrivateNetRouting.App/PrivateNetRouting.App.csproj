@@ -20,6 +20,8 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <!-- our own Main: the windowless roles run before WPF starts (Program.cs, HeadlessHost.cs) -->
+    <StartupObject>PrivateNetRouting.App.Program</StartupObject>
   </PropertyGroup>
 
 </Project>

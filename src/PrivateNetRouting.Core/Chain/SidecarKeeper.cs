@@ -24,7 +24,7 @@ public sealed class SidecarKeeper(
     ChainTailscaleConfig config, IProcessFinder processes, FileLog log) : ISidecarKeeper
 {
     public bool IsRunning =>
-        processes.Find("tailscale.exe", config.Socket)
+        processes.FindByArgument("tailscale.exe", config.Socket)
             .Any(p => p.CommandLine.Contains("watch-ipn", StringComparison.OrdinalIgnoreCase));
 
     public async Task EnsureStartedAsync(CancellationToken ct)
@@ -56,11 +56,17 @@ public sealed class SidecarKeeper(
 
     public Task KillAsync(CancellationToken ct)
     {
-        foreach (var found in processes.Find("tailscale.exe", config.Socket)
+        foreach (var found in processes.FindByArgument("tailscale.exe", config.Socket)
                      .Where(p => p.CommandLine.Contains("watch-ipn", StringComparison.OrdinalIgnoreCase)))
         {
             try
             {
+                if (!processes.StillCarriesArgument(found, config.Socket))
+                {
+                    log.Debug($"keeper: pid={found.Id} is gone or no longer ours, not killed");
+                    continue;
+                }
+
                 Process.GetProcessById(found.Id).Kill();
                 log.Info($"keeper: killed pid={found.Id}");
             }

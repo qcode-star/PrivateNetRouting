@@ -28,7 +28,8 @@ internal sealed class FakeFinderByName : IProcessFinder
 
     public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => [];
 
-    public FoundProcess? FindById(int processId) => null;
+    public FoundProcess? FindById(int processId) =>
+        ByName.Values.SelectMany(list => list).FirstOrDefault(p => p.Id == processId);
 }
 
 /// <summary>Resolver with a canned answer; counts calls.</summary>
