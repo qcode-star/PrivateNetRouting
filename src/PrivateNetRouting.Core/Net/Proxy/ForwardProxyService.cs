@@ -249,6 +249,9 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     private async Task HandleClientAsync(TcpClient client)
     {
+        // the token of the start that accepted this client: a stop must end its tunnels, and a
+        // later start must not hand them its fresh one
+        var stopToken = _cts.Token;
         using var _ = client;
         Interlocked.Increment(ref _totalConnections);
         Interlocked.Increment(ref _activeConnections);
@@ -302,8 +305,13 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
             _log.Debug($"forward-proxy: {target} -> {route}");
 
+            // a peer that vanished without a FIN (a WSL distro shut down, a dropped link) would
+            // otherwise leave the tunnel relaying nothing forever and counted as activity
+            EnableKeepAlive(client.Client);
+            EnableKeepAlive(upstreamClient);
+
             var upstreamStream = new NetworkStream(upstreamClient, ownsSocket: false);
-            await TunnelAsync(stream, upstreamStream);
+            await TunnelAsync(stream, upstreamStream, stopToken);
         }
         catch (OperationCanceledException) when (!_running)
         {
@@ -345,29 +353,51 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
     }
 
-    /// <summary>Pumps bytes in both directions; the end of one direction shuts down both sockets.</summary>
-    private static async Task TunnelAsync(NetworkStream client, NetworkStream upstream)
+    /// <summary>
+    /// Pumps bytes in both directions; the end of one direction shuts down both sockets, and so
+    /// does the cancellation of <paramref name="ct"/> (the service stop).
+    /// </summary>
+    private static async Task TunnelAsync(NetworkStream client, NetworkStream upstream, CancellationToken ct)
     {
-        var up = PumpAsync(client, upstream);
-        var down = PumpAsync(upstream, client);
+        var up = PumpAsync(client, upstream, ct);
+        var down = PumpAsync(upstream, client, ct);
         await Task.WhenAll(up, down);
     }
 
-    private static async Task PumpAsync(NetworkStream from, NetworkStream to)
+    private static void EnableKeepAlive(Socket socket)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 60);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 10);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException or NotSupportedException)
+        {
+            // keepalive is a safety net, not a requirement
+        }
+    }
+
+    private static async Task PumpAsync(NetworkStream from, NetworkStream to, CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
         try
         {
             while (true)
             {
-                var read = await from.ReadAsync(buffer);
+                var read = await from.ReadAsync(buffer, ct);
                 if (read == 0)
                 {
                     break;
                 }
 
-                await to.WriteAsync(buffer.AsMemory(0, read));
+                await to.WriteAsync(buffer.AsMemory(0, read), ct);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // the service stop: fall through to shutting both sockets down
         }
         catch (IOException)
         {

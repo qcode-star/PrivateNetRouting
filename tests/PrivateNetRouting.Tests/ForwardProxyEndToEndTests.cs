@@ -208,6 +208,48 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// StopAsync used to close only the listeners: tunnels already established kept relaying
+    /// (ActiveConnections stayed above zero and the chain "stopped" while Claude still worked).
+    /// </summary>
+    [Fact]
+    public async Task StopEndsEstablishedTunnels()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.StartsWith("HTTP/1.1 200", await ReadLineAsync(stream, timeout.Token));
+        Assert.Equal(1, proxy.ActiveConnections);
+
+        await proxy.StopAsync();
+
+        // the client sees the tunnel closed: EOF (or a reset) instead of an open, silent socket
+        var buffer = new byte[16];
+        var read = 0;
+        try
+        {
+            read = await stream.ReadAsync(buffer, timeout.Token);
+        }
+        catch (IOException)
+        {
+        }
+
+        Assert.Equal(0, read);
+        while (proxy.ActiveConnections > 0)
+        {
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+
+    /// <summary>
     /// Regression of the "deaf restart": StopAsync used to cancel the token shared across
     /// starts, so a second StartAsync in the same process bound a listener whose accept loop
     /// died the moment it started — the port answered the TCP handshake and nobody read the
