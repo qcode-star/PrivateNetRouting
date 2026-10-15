@@ -798,23 +798,42 @@ public class ChainSupervisorTests : IDisposable
 
         public Exception? EnsureThrows { get; init; }
 
+        /// <summary>When set, EnsureStartedAsync parks until it completes (a UAC prompt that is still open).</summary>
+        public TaskCompletionSource? EnsureGate { get; init; }
+
+        public int ConcurrentEnsures { get; private set; }
+
+        public int MaxConcurrentEnsures { get; private set; }
+
         public Exception? KillThrows { get; init; }
 
         public bool NeedsUac { get; init; }
 
         public bool StartNeedsUac() => NeedsUac;
 
-        public Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct)
+        public async Task EnsureStartedAsync(IProgress<string>? progress, CancellationToken ct)
         {
             calls.Add("daemon.ensure");
-            if (EnsureThrows is not null)
+            MaxConcurrentEnsures = Math.Max(MaxConcurrentEnsures, ++ConcurrentEnsures);
+            try
             {
-                throw EnsureThrows;
-            }
+                if (EnsureGate is not null)
+                {
+                    await EnsureGate.Task.WaitAsync(ct);
+                }
 
-            IsHttpListening = true;
-            IsProcessAlive = true;
-            return Task.CompletedTask;
+                if (EnsureThrows is not null)
+                {
+                    throw EnsureThrows;
+                }
+
+                IsHttpListening = true;
+                IsProcessAlive = true;
+            }
+            finally
+            {
+                ConcurrentEnsures--;
+            }
         }
 
         public Task KillAsync(CancellationToken ct)
@@ -938,6 +957,75 @@ public class ChainSupervisorTests : IDisposable
         Directory.Delete(stateDir, recursive: true);
         log.Dispose();
         File.Delete(logPath);
+    }
+
+    /// <summary>Two bring-ups at once (the card and an update window) must not interleave: the second waits and then finds the chain up.</summary>
+    [Fact]
+    public async Task ConcurrentBringUpsAreSerialised()
+    {
+        var gate = new TaskCompletionSource();
+        var daemon = new FakeDaemon(_calls) { EnsureGate = gate };
+        var supervisor = Create(daemon: daemon);
+
+        var first = supervisor.EnsureRunningAsync(null, CancellationToken.None);
+        while (daemon.ConcurrentEnsures == 0)
+        {
+            await Task.Delay(10);
+        }
+
+        var second = supervisor.EnsureRunningAsync(null, CancellationToken.None);
+        await Task.Delay(150);
+        Assert.False(second.IsCompleted); // waits for the first operation instead of racing it
+        Assert.Single(_calls, c => c == "daemon.ensure");
+
+        gate.SetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(1, daemon.MaxConcurrentEnsures);
+        Assert.Single(_calls, c => c == "daemon.ensure"); // the second pass saw the daemon alive
+    }
+
+    [Fact]
+    public async Task AStopWaitsForABringUpInFlight()
+    {
+        var gate = new TaskCompletionSource();
+        var daemon = new FakeDaemon(_calls) { EnsureGate = gate };
+        var supervisor = Create(daemon: daemon);
+        var bringUp = supervisor.EnsureRunningAsync(null, CancellationToken.None);
+        while (daemon.ConcurrentEnsures == 0)
+        {
+            await Task.Delay(10);
+        }
+
+        var stop = supervisor.StopAsync(null, CancellationToken.None);
+        await Task.Delay(150);
+        Assert.False(stop.IsCompleted);
+        Assert.DoesNotContain("daemon.kill", _calls); // it would have found nothing yet to kill
+
+        gate.SetResult();
+        await Task.WhenAll(bringUp, stop);
+
+        Assert.True(_calls.IndexOf("daemon.ensure") < _calls.IndexOf("daemon.kill"));
+    }
+
+    [Fact]
+    public async Task ACancelledWaiterLeavesTheOperationLockFree()
+    {
+        var gate = new TaskCompletionSource();
+        var daemon = new FakeDaemon(_calls) { EnsureGate = gate };
+        var supervisor = Create(daemon: daemon);
+        var first = supervisor.EnsureRunningAsync(null, CancellationToken.None);
+        while (daemon.ConcurrentEnsures == 0)
+        {
+            await Task.Delay(10);
+        }
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => supervisor.EnsureRunningAsync(null, cts.Token));
+
+        gate.SetResult();
+        await first;
+        await supervisor.StopAsync(null, CancellationToken.None); // the lock was not leaked
     }
 
     /// <summary>

@@ -173,7 +173,43 @@ public sealed class ChainSupervisor(
             proxyHealthy);
     }
 
+    /// <summary>
+    /// One chain operation at a time per process: a bring-up and a stop (or two bring-ups, from the
+    /// card, a launch and an update window) must not interleave - a second bring-up would see the
+    /// first one's daemon "alive without listener" and kill it, and a stop during a pending UAC
+    /// prompt would find nothing to stop. A waiter simply runs its own idempotent pass afterwards.
+    /// </summary>
+    private readonly SemaphoreSlim _operation = new(1, 1);
+
     public async Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    {
+        await _operation.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await EnsureRunningCoreAsync(progress, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operation.Release();
+        }
+    }
+
+    public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    {
+        // a stop is never abandoned while it waits for its turn (the steps run to the end even on
+        // a cancelled token): the bring-up in flight is cancelled by its own owner and lets go
+        await _operation.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await StopCoreAsync(progress, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operation.Release();
+        }
+    }
+
+    private async Task EnsureRunningCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
         if (_proxyDisabledInTailscale)
         {
@@ -346,7 +382,7 @@ public sealed class ChainSupervisor(
         throw new ChainException("egress", new IOException($"the provided {kind} upstream does not pass the CONNECT check"));
     }
 
-    public async Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    private async Task StopCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct)
     {
         // every step runs even when an earlier one failed: a daemon that refuses to die must not
         // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end
