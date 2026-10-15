@@ -10,9 +10,32 @@ public static class ClaudeEnvValues
     /// <summary>The proxy URL the Windows clients are pointed at (the applications proxy endpoint).</summary>
     public static string WindowsProxyUrl(AppConfig config) => AppProxyEndpoint.Url(config);
 
-    /// <summary>Proxy address for WSL: IP of the Windows side of WSL NAT (vEthernet (WSL...)) — not 127.0.0.1; the port is the applications proxy endpoint's.</summary>
+    /// <summary>
+    /// The host the distros must dial when the applications endpoint is an external upstream
+    /// (the local proxy is skipped) on a routable address: that address itself — the WSL NAT
+    /// gateway has nothing listening on the upstream's port. Null — the endpoint lives on this
+    /// Windows host (the local proxy, or a loopback upstream), reached through the gateway.
+    /// </summary>
+    public static string? WslFixedHost(AppConfig config)
+    {
+        if (!AppProxyEndpoint.IsSkipped(config))
+        {
+            return null;
+        }
+
+        var address = AppProxyEndpoint.EndPoint(config).Address;
+        return System.Net.IPAddress.IsLoopback(address) ? null : address.ToString();
+    }
+
+    /// <summary>
+    /// Proxy address for WSL: for a host-local endpoint the IP of the Windows side of WSL NAT
+    /// (vEthernet (WSL...)) — not 127.0.0.1; for an external upstream (<see cref="WslFixedHost"/>)
+    /// the upstream's own address. The port is the applications proxy endpoint's.
+    /// </summary>
     public static string? WslProxyUrl(System.Net.IPAddress? gateway, AppConfig config) =>
-        gateway is null ? null : $"http://{gateway}:{Port(config)}";
+        WslFixedHost(config) is { } host
+            ? $"http://{host}:{Port(config)}"
+            : gateway is null ? null : $"http://{gateway}:{Port(config)}";
 
     public static int Port(AppConfig config) => AppProxyEndpoint.Port(config);
 

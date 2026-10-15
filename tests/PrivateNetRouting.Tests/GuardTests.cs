@@ -262,7 +262,9 @@ public class GuardTests : IDisposable
         config.Chain.Socks5.Upstream = "192.0.2.10:7080";
         Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WindowsProxyUrl(config));
         Assert.Equal(7080, ClaudeEnvValues.Port(config));
-        Assert.Equal("http://192.0.2.1:7080", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
+        // WSL dials the upstream's own address: nothing listens on <gateway>:7080
+        Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), config));
+        Assert.Equal("http://192.0.2.10:7080", ClaudeEnvValues.WslProxyUrl(null, config));
     }
 
     [Fact]
@@ -804,6 +806,96 @@ public class GuardTests : IDisposable
         Assert.Equal(18082, status.Distros[0].ProxyEnvPort);
         Assert.Equal(GuardState.Unknown, status.Distros[1].State);
         Assert.Contains("not running", status.Distros[1].Reason);
+    }
+
+    /// <summary>A WSL config in a skipped shape: the http mode, the applications endpoint is the upstream itself.</summary>
+    private AppConfig WslSkippedShapeConfig(string upstream)
+    {
+        var config = WslConfig("on", ("d1", "u1"));
+        config.Chain.Mode = "http";
+        config.Chain.Http.Upstream = upstream;
+        return config;
+    }
+
+    [Fact]
+    public async Task WslSkippedShapeSyncsTheUpstreamAddressNotTheGateway()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var guard = new WslConfigGuard(
+            WslSkippedShapeConfig("192.0.2.50:3128"),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.Equal("http://192.0.2.50:3128", d1.ProxyUrl); // not http://<gateway>:3128
+        var startup = Assert.Single(runner.Scripts, s => s.Script.Contains("10-claude-proxy.sh"));
+        var script = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(startup.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"")));
+        Assert.Contains("PORT=3128", script);
+        Assert.Contains("PNR_PROXY_HOST='192.0.2.50'", script);
+        var envPass = Assert.Single(runner.Scripts, s => s.Script.Contains("ENVFILE="));
+        var env = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"")));
+        Assert.Contains("PNR_CODEX_PROXY_PORT=3128", env);
+        Assert.Contains("PNR_CODEX_PROXY_HOST='192.0.2.50'", env);
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var settingsJson = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
+        Assert.Contains("\"HTTPS_PROXY\": \"http://192.0.2.50:3128\"", settingsJson);
+    }
+
+    [Fact]
+    public async Task WslLocalShapeKeepsTheGatewayAndBakesNoHost()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1")),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.SyncAsync(CancellationToken.None);
+
+        var startup = Assert.Single(runner.Scripts, s => s.Script.Contains("10-claude-proxy.sh"));
+        var script = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(startup.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"")));
+        Assert.DoesNotContain("PNR_PROXY_HOST='", script);
+        Assert.Contains("ip route show default", script);
+    }
+
+    [Fact]
+    public void WslSkippedLoopbackUpstreamStillUsesTheGateway()
+    {
+        // a loopback upstream lives on the Windows host: the distros reach it through the gateway
+        // (the status warns separately that a loopback-only listener is unreachable from WSL)
+        Assert.Null(ClaudeEnvValues.WslFixedHost(WslSkippedShapeConfig("127.0.0.1:3128")));
+        Assert.Equal("http://192.0.2.1:3128", ClaudeEnvValues.WslProxyUrl(IPAddress.Parse("192.0.2.1"), WslSkippedShapeConfig("127.0.0.1:3128")));
+    }
+
+    [Fact]
+    public async Task WslSkippedShapeStatusComparesTheUpstreamHost()
+    {
+        var config = WslSkippedShapeConfig("192.0.2.50:3128");
+        var inSync = "SCRIPT=present\nPORT=3128\nPNR_PROXY_HOST='192.0.2.50'\nUSER_NAME='u1'\n"
+            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\nPNR_CODEX_PROXY_HOST='192.0.2.50'\n"
+            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.50:3128\"}}\nSETTINGS=END\n";
+        // what the gateway-form scripts of an earlier sync look like: right port, no baked host
+        var gatewayForm = "SCRIPT=present\nPORT=3128\nUSER_NAME='u1'\n"
+            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\n"
+            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:3128\"}}\nSETTINGS=END\n";
+        var probe = inSync;
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => probe };
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var ok = await guard.ReadAsync(CancellationToken.None);
+        Assert.Equal(GuardState.On, ok.Distros[0].State);
+        Assert.Equal("http://192.0.2.50:3128", ok.ExpectedProxy);
+
+        probe = gatewayForm;
+        var stale = await guard.ReadAsync(CancellationToken.None);
+        Assert.Equal(GuardState.Partial, stale.Distros[0].State);
+        Assert.Contains("host", stale.Distros[0].Reason);
     }
 
     [Fact]

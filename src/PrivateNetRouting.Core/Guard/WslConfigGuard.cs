@@ -264,9 +264,11 @@ public sealed class WslConfigGuard(
             }
 
             // a layer that is not synced cannot be stale: its signals are ignored
-            var portOk = !config.Wsl.SyncClaude || read.ScriptPort == expectedPort;
+            var expectedHost = ClaudeEnvValues.WslFixedHost(config);
+            var portOk = !config.Wsl.SyncClaude || (read.ScriptPort == expectedPort && read.ScriptHost == expectedHost);
             var proxyOk = !config.Wsl.SyncClaude || expectedProxy is null || read.SettingsProxy == expectedProxy;
-            var envOk = !config.Wsl.SyncCodex || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort);
+            var envOk = !config.Wsl.SyncCodex
+                || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expectedHost);
             var ok = portOk && proxyOk && envOk;
             return new WslDistroStatus(
                 distro.Name,
@@ -274,7 +276,7 @@ public sealed class WslConfigGuard(
                 ok ? GuardState.On : GuardState.Partial,
                 read.ScriptPort,
                 read.SettingsProxy,
-                ok ? "" : DescribeMismatch(read, expectedPort, expectedProxy, config.Wsl.SyncCodex),
+                ok ? "" : DescribeMismatch(read, expectedPort, expectedHost, expectedProxy, config.Wsl.SyncCodex),
                 read.ProxyEnvPresent,
                 read.ProxyEnvPort);
         }
@@ -389,7 +391,7 @@ public sealed class WslConfigGuard(
             RequireCompleted(settingsOutput, $"settings.json sync in '{distro.Name}'");
 
             // startup script: refreshes the proxy address on every distro start
-            var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config));
+            var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config), ClaudeEnvValues.WslFixedHost(config));
             var rootScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 SCRIPT="{{scriptPath}}"
@@ -423,7 +425,8 @@ public sealed class WslConfigGuard(
         {
             var envContent = BuildCodexProxyEnvScript(
                 ClaudeEnvValues.Port(config),
-                ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
+                ClaudeEnvValues.BuildNoProxy(config.BypassDomains),
+                ClaudeEnvValues.WslFixedHost(config));
             var envScript = NormalizeLf($$"""
                 {{PnrBakFn}}
                 ENVFILE="{{envPath}}"
@@ -526,7 +529,9 @@ public sealed class WslConfigGuard(
         bool ProxyEnvPresent = false,
         int? ProxyEnvPort = null,
         string? WslConfText = null,
-        WslBootRunnerState BootRunner = WslBootRunnerState.Missing);
+        WslBootRunnerState BootRunner = WslBootRunnerState.Missing,
+        string? ScriptHost = null,
+        string? ProxyEnvHost = null);
 
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
@@ -539,6 +544,7 @@ public sealed class WslConfigGuard(
             if [ -f {scriptPath} ]; then
                 echo SCRIPT=present
                 grep -E '^PORT=' {scriptPath} 2>/dev/null || true
+                grep -E '^PNR_PROXY_HOST=' {scriptPath} 2>/dev/null || true
                 grep -E '^USER_NAME=' {scriptPath} 2>/dev/null || true
             else
                 echo SCRIPT=missing
@@ -546,6 +552,7 @@ public sealed class WslConfigGuard(
             if [ -f {envPath} ]; then
                 echo PROXYENV=present
                 grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
+                grep -E '^PNR_CODEX_PROXY_HOST=' {envPath} 2>/dev/null || true
             else
                 echo PROXYENV=missing
             fi
@@ -585,7 +592,7 @@ public sealed class WslConfigGuard(
     {
         bool scriptPresent = false, settingsFilePresent = false, proxyEnvPresent = false;
         int? port = null, proxyEnvPort = null;
-        string? user = null, proxy = null, wslConf = null;
+        string? user = null, proxy = null, wslConf = null, scriptHost = null, proxyEnvHost = null;
         var bootRunner = WslBootRunnerState.Missing;
         JsonObject? root = null;
 
@@ -655,6 +662,14 @@ public sealed class WslConfigGuard(
                     {
                         proxyEnvPort = envPort;
                     }
+                    else if (line.StartsWith("PNR_CODEX_PROXY_HOST=", StringComparison.Ordinal))
+                    {
+                        proxyEnvHost = line["PNR_CODEX_PROXY_HOST=".Length..].Trim().Trim('\'', '"');
+                    }
+                    else if (line.StartsWith("PNR_PROXY_HOST=", StringComparison.Ordinal))
+                    {
+                        scriptHost = line["PNR_PROXY_HOST=".Length..].Trim().Trim('\'', '"');
+                    }
                     else if (line.StartsWith("USER_NAME=", StringComparison.Ordinal))
                     {
                         user = line["USER_NAME=".Length..].Trim().Trim('\'', '"');
@@ -664,7 +679,7 @@ public sealed class WslConfigGuard(
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost);
     }
 
     /// <summary>
@@ -681,13 +696,14 @@ public sealed class WslConfigGuard(
     /// by the loopback form the Windows side keeps there. The Windows launcher refreshes the file
     /// back before every launch.
     /// </summary>
-    internal static string BuildCodexProxyEnvScript(int port, string noProxy) => NormalizeLf($$"""
+    internal static string BuildCodexProxyEnvScript(int port, string noProxy, string? fixedHost = null) => NormalizeLf($$"""
         # Managed by PrivateNetRouting (guard.wsl.proxyEnvPath) — do not edit by hand.
         # Exports the application's forward proxy to the Codex CLI running inside this distro:
         # the desktop app passes CODEX_HOME into the distro for its own processes (the marker),
         # the codex command name is the fallback. Everything else — ordinary shells, apt, pip,
         # git — keeps the direct route.
         PNR_CODEX_PROXY_PORT={{port}}
+        {{(fixedHost is null ? "" : $"PNR_CODEX_PROXY_HOST='{fixedHost}'")}}
         _pnr_codex_shell=0
         if [ -n "${CODEX_HOME:-}" ]; then
             _pnr_codex_shell=1
@@ -696,7 +712,10 @@ public sealed class WslConfigGuard(
             *codex*|*Codex*) _pnr_codex_shell=1 ;;
         esac
         if [ "$_pnr_codex_shell" = "1" ]; then
-            _pnr_host_ip=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+            _pnr_host_ip="${PNR_CODEX_PROXY_HOST:-}"
+            if [ -z "$_pnr_host_ip" ]; then
+                _pnr_host_ip=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+            fi
             if [ -n "$_pnr_host_ip" ]; then
                 export HTTP_PROXY="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT"
                 export HTTPS_PROXY="$HTTP_PROXY"
@@ -1018,7 +1037,7 @@ public sealed class WslConfigGuard(
     }
 
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
-    internal static string BuildStartupScript(string user, int port) => NormalizeLf($$"""
+    internal static string BuildStartupScript(string user, int port, string? fixedHost = null) => NormalizeLf($$"""
         #!/bin/bash
         # Managed by PrivateNetRouting (guard.wslStartupScript). Keeps the Claude Code proxy
         # env pointing at the Windows side of the WSL NAT gateway, where the application's
@@ -1030,15 +1049,19 @@ public sealed class WslConfigGuard(
         USER_HOME="/home/$USER_NAME"
         SETTINGS="$USER_HOME/.claude/settings.json"
         PORT={{port}}
+        {{(fixedHost is null ? "" : $"PNR_PROXY_HOST='{fixedHost}'")}}
 
-        # Host IP = default gateway of the WSL NAT. resolv.conf is not used: with
-        # dnsTunneling enabled it holds 10.255.255.4/254, not the host address.
-        HOST_IP=""
-        for i in 1 2 3 4 5; do
-            HOST_IP=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
-            [ -n "$HOST_IP" ] && break
-            sleep 2
-        done
+        # Host IP: the external upstream's own address when the application's endpoint is one
+        # (PNR_PROXY_HOST above), otherwise the default gateway of the WSL NAT. resolv.conf is
+        # not used: with dnsTunneling enabled it holds 10.255.255.4/254, not the host address.
+        HOST_IP="${PNR_PROXY_HOST:-}"
+        if [ -z "$HOST_IP" ]; then
+            for i in 1 2 3 4 5; do
+                HOST_IP=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+                [ -n "$HOST_IP" ] && break
+                sleep 2
+            done
+        fi
         if [ -z "$HOST_IP" ]; then
             echo "$TAG default route not found - exiting without changes"
             exit 0
@@ -1109,12 +1132,17 @@ public sealed class WslConfigGuard(
         return distros.All(d => d.State == GuardState.Off) ? GuardState.Off : GuardState.Partial;
     }
 
-    private static string DescribeMismatch(WslRead read, int expectedPort, string? expectedProxy, bool proxyEnvExpected)
+    private static string DescribeMismatch(WslRead read, int expectedPort, string? expectedHost, string? expectedProxy, bool proxyEnvExpected)
     {
         var parts = new List<string>();
         if (read.ScriptPort != expectedPort)
         {
             parts.Add($"script PORT={read.ScriptPort ?? -1} (expected {expectedPort})");
+        }
+
+        if (read.ScriptHost != expectedHost)
+        {
+            parts.Add($"script host={read.ScriptHost ?? "<gateway>"} (expected {expectedHost ?? "<gateway>"})");
         }
 
         if (expectedProxy is not null && read.SettingsProxy != expectedProxy)
@@ -1134,6 +1162,10 @@ public sealed class WslConfigGuard(
         else if (proxyEnvExpected && read.ProxyEnvPort != expectedPort)
         {
             parts.Add($"codex proxy env PORT={read.ProxyEnvPort?.ToString() ?? "<none>"} (expected {expectedPort})");
+        }
+        else if (proxyEnvExpected && read.ProxyEnvHost != expectedHost)
+        {
+            parts.Add($"codex proxy env host={read.ProxyEnvHost ?? "<gateway>"} (expected {expectedHost ?? "<gateway>"})");
         }
 
         return string.Join("; ", parts);
