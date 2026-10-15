@@ -35,14 +35,25 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
 
     public async Task<long> GetLengthAsync(string url, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Head, url);
-        using var response = await http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode)
+        // the HttpClient has no global timeout (long fragments): a stalled egress would hold the
+        // size query forever, so it gets the per-request limit
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.ChunkTimeoutSeconds)));
+        try
         {
-            throw new IOException($"HEAD failed: {(int)response.StatusCode} {response.ReasonPhrase}");
-        }
+            using var request = new HttpRequestMessage(HttpMethod.Head, url);
+            using var response = await http.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new IOException($"HEAD failed: {(int)response.StatusCode} {response.ReasonPhrase}");
+            }
 
-        return response.Content.Headers.ContentLength ?? 0;
+            return response.Content.Headers.ContentLength ?? 0;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new IOException($"HEAD timed out after {config.ChunkTimeoutSeconds}s — the egress accepts connections but does not answer");
+        }
     }
 
     public async Task DownloadAsync(string url, string targetFile, long expectedLength, IProgress<(long, long)>? progress, CancellationToken ct)

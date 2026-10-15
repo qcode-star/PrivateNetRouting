@@ -18,8 +18,15 @@ public interface ICodexVersionManifest
 /// the live proxy chain (the caller's HttpClient is already proxied); any failure is "no version",
 /// never an error — the Store search remains the sole source of truth about an update existing.
 /// </summary>
-public sealed class CodexVersionManifest(HttpClient http, CodexUpdateConfig config, FileLog log) : ICodexVersionManifest
+public sealed class CodexVersionManifest(
+    HttpClient http,
+    CodexUpdateConfig config,
+    FileLog log,
+    TimeSpan? requestTimeout = null) : ICodexVersionManifest
 {
+    /// <summary>The HttpClient is shared and has no global timeout: a stalled egress must not hang the check.</summary>
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(30);
+
     public async Task<string?> FindOfferedVersionAsync(CancellationToken ct)
     {
         if (config.UpdateVersionUrl.Length == 0)
@@ -27,16 +34,23 @@ public sealed class CodexVersionManifest(HttpClient http, CodexUpdateConfig conf
             return null;
         }
 
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(requestTimeout ?? DefaultRequestTimeout);
         try
         {
-            using var response = await http.GetAsync(config.UpdateVersionUrl, ct).ConfigureAwait(false);
+            using var response = await http.GetAsync(config.UpdateVersionUrl, timeout.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             return ParseVersion(json, config.StoreProductId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {
-            throw;
+            log.Debug("codex-updater: version manifest timed out");
+            return null;
         }
         catch (Exception ex)
         {

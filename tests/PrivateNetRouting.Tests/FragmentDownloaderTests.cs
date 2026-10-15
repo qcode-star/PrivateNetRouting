@@ -45,6 +45,56 @@ public class FragmentDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task HeadTimesOutOnAStalledEgress()
+    {
+        using var http = new HttpClient(new StallingHandler());
+        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { ChunkTimeoutSeconds = 1 }, _log);
+
+        var error = await Assert.ThrowsAsync<IOException>(
+            () => downloader.GetLengthAsync("https://pkg.example.com/app.msix", CancellationToken.None));
+
+        Assert.Contains("timed out", error.Message);
+    }
+
+    [Fact]
+    public async Task HeadCancellationByTheCallerIsNotATimeout()
+    {
+        using var http = new HttpClient(new StallingHandler());
+        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { ChunkTimeoutSeconds = 30 }, _log);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => downloader.GetLengthAsync("https://pkg.example.com/app.msix", cts.Token));
+    }
+
+    [Fact]
+    public async Task ManifestTimeoutMeansNoVersionButCallerCancellationPropagates()
+    {
+        using var http = new HttpClient(new StallingHandler());
+        var manifest = new CodexVersionManifest(
+            http, new CodexUpdateConfig { UpdateVersionUrl = "https://manifest.example.com/v.json" }, _log,
+            requestTimeout: TimeSpan.FromMilliseconds(200));
+
+        Assert.Null(await manifest.FindOfferedVersionAsync(CancellationToken.None));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        var slow = new CodexVersionManifest(
+            http, new CodexUpdateConfig { UpdateVersionUrl = "https://manifest.example.com/v.json" }, _log,
+            requestTimeout: TimeSpan.FromSeconds(30));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => slow.FindOfferedVersionAsync(cts.Token));
+    }
+
+    /// <summary>An egress that accepts the connection and then never answers.</summary>
+    private sealed class StallingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new HttpResponseMessage();
+        }
+    }
+
+    [Fact]
     public async Task DownloadAssemblesFileFromRanges()
     {
         var target = Path.Combine(_root, "app.msix");
