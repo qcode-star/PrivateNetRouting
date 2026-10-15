@@ -1,3 +1,4 @@
+using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.SystemOps;
@@ -74,6 +75,84 @@ public class WatchdogSupervisorTests : IDisposable
 
         Assert.Empty(spawned);
         Assert.Equal([22], supervisor.FindStopperPids());
+    }
+
+    /// <summary>
+    /// Two starts close together (the GUI and a CLI raise): the second one must wait for the first
+    /// spawn to become visible in the process list instead of seeing "no stopper" and spawning again.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentStartsSpawnASingleWorker()
+    {
+        var finder = new FakeFinderByName();
+        var spawned = 0;
+        using var firstInside = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var first = Create(finder, spawn: commandLine =>
+        {
+            spawned++;
+            firstInside.Set();
+            release.Wait(TimeSpan.FromSeconds(10)); // the worker is not in the process list yet
+            finder.ByName["PrivateNetRouting.App.exe"] = [new(33, commandLine)];
+        });
+        var second = Create(finder, spawn: _ => spawned++);
+
+        var firstStart = Task.Run(() => first.StartAsync(CancellationToken.None));
+        Assert.True(firstInside.Wait(TimeSpan.FromSeconds(10)));
+        var secondStart = Task.Run(() => second.StartAsync(CancellationToken.None));
+        await Task.Delay(300); // the second start is parked on the lock, not past the check
+        release.Set();
+        await Task.WhenAll(firstStart, secondStart);
+
+        Assert.Equal(1, spawned);
+    }
+
+    /// <summary>
+    /// A raise followed by a quick stop: the stop waits for the pending auto start, so the worker
+    /// it spawns is already visible (and killed) instead of surviving over the stopped chain.
+    /// </summary>
+    [Fact]
+    public async Task StopWaitsForAPendingAutoStartAndKillsItsWorker()
+    {
+        var finder = new FakeFinderByName();
+        var killed = new List<int>();
+        using var spawning = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var supervisor = Create(
+            finder,
+            spawn: commandLine =>
+            {
+                spawning.Set();
+                release.Wait(TimeSpan.FromSeconds(10));
+                finder.ByName["PrivateNetRouting.App.exe"] = [new(33, commandLine)];
+            },
+            kill: pid =>
+            {
+                killed.Add(pid);
+                finder.ByName["PrivateNetRouting.App.exe"] = [];
+            });
+
+        supervisor.TrackAutoStart();
+        Assert.True(spawning.Wait(TimeSpan.FromSeconds(10)));
+        var stop = supervisor.StopAsync(CancellationToken.None); // the worker is not visible yet
+        await Task.Delay(200);
+        Assert.False(stop.IsCompleted); // it waits for the spawn to settle
+        release.Set();
+        await stop;
+
+        Assert.Equal([33], killed);
+    }
+
+    [Fact]
+    public void WorkerRefusesToRunBesideALowerPidStopperOrOverAStoppedChain()
+    {
+        var up = new ChainState(true, true, true, "Running", true, true);
+        var stopped = new ChainState(false, false, false, null, false, false);
+
+        Assert.Null(WatchdogWorker.RefusalReason([50], 50, up)); // alone
+        Assert.Null(WatchdogWorker.RefusalReason([50, 60], 50, up)); // the lowest pid stays
+        Assert.NotNull(WatchdogWorker.RefusalReason([50, 60], 60, up)); // the higher one steps aside
+        Assert.NotNull(WatchdogWorker.RefusalReason([50], 50, stopped)); // nothing to watch
     }
 
     [Fact]

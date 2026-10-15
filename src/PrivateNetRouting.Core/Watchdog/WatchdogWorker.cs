@@ -1,3 +1,4 @@
+using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 
 namespace PrivateNetRouting.Core.Watchdog;
@@ -12,6 +13,22 @@ namespace PrivateNetRouting.Core.Watchdog;
 /// </summary>
 public static class WatchdogWorker
 {
+    /// <summary>
+    /// Why a freshly started worker must not run (null — it runs). A stopper exists only over a
+    /// live chain, so a chain that is stopped at start means the chain went down after the spawn;
+    /// and one stopper is enough: when several are alive the lowest pid stays (two workers that
+    /// started together both see each other, so the rule must pick the same survivor for both).
+    /// </summary>
+    internal static string? RefusalReason(IReadOnlyList<int> stopperPids, int selfPid, ChainState chain)
+    {
+        if (stopperPids.Any(pid => pid != selfPid && pid < selfPid))
+        {
+            return "another stopper is already watching this chain";
+        }
+
+        return chain.IsStopped ? "the chain is not up, there is nothing to watch" : null;
+    }
+
     public static async Task<int> RunAsync(CancellationToken stop)
     {
         var config = AppConfigStore.LoadOrCreate();
@@ -19,6 +36,16 @@ public static class WatchdogWorker
         runtime.Log.Info($"watchdog worker: started (pid {Environment.ProcessId}, interval {config.Watchdog.CheckSeconds}s)");
         try
         {
+            var refusal = RefusalReason(
+                runtime.WatchdogControl.FindStopperPids(),
+                Environment.ProcessId,
+                await runtime.Chain.GetStateAsync(stop).ConfigureAwait(false));
+            if (refusal is not null)
+            {
+                runtime.Log.Info($"watchdog worker: {refusal} — exiting");
+                return 0;
+            }
+
             await runtime.Watchdog.RunAsync(null, stop).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

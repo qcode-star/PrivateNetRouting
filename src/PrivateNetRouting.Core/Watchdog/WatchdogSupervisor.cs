@@ -73,6 +73,10 @@ public sealed class WatchdogSupervisor(
     /// </summary>
     public async Task StartAsync(CancellationToken ct)
     {
+        // check -> spawn -> wait-for-visibility is one critical section across processes: the GUI
+        // and a CLI raise close together would otherwise both see "no stopper" during the gap
+        // between the spawn and the worker showing up in the process list, and arm two of them
+        using var spawnLock = await AcquireSpawnLockAsync(ct).ConfigureAwait(false);
         var existing = FindStopperPids();
         if (existing.Count > 0)
         {
@@ -102,6 +106,48 @@ public sealed class WatchdogSupervisor(
         }
 
         throw new IOException($"watchdog worker did not start within {config.WorkerStartWaitSeconds}s; log: {workerErrorLog}");
+    }
+
+    /// <summary>How long a start waits for another start (this or another process) to finish its spawn.</summary>
+    private static readonly TimeSpan SpawnLockWait = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// An exclusive file next to the logs - async-safe, unlike a named mutex (thread-affine), and
+    /// shared between the GUI and the CLI. Fails open: a lock that cannot be taken in time is logged
+    /// and the start goes on, a stuck lock file must never keep the chain without its stopper.
+    /// </summary>
+    private async Task<IDisposable> AcquireSpawnLockAsync(CancellationToken ct)
+    {
+        var path = Path.Combine(
+            Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
+            "watchdog.spawn.lock");
+        var deadline = DateTime.UtcNow + SpawnLockWait;
+        while (true)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    log.Warn($"watchdog: the spawn lock {path} is still held after {SpawnLockWait.TotalSeconds:0}s, starting without it: {ex.Message}");
+                    return NoLock.Instance;
+                }
+            }
+
+            await Task.Delay(50, ct).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class NoLock : IDisposable
+    {
+        public static readonly NoLock Instance = new();
+
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>
@@ -142,6 +188,17 @@ public sealed class WatchdogSupervisor(
     /// </summary>
     public async Task StopAsync(CancellationToken ct)
     {
+        // a raise right before this stop may still be spawning its worker, which is not in the
+        // process list yet: let the spawn finish, or the worker would outlive the chain it guards
+        try
+        {
+            await LastAutoStart.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"watchdog: the pending auto start failed: {ex.Message}");
+        }
+
         var self = Environment.ProcessId;
         var pids = FindStopperPids().Where(pid => pid != self).ToList();
         if (pids.Count == 0)
