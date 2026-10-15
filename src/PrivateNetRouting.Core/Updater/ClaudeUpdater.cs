@@ -104,9 +104,22 @@ public sealed class ClaudeUpdater(
         return new UpdateCheckResult(installed, url, offered, IsUpToDate(installed.Version, offered));
     }
 
-    /// <summary>Version formats differ: the URL has 2.26454.2, the package has 2.26454.2.0 — compare by prefix.</summary>
-    private static bool IsUpToDate(string installedVersion, string? offered) =>
-        offered is not null && installedVersion.StartsWith(offered, StringComparison.Ordinal);
+    /// <summary>
+    /// Up to date means the offered version is not newer than the installed one: a stale address
+    /// of an older release (an old journal entry) is not an update. Versions that do not parse
+    /// fall back to the prefix comparison.
+    /// </summary>
+    private static bool IsUpToDate(string installedVersion, string? offered)
+    {
+        if (offered is null)
+        {
+            return false;
+        }
+
+        return PackageVersion.Compare(installedVersion, offered) is { } order
+            ? order >= 0
+            : installedVersion.StartsWith(offered, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Package address, in order: manual; the update feed (only when the proxy is already
@@ -193,6 +206,14 @@ public sealed class ClaudeUpdater(
                 "publisher mismatch — the package will not install over the existing one:\n" +
                 $"  package:    {identity.Publisher}\n" +
                 $"  installed:  {installed.Publisher}");
+        }
+
+        // an older package cannot be installed over a newer one (0x80073D06) — find out before
+        // Claude is closed, not after
+        if (PackageVersion.Compare(identity.Version, installed.Version) is < 0)
+        {
+            throw new IOException(
+                $"the package is older than the installed one ({identity.Version} < {installed.Version}) — it cannot be installed over it");
         }
 
         log.Info($"updater: package verified Name={identity.Name} Version={identity.Version} Arch={identity.Architecture}");

@@ -92,6 +92,38 @@ public class UpdaterTests : IDisposable
         Assert.True(check.UpToDate); // 2.26454.2.0.StartsWith("2.26454.2")
     }
 
+    [Theory]
+    [InlineData("2.26454.2", "2.26454.2.0", 0)]
+    [InlineData("2.26454.2.0", "2.26454.2", 0)]
+    [InlineData("2.26453.0", "2.26454.2.0", -1)]
+    [InlineData("2.26455.1.0", "2.26454.2", 1)]
+    [InlineData("2.9.0", "2.10.0", -1)] // numeric, not textual
+    public void PackageVersionsAreOrderedNumericallyAcrossFormats(string left, string right, int expectedSign)
+        => Assert.Equal(expectedSign, Math.Sign(PackageVersion.Compare(left, right)!.Value));
+
+    [Fact]
+    public async Task CheckTreatsAnOlderOfferedVersionAsUpToDate()
+    {
+        // a stale journal address of an older release is not an update
+        var updater = Create(journalUrl: "https://downloads.claude.ai/releases/win32/x64/2.26453.0/Claude-old.msix");
+
+        var check = await updater.CheckAsync(UpdateOptions.Default, CancellationToken.None);
+
+        Assert.True(check.UpToDate);
+    }
+
+    [Fact]
+    public async Task VerifyRefusesAPackageOlderThanTheInstalledOne()
+    {
+        _appx.Installed = new InstalledPackage("Claude", "2.26456.0.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var package = await WritePackageAsync(MatchingPublisher); // identity 2.26455.1.0
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() => updater.VerifyAsync(package, CancellationToken.None));
+
+        Assert.Contains("older than the installed", error.Message);
+    }
+
     [Fact]
     public async Task CheckWithoutInstalledPackageHasNothingToUpdate()
     {
