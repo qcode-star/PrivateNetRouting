@@ -1,4 +1,6 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace PrivateNetRouting.Core.Configuration;
@@ -17,6 +19,14 @@ public static class AppConfigStore
         AllowTrailingCommas = true,
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // the file is read by people: non-ASCII text and <>&+ stay as written, not \uXXXX
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private static readonly JsonDocumentOptions RawDocumentOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
     };
 
     /// <summary>Default path: %APPDATA%\PrivateNetRouting\appsettings.json.</summary>
@@ -46,27 +56,91 @@ public static class AppConfigStore
     }
 
     /// <summary>
-    /// Point change of the config on disk (used by UI settings, e.g. language
-    /// switching). The file is re-read without expanding environment variables — so that %APPDATA%
-    /// in paths is not saved expanded — then mutated and written back.
+    /// Point change of the config on disk (used by UI settings, e.g. language switching). Only
+    /// what the mutation actually changed is written: the file is read as raw JSON, the typed
+    /// model is compared before and after <paramref name="mutate"/>, and the differing values are
+    /// patched into the raw tree. Unknown keys, keys the user left out (new defaults of later
+    /// releases keep applying) and the key order survive; a mutation that changes nothing does
+    /// not touch the file at all. Environment variables are not expanded on this path, so
+    /// %APPDATA% in paths is never saved expanded.
     /// </summary>
     public static void Update(Action<AppConfig> mutate, string? path = null)
     {
         path ??= GetDefaultConfigPath();
-        AppConfig config;
-        if (File.Exists(path))
+        if (!File.Exists(path))
         {
-            config = Deserialize(ReadShared(path), path);
-        }
-        else
-        {
-            config = new AppConfig();
+            var fresh = new AppConfig();
+            mutate(fresh);
+            Save(fresh, path);
+            return;
         }
 
+        var text = ReadShared(path);
+        var raw = JsonNode.Parse(text, documentOptions: RawDocumentOptions) as JsonObject
+            ?? throw new InvalidDataException($"config {path} is empty or corrupted");
+        var config = Deserialize(text, path);
+        var before = (JsonObject)JsonSerializer.SerializeToNode(config, JsonOptions)!;
         mutate(config);
-        Save(config, path);
+        var after = (JsonObject)JsonSerializer.SerializeToNode(config, JsonOptions)!;
+        if (!Patch(raw, before, after))
+        {
+            return;
+        }
+
+        WriteAtomic(path, raw.ToJsonString(JsonOptions));
     }
 
+    /// <summary>Applies the differences between two serializations of the model onto the raw file tree.</summary>
+    private static bool Patch(JsonObject raw, JsonObject before, JsonObject after)
+    {
+        var changed = false;
+        foreach (var (key, afterValue) in after.ToList())
+        {
+            before.TryGetPropertyValue(key, out var beforeValue);
+            if (beforeValue is not null && JsonNode.DeepEquals(beforeValue, afterValue))
+            {
+                continue;
+            }
+
+            var rawKey = FindKey(raw, key) ?? key;
+            if (beforeValue is JsonObject beforeObject && afterValue is JsonObject afterObject
+                && (raw[rawKey] is null || raw[rawKey] is JsonObject))
+            {
+                var target = raw[rawKey] as JsonObject;
+                var created = target is null;
+                target ??= [];
+                if (Patch(target, beforeObject, afterObject))
+                {
+                    if (created)
+                    {
+                        raw[rawKey] = target;
+                    }
+
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            raw[rawKey] = afterValue?.DeepClone();
+            changed = true;
+        }
+
+        foreach (var key in before.Select(pair => pair.Key).Where(key => !after.ContainsKey(key)).ToList())
+        {
+            if (FindKey(raw, key) is { } rawKey)
+            {
+                raw.Remove(rawKey);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>The spelling of a key in the raw file (property names are matched case-insensitively on load).</summary>
+    private static string? FindKey(JsonObject raw, string key) =>
+        raw.Select(pair => pair.Key).FirstOrDefault(name => string.Equals(name, key, StringComparison.OrdinalIgnoreCase));
     public static void Save(AppConfig config, string? path = null)
     {
         path ??= GetDefaultConfigPath();

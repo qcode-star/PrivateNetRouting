@@ -27,6 +27,55 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void UpdatePatchesOnlyTheChangedKeyAndKeepsTheRestOfTheFile()
+    {
+        File.WriteAllText(_path, """
+            {
+              // the owner's note
+              "ui": { "language": "auto" },
+              "myCustomKey": { "keep": "Привет <&>" },
+              "forwardProxy": { "listen": "127.0.0.1:19999" }
+            }
+            """);
+
+        AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
+
+        var written = File.ReadAllText(_path);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(written)!.AsObject();
+        Assert.Equal("ru", (string?)root["ui"]!["language"]);
+        Assert.Equal("Привет <&>", (string?)root["myCustomKey"]!["keep"]); // unknown key kept, not escaped
+        Assert.Equal("127.0.0.1:19999", (string?)root["forwardProxy"]!["listen"]);
+        // no defaults were pinned into the file: sections the user never wrote stay absent
+        Assert.Null(root["chain"]);
+        Assert.Null(root["guard"]);
+        Assert.Null(root["forwardProxy"]!["bindWslGateway"]);
+        Assert.Equal(["ui", "myCustomKey", "forwardProxy"], root.Select(p => p.Key).ToArray());
+    }
+
+    [Fact]
+    public void UpdateThatChangesNothingDoesNotTouchTheFile()
+    {
+        const string original = "{\n  // keep me\n  \"ui\": { \"language\": \"ru\" }\n}\n";
+        File.WriteAllText(_path, original);
+
+        AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
+
+        Assert.Equal(original, File.ReadAllText(_path)); // the comment survives a no-op
+    }
+
+    [Fact]
+    public void UpdateWritesAKeyThatWasOnlyADefaultBefore()
+    {
+        File.WriteAllText(_path, "{ \"ui\": { } }");
+
+        AppConfigStore.Update(config => config.Ui.ChainCardExpanded = !config.Ui.ChainCardExpanded, _path);
+
+        var reloaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(!new AppConfig().Ui.ChainCardExpanded, reloaded.Ui.ChainCardExpanded);
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_path))!["chain"]);
+    }
+
+    [Fact]
     public void SaveReplacesTheFileInOneStepAndLeavesNoTempFile()
     {
         AppConfigStore.LoadOrCreate(_path);
