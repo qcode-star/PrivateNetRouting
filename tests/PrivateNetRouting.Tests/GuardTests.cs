@@ -887,12 +887,12 @@ public class GuardTests : IDisposable
         Assert.Equal("http://192.0.2.50:3128", d1.ProxyUrl); // not http://<gateway>:3128
         var startup = Assert.Single(runner.Scripts, s => s.Script.Contains("10-claude-proxy.sh"));
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(
-            ExtractBase64Payload(startup.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"")));
+            ExtractBase64Payload(startup.Script, "SCRIPT='/etc/wsl.d/startup/10-claude-proxy.sh'")));
         Assert.Contains("PORT=3128", script);
         Assert.Contains("PNR_PROXY_HOST='192.0.2.50'", script);
         var envPass = Assert.Single(runner.Scripts, s => s.Script.Contains("ENVFILE="));
         var env = Encoding.UTF8.GetString(Convert.FromBase64String(
-            ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"")));
+            ExtractBase64Payload(envPass.Script, "ENVFILE='/etc/profile.d/20-pnr-codex-proxy.sh'")));
         Assert.Contains("PNR_CODEX_PROXY_PORT=3128", env);
         Assert.Contains("PNR_CODEX_PROXY_HOST='192.0.2.50'", env);
         var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
@@ -914,7 +914,7 @@ public class GuardTests : IDisposable
 
         var startup = Assert.Single(runner.Scripts, s => s.Script.Contains("10-claude-proxy.sh"));
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(
-            ExtractBase64Payload(startup.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"")));
+            ExtractBase64Payload(startup.Script, "SCRIPT='/etc/wsl.d/startup/10-claude-proxy.sh'")));
         Assert.DoesNotContain("PNR_PROXY_HOST='", script);
         Assert.Contains("ip route show default", script);
     }
@@ -1087,7 +1087,7 @@ public class GuardTests : IDisposable
         Assert.True(d1.ProxyEnvWritten);
 
         // startup script contents: the app port and the distro user
-        var payload = ExtractBase64Payload(root.Script, "SCRIPT=\"/etc/wsl.d/startup/10-claude-proxy.sh\"");
+        var payload = ExtractBase64Payload(root.Script, "SCRIPT='/etc/wsl.d/startup/10-claude-proxy.sh'");
         var script = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
         Assert.Contains("USER_NAME='u1'", script);
         Assert.Contains("PORT=18082", script);
@@ -1112,7 +1112,7 @@ public class GuardTests : IDisposable
         // codex proxy env contents: the marker, the port and the bypass zones of the config
         var envPass = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("ENVFILE="));
         Assert.Contains("pnr_bak \"$ENVFILE\" BACKUP", envPass.Script);
-        var envPayload = ExtractBase64Payload(envPass.Script, "ENVFILE=\"/etc/profile.d/20-pnr-codex-proxy.sh\"");
+        var envPayload = ExtractBase64Payload(envPass.Script, "ENVFILE='/etc/profile.d/20-pnr-codex-proxy.sh'");
         var envScript = Encoding.UTF8.GetString(Convert.FromBase64String(envPayload));
         Assert.Contains("wsl.proxyEnvPath", envScript);
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", envScript);
@@ -1542,6 +1542,54 @@ public class GuardTests : IDisposable
         Assert.Contains("PROXYENV=missing", probe);
     }
 
+    [Fact]
+    public async Task WslProbeOmitsTheStartupScriptBlockForAnEmptyPath()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => WslProbeInSync("u1") };
+        var config = WslConfig("on", ("d1", "u1"));
+        config.Wsl.StartupScriptPath = "";
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.ReadAsync(CancellationToken.None);
+
+        var probe = Assert.Single(runner.Probes).Script;
+        Assert.DoesNotContain("'^PORT='", probe);
+        Assert.DoesNotContain("[ -f  ]", probe);
+        Assert.DoesNotContain("[ -f '' ]", probe);
+        Assert.Contains("echo SCRIPT=missing", probe);
+    }
+
+    [Fact]
+    public async Task WslScriptsQuoteConfiguredPaths()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n",
+            WriteOutput = "RUNNER=written\nWSLCONF=written\nSETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n",
+        };
+        var config = WslConfig("on", ("d1", "u1"));
+        config.Wsl.StartupScriptPath = "/etc/wsl d/startup/10 it's.sh";
+        config.Wsl.ProxyEnvPath = "/etc/profile.d/20 pnr.sh";
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.SyncAsync(CancellationToken.None);
+
+        var probe = runner.Probes[0].Script;
+        Assert.Contains("if [ -f '/etc/wsl d/startup/10 it'\\''s.sh' ]; then", probe);
+        Assert.Contains("grep -E '^PORT=' '/etc/wsl d/startup/10 it'\\''s.sh'", probe);
+        Assert.Contains("if [ -f '/etc/profile.d/20 pnr.sh' ]; then", probe);
+        Assert.Contains("if [ -f '/etc/wsl d/startup.sh' ]; then", probe);
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("SCRIPT='/etc/wsl d/startup/10 it'\\''s.sh'"));
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("ls -1t \"$SCRIPT\".pnr-bak-*"));
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("ENVFILE='/etc/profile.d/20 pnr.sh'"));
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("ls -1t \"$ENVFILE\".pnr-bak-*"));
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("RUNNER='/etc/wsl d/startup.sh'"));
+        Assert.All(runner.Scripts, s => Assert.DoesNotContain('\r', s.Script));
+        Assert.DoesNotContain('\r', probe);
+    }
+
     [Theory]
     [InlineData("/etc/wsl.d/startup/10-claude-proxy.sh", true)]
     [InlineData("/opt/wsl/startup/pnr.sh", true)]
@@ -1596,7 +1644,7 @@ public class GuardTests : IDisposable
         Assert.DoesNotContain("USERCMD=", boot.Script);
         Assert.Contains("pnr_bak \"$RUNNER\" BACKUP_RUNNER", boot.Script); // the deduplicating backup helper
         Assert.Contains("pnr_bak \"$WSLCONF\" BACKUP_WSLCONF", boot.Script);
-        var runnerPayload = ExtractBase64Payload(boot.Script, "RUNNER=\"/etc/wsl.d/startup.sh\"");
+        var runnerPayload = ExtractBase64Payload(boot.Script, "RUNNER='/etc/wsl.d/startup.sh'");
         var runnerFile = Encoding.UTF8.GetString(Convert.FromBase64String(runnerPayload));
         Assert.StartsWith("#!/bin/bash", runnerFile);
         Assert.Contains(WslConfigGuard.BootRunnerMarker, runnerFile);
@@ -1696,7 +1744,7 @@ public class GuardTests : IDisposable
         Assert.Equal("/etc/wsl.conf.pnr-bak-20261014-120000", Assert.Single(d1.BootBackups ?? []));
 
         var boot = Assert.Single(runner.Scripts, s => s.User == "root" && s.Script.Contains("USERCMD="));
-        var userPayload = ExtractBase64Payload(boot.Script, "USERCMD=\"/etc/wsl.d/startup/00-user-boot-command.sh\"");
+        var userPayload = ExtractBase64Payload(boot.Script, "USERCMD='/etc/wsl.d/startup/00-user-boot-command.sh'");
         var userScript = Encoding.UTF8.GetString(Convert.FromBase64String(userPayload));
         Assert.EndsWith("docker start things", userScript); // the user's command, verbatim
         Assert.Equal("755", GetChmodTarget(boot.Script, "USERCMD="));

@@ -438,7 +438,7 @@ public sealed class WslConfigGuard(
                     echo SETTINGS=written
                 fi
                 rm -f "$NEW"
-                ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                ls -1t "$HOME"/.claude/settings.json.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
                 find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
                 echo PNR=ok
                 """);
@@ -449,7 +449,7 @@ public sealed class WslConfigGuard(
             var scriptContent = BuildStartupScript(distro.User, ClaudeEnvValues.Port(config), ClaudeEnvValues.WslFixedHost(config));
             var rootScript = NormalizeLf($$"""
                 {{PnrBakFn}}
-                SCRIPT="{{scriptPath}}"
+                SCRIPT={{BashQuote(scriptPath)}}
                 NEW="/tmp/.pnr-startup-{{stamp}}"
                 echo '{{DistroPayload(scriptContent)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$SCRIPT")"
@@ -462,8 +462,8 @@ public sealed class WslConfigGuard(
                     echo SCRIPT=written
                 fi
                 rm -f "$NEW"
-                ls -1t {{scriptPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
-                find "$(dirname "{{scriptPath}}")" -maxdepth 1 -name '{{Path.GetFileName(scriptPath)}}.bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -type f -delete
+                ls -1t "$SCRIPT".pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
+                find "$(dirname "$SCRIPT")" -maxdepth 1 -name "$(basename "$SCRIPT").bak-2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]" -type f -delete
                 echo PNR=ok
                 """);
             scriptOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], rootScript, Encoding.UTF8, ct);
@@ -484,7 +484,7 @@ public sealed class WslConfigGuard(
                 ClaudeEnvValues.WslFixedHost(config));
             var envScript = NormalizeLf($$"""
                 {{PnrBakFn}}
-                ENVFILE="{{envPath}}"
+                ENVFILE={{BashQuote(envPath)}}
                 NEW="/tmp/.pnr-codexenv-{{stamp}}"
                 echo '{{DistroPayload(envContent)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$ENVFILE")"
@@ -497,7 +497,7 @@ public sealed class WslConfigGuard(
                     echo ENVFILE=written
                 fi
                 rm -f "$NEW"
-                ls -1t {{envPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                ls -1t "$ENVFILE".pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
                 echo PNR=ok
                 """);
             var envOutput = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], envScript, Encoding.UTF8, ct);
@@ -532,6 +532,12 @@ public sealed class WslConfigGuard(
     /// line endings must not reach the distros.
     /// </summary>
     internal static string NormalizeLf(string text) => text.Replace("\r\n", "\n").Replace("\r", "\n");
+
+    /// <summary>
+    /// A config value as one bash single-quoted word: spaces, `$`, backquotes and globs stay
+    /// literal, an embedded single quote is closed, escaped and reopened ('\'').
+    /// </summary>
+    internal static string BashQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
     /// <summary>The base64 payload of a file destined for inside a distro, LF-normalized.</summary>
     internal static string DistroPayload(string content) =>
@@ -599,14 +605,27 @@ public sealed class WslConfigGuard(
         var runnerPath = BootRunnerPath(scriptPath);
 
         // An empty path would make `[ -f  ]` true and `grep -E …` with no file read the rest of
-        // the probe script from stdin, so the block exists only for a configured path.
+        // the probe script from stdin, so a block exists only for a configured path; the paths
+        // are single-quoted words, so a path with spaces stays one argument.
+        var scriptProbe = string.IsNullOrWhiteSpace(scriptPath)
+            ? "echo SCRIPT=missing"
+            : $"""
+            if [ -f {BashQuote(scriptPath)} ]; then
+                echo SCRIPT=present
+                grep -E '^PORT=' {BashQuote(scriptPath)} 2>/dev/null || true
+                grep -E '^PNR_PROXY_HOST=' {BashQuote(scriptPath)} 2>/dev/null || true
+                grep -E '^USER_NAME=' {BashQuote(scriptPath)} 2>/dev/null || true
+            else
+                echo SCRIPT=missing
+            fi
+            """;
         var envProbe = string.IsNullOrWhiteSpace(envPath)
             ? "echo PROXYENV=missing"
             : $"""
-            if [ -f {envPath} ]; then
+            if [ -f {BashQuote(envPath)} ]; then
                 echo PROXYENV=present
-                grep -E '^PNR_CODEX_PROXY_PORT=' {envPath} 2>/dev/null || true
-                grep -E '^PNR_CODEX_PROXY_HOST=' {envPath} 2>/dev/null || true
+                grep -E '^PNR_CODEX_PROXY_PORT=' {BashQuote(envPath)} 2>/dev/null || true
+                grep -E '^PNR_CODEX_PROXY_HOST=' {BashQuote(envPath)} 2>/dev/null || true
             else
                 echo PROXYENV=missing
             fi
@@ -614,17 +633,10 @@ public sealed class WslConfigGuard(
         var probe = NormalizeLf($"""
             PNR_HOME=$(getent passwd '{distro.User}' | cut -d: -f6)
             [ -n "$PNR_HOME" ] || PNR_HOME="/home/{distro.User}"
-            if [ -f {scriptPath} ]; then
-                echo SCRIPT=present
-                grep -E '^PORT=' {scriptPath} 2>/dev/null || true
-                grep -E '^PNR_PROXY_HOST=' {scriptPath} 2>/dev/null || true
-                grep -E '^USER_NAME=' {scriptPath} 2>/dev/null || true
-            else
-                echo SCRIPT=missing
-            fi
+            {scriptProbe}
             {envProbe}
-            if [ -f {runnerPath} ]; then
-                if grep -q '{BootRunnerMarker}' {runnerPath} 2>/dev/null; then
+            if [ -f {BashQuote(runnerPath)} ]; then
+                if grep -q '{BootRunnerMarker}' {BashQuote(runnerPath)} 2>/dev/null; then
                     echo RUNNER=ours
                 else
                     echo RUNNER=foreign
@@ -1055,7 +1067,7 @@ public sealed class WslConfigGuard(
         var sb = new StringBuilder();
         sb.Append($$"""
             {{PnrBakFn}}
-            RUNNER="{{runnerPath}}"
+            RUNNER={{BashQuote(runnerPath)}}
             NEW="/tmp/.pnr-runner-{{stamp}}"
             echo '{{DistroPayload(BuildBootRunner(startupDir))}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
             mkdir -p "$(dirname "$RUNNER")"
@@ -1068,14 +1080,14 @@ public sealed class WslConfigGuard(
                 echo RUNNER=written
             fi
             rm -f "$NEW"
-            ls -1t {{runnerPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+            ls -1t "$RUNNER".pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
 
             """);
 
         if (plan == WslBootPlan.AdoptForeignCommand && !string.IsNullOrWhiteSpace(userCommand))
         {
             sb.Append($$"""
-                USERCMD="{{userCommandPath}}"
+                USERCMD={{BashQuote(userCommandPath)}}
                 NEW="/tmp/.pnr-usercmd-{{stamp}}"
                 echo '{{DistroPayload(BuildUserCommandScript(userCommand))}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
                 mkdir -p "$(dirname "$USERCMD")"
@@ -1088,7 +1100,7 @@ public sealed class WslConfigGuard(
                     echo USERCMD=written
                 fi
                 rm -f "$NEW"
-                ls -1t {{userCommandPath}}.pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+                ls -1t "$USERCMD".pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
 
                 """);
         }
