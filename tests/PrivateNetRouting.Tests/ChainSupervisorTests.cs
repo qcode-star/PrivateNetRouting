@@ -239,6 +239,62 @@ public class ChainSupervisorTests : IDisposable
 
         Assert.Equal(1, lookups); // only the login needs it — up takes the server from the node state
         Assert.Contains("cli.login:https://system.example/control", _calls);
+        Assert.Equal("https://system.example/control", cli.LastUpServer); // up mentions the server the login bound
+    }
+
+    /// <summary>
+    /// A downed node bound to a custom control server: `up` must mention it, or tailscale rejects
+    /// the up ("requires mentioning all non-default flags"). The node's own prefs win over the
+    /// system tailscale's guess.
+    /// </summary>
+    [Fact]
+    public async Task UpMentionsTheControlServerTheNodeIsBoundTo()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "Stopped", ControlUrl = "https://node.example/control" };
+        var supervisor = Create(
+            cli: cli,
+            systemControlUrl: _ => Task.FromResult<string?>("https://system.example/control"));
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.DoesNotContain(_calls, c => c.StartsWith("cli.login", StringComparison.Ordinal));
+        Assert.Equal("https://node.example/control", cli.LastUpServer);
+    }
+
+    [Fact]
+    public async Task UpFallsBackToTheSystemControlServerWhenTheNodeIsSilent()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "Stopped" };
+        var supervisor = Create(
+            cli: cli,
+            systemControlUrl: _ => Task.FromResult<string?>("https://system.example/control"));
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Equal("https://system.example/control", cli.LastUpServer);
+    }
+
+    [Fact]
+    public async Task UpMentionsTheConfiguredLoginServer()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "Stopped", ControlUrl = "https://node.example/control" };
+        var supervisor = Create(cli: cli, loginServer: "https://config.example/control");
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Equal("https://config.example/control", cli.LastUpServer);
+    }
+
+    [Fact]
+    public async Task UpWithoutAnyKnownServerLeavesTheDefault()
+    {
+        var cli = new FakeCli(_calls) { BackendState = "Stopped" };
+        var supervisor = Create(cli: cli);
+
+        await supervisor.EnsureRunningAsync(null, CancellationToken.None);
+
+        Assert.Contains("cli.up", _calls);
+        Assert.Null(cli.LastUpServer);
     }
 
     [Fact]
@@ -1041,9 +1097,18 @@ public class ChainSupervisorTests : IDisposable
         public Task<string?> GetBackendStateAsync(CancellationToken ct) =>
             Task.FromResult(BackendState);
 
-        public Task<CliResult> UpAsync(CancellationToken ct)
+        /// <summary>The node's own ControlURL (its prefs); a login binds the node to its server.</summary>
+        public string? ControlUrl { get; set; }
+
+        /// <summary>The login-server argument of the last up; null — the default control server.</summary>
+        public string? LastUpServer { get; private set; }
+
+        public Task<string?> GetControlUrlAsync(CancellationToken ct) => Task.FromResult(ControlUrl);
+
+        public Task<CliResult> UpAsync(string? loginServer, CancellationToken ct)
         {
             calls.Add("cli.up");
+            LastUpServer = loginServer;
             BackendState = BackendStateAfterUp ?? "Running";
             return Task.FromResult(new CliResult(0, "up"));
         }
@@ -1065,6 +1130,8 @@ public class ChainSupervisorTests : IDisposable
             {
                 throw LoginThrows;
             }
+
+            ControlUrl = loginServer;
 
             if (AuthUrl is not null)
             {

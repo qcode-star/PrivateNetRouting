@@ -54,7 +54,9 @@ the authentication page in the browser (the URL is also in the chain card's step
 the log) and continues the bring-up once the device is approved. The coordination server comes
 from `chain.tailscale.loginServer`; when it is empty, the machine's system-wide tailscale is
 asked for its own (a read-only read of its prefs — the system service only has to answer at
-that moment) and the node state remembers the answer afterwards. The login is one-time — the
+that moment) and the node state remembers the answer afterwards: every later `tailscale up`
+mentions the control server the node is bound to (tailscale rejects an up that leaves a
+non-default one out). The login is one-time — the
 key lives in the statedir (`chain.tailscale.loginWaitSeconds` bounds the wait). Migrating from
 a system-wide tailscale: disable the service's autostart (do not uninstall — the application
 uses its binaries) and raise the chain; the sidecar node is a separate identity and logs in

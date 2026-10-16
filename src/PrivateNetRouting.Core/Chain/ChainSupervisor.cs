@@ -316,7 +316,7 @@ public sealed class ChainSupervisor(
                         await LoginNodeAsync(progress, ct);
                     }
 
-                    var up = await cli.UpAsync(ct);
+                    var up = await cli.UpAsync(await ResolveUpControlUrlAsync(ct), ct);
                     state = await cli.GetBackendStateAsync(ct);
                     if (state != "Running")
                     {
@@ -558,6 +558,23 @@ public sealed class ChainSupervisor(
             Report(progress, "Node", ChainStepStatus.Active,
                 "authenticated — waiting for the tailnet's device approval");
         }
+    }
+
+    /// <summary>
+    /// The control server `up` has to mention: tailscale rejects an up that leaves out a
+    /// non-default control server the node is bound to ("requires mentioning all non-default
+    /// flags"). chain.tailscale.loginServer when set; otherwise the node's own current ControlURL
+    /// (the login may have picked the system tailscale's one), and — when the node does not say —
+    /// the system tailscale's control server, the same guess the login makes.
+    /// </summary>
+    private async Task<string?> ResolveUpControlUrlAsync(CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(config.Tailscale.LoginServer))
+        {
+            return config.Tailscale.LoginServer;
+        }
+
+        return await cli.GetControlUrlAsync(ct) ?? await _systemControlUrl(ct);
     }
 
     /// <summary>A step into the UI/CLI progress; also a Debug line to the log (the full bring-up picture).</summary>

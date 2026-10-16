@@ -18,7 +18,18 @@ public interface ISidecarCli
     /// <summary>Node BackendState from status --json; null — the CLI did not respond.</summary>
     Task<string?> GetBackendStateAsync(CancellationToken ct);
 
-    Task<CliResult> UpAsync(CancellationToken ct);
+    /// <summary>
+    /// The control server the node itself is bound to ("ControlURL" of `debug prefs` over our
+    /// socket); null — the daemon did not answer or the prefs hold none yet (a fresh statedir).
+    /// </summary>
+    Task<string?> GetControlUrlAsync(CancellationToken ct);
+
+    /// <summary>
+    /// `tailscale up` with the fixed flag set; <paramref name="loginServer"/> — the control server
+    /// the node uses (null — the default one). tailscale rejects an up that leaves out a
+    /// non-default control server the node is bound to, so the caller passes the real one.
+    /// </summary>
+    Task<CliResult> UpAsync(string? loginServer, CancellationToken ct);
 
     Task<CliResult> DownAsync(CancellationToken ct);
 
@@ -111,7 +122,20 @@ public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCl
         }
     }
 
-    public async Task<CliResult> UpAsync(CancellationToken ct)
+    public async Task<string?> GetControlUrlAsync(CancellationToken ct)
+    {
+        try
+        {
+            var result = await RunAsync(["debug", "prefs"], ct);
+            return result.Ok ? SystemControlUrlFinder.ParseControlUrl(result.Output) : null;
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    public async Task<CliResult> UpAsync(string? loginServer, CancellationToken ct)
     {
         // set-like flag set only: up overwrites the unspecified with defaults
         var arguments = new List<string>
@@ -121,9 +145,9 @@ public sealed partial class SidecarCli(ChainTailscaleConfig config) : ISidecarCl
             "--accept-routes",
             $"--timeout={config.UpTimeoutSeconds}s",
         };
-        if (!string.IsNullOrWhiteSpace(config.LoginServer))
+        if (!string.IsNullOrWhiteSpace(loginServer))
         {
-            arguments.Add($"--login-server={config.LoginServer}");
+            arguments.Add($"--login-server={loginServer}");
         }
 
         return await RunAsync(arguments, ct);
