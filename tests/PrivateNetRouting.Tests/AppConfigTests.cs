@@ -41,7 +41,8 @@ public class AppConfigTests : IDisposable
         AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
 
         var written = File.ReadAllText(_path);
-        var root = System.Text.Json.Nodes.JsonNode.Parse(written)!.AsObject();
+        Assert.Contains("// the owner's note", written); // the comment survives the edit
+        var root = ParseWithComments(written);
         Assert.Equal("ru", (string?)root["ui"]!["language"]);
         Assert.Equal("Привет <&>", (string?)root["myCustomKey"]!["keep"]); // unknown key kept, not escaped
         Assert.Equal("127.0.0.1:19999", (string?)root["forwardProxy"]!["listen"]);
@@ -50,6 +51,102 @@ public class AppConfigTests : IDisposable
         Assert.Null(root["guard"]);
         Assert.Null(root["forwardProxy"]!["bindWslGateway"]);
         Assert.Equal(["ui", "myCustomKey", "forwardProxy"], root.Select(p => p.Key).ToArray());
+    }
+
+    private static System.Text.Json.Nodes.JsonObject ParseWithComments(string json) =>
+        System.Text.Json.Nodes.JsonNode.Parse(
+            json,
+            documentOptions: new System.Text.Json.JsonDocumentOptions
+            {
+                CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            })!.AsObject();
+
+    /// <summary>A config copied from the commented template keeps every comment and its layout through a UI write.</summary>
+    [Fact]
+    public void UpdateEditsOnlyTheValueSpanAndKeepsCommentsAndFormatting()
+    {
+        const string original = """
+            {
+              // Interface.
+              "ui": {
+                // auto | en | ru
+                "language":   "auto", /* spacing kept */
+                "chainCardExpanded": true,
+              },
+              "watchdog": { "checkSeconds": 300 }, // inline section
+              "forwardProxy": {
+                "listen": "127.0.0.1:18081"
+              }
+            }
+            """;
+        File.WriteAllText(_path, original);
+
+        AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
+
+        Assert.Equal(original.Replace("\"language\":   \"auto\"", "\"language\":   \"ru\""), File.ReadAllText(_path));
+    }
+
+    [Fact]
+    public void UpdateEditsANestedKeyInPlace()
+    {
+        const string original = "{\r\n  // c\r\n  \"claude\": {\r\n    \"update\": {\r\n      \"chunkRetries\": 3 // retries\r\n    }\r\n  }\r\n}\r\n";
+        File.WriteAllText(_path, original);
+
+        AppConfigStore.Update(config => config.Claude.Update.ChunkRetries = 7, _path);
+
+        Assert.Equal(original.Replace("\"chunkRetries\": 3", "\"chunkRetries\": 7"), File.ReadAllText(_path));
+    }
+
+    [Fact]
+    public void UpdateAddsAMissingKeyMinimally()
+    {
+        const string original = """
+            {
+              // keep
+              "ui": {
+                "language": "en"
+              },
+              "watchdog": { "checkSeconds": 300 }
+            }
+            """;
+        File.WriteAllText(_path, original);
+        var defaults = new AppConfig();
+
+        AppConfigStore.Update(
+            config =>
+            {
+                config.Ui.ChainCardExpanded = !defaults.Ui.ChainCardExpanded; // a missing key of a multi-line object
+                config.Watchdog.AutoStart = !defaults.Watchdog.AutoStart; // a missing key of an inline object
+                config.Claude.Update.ChunkRetries = 9; // a whole missing section
+            },
+            _path);
+
+        var written = File.ReadAllText(_path);
+        Assert.Contains("// keep", written);
+        Assert.Contains("\"language\": \"en\",\n    \"chainCardExpanded\": " + (!defaults.Ui.ChainCardExpanded).ToString().ToLowerInvariant(), written.Replace("\r\n", "\n"));
+        Assert.Contains("{ \"checkSeconds\": 300, \"autoStart\": " + (!defaults.Watchdog.AutoStart).ToString().ToLowerInvariant() + " }", written);
+        var root = ParseWithComments(written);
+        Assert.Equal(9, (int)root["claude"]!["update"]!["chunkRetries"]!);
+        Assert.Single(root["claude"]!.AsObject()); // only the changed leaf, no defaults pinned
+        var reloaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal(!defaults.Ui.ChainCardExpanded, reloaded.Ui.ChainCardExpanded);
+        Assert.Equal(!defaults.Watchdog.AutoStart, reloaded.Watchdog.AutoStart);
+        Assert.Equal(9, reloaded.Claude.Update.ChunkRetries);
+    }
+
+    /// <summary>A path the text cannot hold surgically is refused, so Update falls back to the full rewrite.</summary>
+    [Fact]
+    public void TextPatchRefusesAPathThroughANonObject()
+    {
+        Assert.Throws<InvalidDataException>(() => JsonTextPatch.Apply(
+            "{ \"a\": 1 }", [new JsonTextPatch.Edit(["a", "b"], System.Text.Json.Nodes.JsonValue.Create(2))]));
+        Assert.Equal(
+            "{ \"A\": 2 /* c */ }",
+            JsonTextPatch.Apply("{ \"A\": 1 /* c */ }", [new JsonTextPatch.Edit(["a"], System.Text.Json.Nodes.JsonValue.Create(2))]));
+        Assert.Equal(
+            "{ \"a\": 1, \"a\": 3 }", // of duplicates the last one is what the loader keeps
+            JsonTextPatch.Apply("{ \"a\": 1, \"a\": 2 }", [new JsonTextPatch.Edit(["a"], System.Text.Json.Nodes.JsonValue.Create(3))]));
     }
 
     [Fact]

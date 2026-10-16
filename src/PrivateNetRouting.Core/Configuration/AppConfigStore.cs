@@ -59,23 +59,25 @@ public static class AppConfigStore
 
     /// <summary>
     /// Point change of the config on disk (used by UI settings, e.g. language switching). Only
-    /// what the mutation actually changed is written: the file is read as raw JSON, the typed
-    /// model is compared before and after <paramref name="mutate"/>, and the differing values are
-    /// patched into the raw tree. Unknown keys, keys the user left out (new defaults of later
-    /// releases keep applying) and the key order survive; a mutation that changes nothing does
-    /// not touch the file at all. Environment variables are not expanded on this path, so
-    /// %APPDATA% in paths is never saved expanded.
+    /// what the mutation actually changed is written: the typed model is compared before and
+    /// after <paramref name="mutate"/>, and the differing values are edited into the file text
+    /// surgically (JsonTextPatch) — comments, formatting, unknown keys, keys the user left out
+    /// (new defaults of later releases keep applying) and the key order survive; a mutation that
+    /// changes nothing does not touch the file at all. Should the surgical edit fail (or not
+    /// read back as the intended model), the raw tree is patched and rewritten instead — the
+    /// values survive, the comments do not — and <paramref name="log"/> says why. Environment
+    /// variables are not expanded on this path, so %APPDATA% in paths is never saved expanded.
     /// </summary>
-    public static void Update(Action<AppConfig> mutate, string? path = null)
+    public static void Update(Action<AppConfig> mutate, string? path = null, Action<string>? log = null)
     {
         path ??= GetDefaultConfigPath();
         lock (WriteGate)
         {
-            UpdateLocked(mutate, path);
+            UpdateLocked(mutate, path, log ?? (message => System.Diagnostics.Trace.TraceWarning(message)));
         }
     }
 
-    private static void UpdateLocked(Action<AppConfig> mutate, string path)
+    private static void UpdateLocked(Action<AppConfig> mutate, string path, Action<string> log)
     {
         if (!File.Exists(path))
         {
@@ -86,18 +88,77 @@ public static class AppConfigStore
         }
 
         var text = ReadShared(path);
-        var raw = JsonNode.Parse(text, documentOptions: RawDocumentOptions) as JsonObject
-            ?? throw new InvalidDataException($"config {path} is empty or corrupted");
         var config = Deserialize(text, path);
         var before = (JsonObject)JsonSerializer.SerializeToNode(config, JsonOptions)!;
         mutate(config);
         var after = (JsonObject)JsonSerializer.SerializeToNode(config, JsonOptions)!;
-        if (!Patch(raw, before, after))
+        var edits = new List<JsonTextPatch.Edit>();
+        Diff(before, after, [], edits);
+        if (edits.Count == 0)
         {
             return;
         }
 
-        WriteAtomic(path, raw.ToJsonString(JsonOptions));
+        string? patched;
+        try
+        {
+            patched = JsonTextPatch.Apply(text, edits);
+            var readBack = (JsonObject)JsonSerializer.SerializeToNode(Deserialize(patched, path), JsonOptions)!;
+            if (!JsonNode.DeepEquals(readBack, after))
+            {
+                log($"config: the in-place edit of {path} does not read back as the intended values — rewriting the file (its comments are lost)");
+                patched = null;
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or ArgumentException or InvalidOperationException)
+        {
+            log($"config: the in-place edit of {path} failed, rewriting the file (its comments are lost): {ex.Message}");
+            patched = null;
+        }
+
+        if (patched is null)
+        {
+            var raw = JsonNode.Parse(text, documentOptions: RawDocumentOptions) as JsonObject
+                ?? throw new InvalidDataException($"config {path} is empty or corrupted");
+            if (!Patch(raw, before, after))
+            {
+                return;
+            }
+
+            patched = raw.ToJsonString(JsonOptions);
+        }
+
+        WriteAtomic(path, patched);
+    }
+
+    /// <summary>The changed leaves between two serializations of the model, as key paths; a removed key becomes null.</summary>
+    private static void Diff(JsonObject before, JsonObject after, List<string> prefix, List<JsonTextPatch.Edit> edits)
+    {
+        foreach (var (key, afterValue) in after)
+        {
+            before.TryGetPropertyValue(key, out var beforeValue);
+            if (beforeValue is not null && JsonNode.DeepEquals(beforeValue, afterValue))
+            {
+                continue;
+            }
+
+            List<string> path = [.. prefix, key];
+            if (beforeValue is JsonObject beforeObject && afterValue is JsonObject afterObject)
+            {
+                Diff(beforeObject, afterObject, path, edits);
+                continue;
+            }
+
+            edits.Add(new JsonTextPatch.Edit(path, afterValue?.DeepClone()));
+        }
+
+        foreach (var (key, _) in before)
+        {
+            if (!after.ContainsKey(key))
+            {
+                edits.Add(new JsonTextPatch.Edit([.. prefix, key], null));
+            }
+        }
     }
 
     /// <summary>Applies the differences between two serializations of the model onto the raw file tree.</summary>

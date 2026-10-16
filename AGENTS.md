@@ -279,7 +279,10 @@ src/
                              # commands refuse with a note; ui.language, ui.checkUpdatesOnStart,
                              # ui.chainCardExpanded, ui.guardsCardExpanded),
                              # AppLanguage (auto → system → en),
-                             # loading from %APPDATA% (the template is config/*.example.json)
+                             # loading from %APPDATA% (the template is config/*.example.json);
+                             # UI writes (AppConfigStore.Update) edit only the changed values in
+                             # the file text (JsonTextPatch: comments and layout survive), one
+                             # writer at a time, through a symlink to its target, by File.Replace
     Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info); one
                              # shared file per log (no PID fallback); size rotation at start and
                              # during writes (postponed while the chain is held) + manual RotateNow
