@@ -255,6 +255,36 @@ public class LauncherTests : IDisposable
         }
     }
 
+    /// <summary>A tracked process that exits on its own stays "gone" through its held handle: no late kill, no error.</summary>
+    [Fact]
+    public async Task RealCloserHoldsTheHandleOfATrackedProcessThatExits()
+    {
+        using var tracked = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping", "-n 60 127.0.0.1")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+        using var closer = new WindowsRunningAppCloser();
+        closer.Track([tracked.Id]);
+
+        tracked.Kill(entireProcessTree: true);
+        await tracked.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+
+        Assert.False(closer.Exists(tracked.Id));
+        closer.KillTree(tracked.Id); // acts on the held handle of the exited process only
+        Assert.False(closer.CloseGracefully(tracked.Id));
+    }
+
+    [Theory]
+    [InlineData("IME", true)]
+    [InlineData("MSCTFIME UI", true)]
+    [InlineData("msctfime ui", true)]
+    [InlineData("Chrome_WidgetWin_1", false)]
+    [InlineData("", false)]
+    public void TheRestartCloseSkipsTheSystemImeWindows(string className, bool skipped) =>
+        Assert.Equal(skipped, WindowCloser.IsSystemWindowClass(className));
+
     [Fact]
     public async Task RunningClaudeWithOurProxyIsOnlyReported()
     {

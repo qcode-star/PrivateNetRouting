@@ -56,12 +56,17 @@ public interface IRunningAppCloser
 /// WM_CLOSE to the top-level windows of a process. Unlike Process.CloseMainWindow, which only
 /// finds a visible, unowned main window, this reaches every window of the process — an
 /// Electron app hidden to the tray still has its (hidden) main window, and is asked to close too.
+/// The input-method windows the system creates in every GUI thread ("IME", "MSCTFIME UI") are
+/// skipped: they are not the application's, and closing them only breaks its text input.
 /// </summary>
 internal static class WindowCloser
 {
     private const uint WmClose = 0x0010;
 
     private delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+
+    /// <summary>Window classes the system owns in every GUI thread: never asked to close.</summary>
+    private static readonly string[] SystemWindowClasses = ["IME", "MSCTFIME UI"];
 
     /// <summary>Posts WM_CLOSE to every top-level window of the process, hidden ones included; returns how many.</summary>
     public static int PostClose(int processId)
@@ -71,7 +76,9 @@ internal static class WindowCloser
             (hwnd, lParam) =>
             {
                 GetWindowThreadProcessId(hwnd, out var owner);
-                if (owner == (uint)processId && PostMessage(hwnd, WmClose, 0, 0))
+                if (owner == (uint)processId
+                    && !IsSystemWindowClass(ClassName(hwnd))
+                    && PostMessage(hwnd, WmClose, 0, 0))
                 {
                     posted++;
                 }
@@ -81,6 +88,20 @@ internal static class WindowCloser
             0);
         return posted;
     }
+
+    /// <summary>True for the IME windows the system adds to a GUI thread (not the application's own).</summary>
+    internal static bool IsSystemWindowClass(string className) =>
+        SystemWindowClasses.Contains(className, StringComparer.OrdinalIgnoreCase);
+
+    private static string ClassName(nint hwnd)
+    {
+        var buffer = new char[256];
+        var length = GetClassName(hwnd, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : string.Empty;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(nint hwnd, char[] className, int maxCount);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
@@ -98,11 +119,16 @@ internal static class WindowCloser
 /// Closer over real processes; no special rights the applications do not have themselves.
 /// <see cref="Track"/> opens a handle per process of the scan and keeps it: the handle keeps
 /// identifying the original process after its PID has been reused, so a late kill can never hit
-/// a stranger — a process that exited is "gone", and Kill on its handle only throws.
+/// a stranger — a process that exited is "gone", and Kill on its handle only throws. A process
+/// whose handle cannot be opened (access denied) is not acted on at all — no close, no kill, the
+/// PID is not trusted; while a process holds that PID it is reported as a survivor.
 /// </summary>
 public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
 {
     private readonly Dictionary<int, Process> _tracked = [];
+
+    /// <summary>Processes of the scan that could not be pinned (access denied): reported, never acted on.</summary>
+    private readonly HashSet<int> _unpinned = [];
 
     public void Track(IReadOnlyList<int> processIds)
     {
@@ -111,17 +137,35 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
             ReleaseTracked();
             foreach (var processId in processIds)
             {
+                Process process;
                 try
                 {
-                    var process = Process.GetProcessById(processId);
-                    if (!_tracked.TryAdd(processId, process))
-                    {
-                        process.Dispose();
-                    }
+                    process = Process.GetProcessById(processId);
                 }
-                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+                catch (ArgumentException)
                 {
-                    // gone already, or not ours to open: nothing to pin
+                    continue; // gone already: nothing to pin
+                }
+
+                try
+                {
+                    // GetProcessById opens nothing: the handle is opened (and held) here
+                    ProcessOps.PinHandle(process);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+                {
+                    process.Dispose();
+                    if (ex is Win32Exception)
+                    {
+                        _unpinned.Add(processId); // alive but not ours to open
+                    }
+
+                    continue;
+                }
+
+                if (!_tracked.TryAdd(processId, process))
+                {
+                    process.Dispose();
                 }
             }
         }
@@ -142,6 +186,11 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
 
     public bool Exists(int processId)
     {
+        if (IsUnpinned(processId))
+        {
+            return PidIsRunning(processId);
+        }
+
         try
         {
             var process = Handle(processId);
@@ -178,6 +227,28 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
         }
     }
 
+    private bool IsUnpinned(int processId)
+    {
+        lock (_tracked)
+        {
+            return _unpinned.Contains(processId);
+        }
+    }
+
+    /// <summary>Whether some process holds the PID (an unpinned one cannot be told from a stranger, it is only reported).</summary>
+    private static bool PidIsRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>The pinned process of this PID; a PID that was never tracked is not acted on.</summary>
     private Process? Handle(int processId)
     {
@@ -195,6 +266,7 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
         }
 
         _tracked.Clear();
+        _unpinned.Clear();
     }
 }
 public sealed record RunningAppCloseResult(int ClosedGracefully, int Killed, IReadOnlyList<int> Survived)
