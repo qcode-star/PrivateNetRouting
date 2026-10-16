@@ -338,6 +338,24 @@ public class GuardTests : IDisposable
         return config;
     }
 
+    [Theory]
+    [InlineData("""{ "env": "http://old:1", "other": 1 }""")]
+    [InlineData("""{ "env": null }""")]
+    [InlineData("""{ "env": [1, 2] }""")]
+    [InlineData("""[ { "env": {} } ]""")]
+    public void SettingsSyncRefusesANonObjectRootOrEnvAndLeavesTheFileUntouched(string content)
+    {
+        // the distro boot script refuses such a file; the Windows side must not replace it either
+        var config = SettingsConfig();
+        File.WriteAllText(config.Claude.SettingsPath, content);
+        var guard = new ClaudeSettingsGuard(config);
+
+        Assert.Throws<InvalidDataException>(() => guard.Sync());
+
+        Assert.Equal(content, File.ReadAllText(config.Claude.SettingsPath));
+        Assert.Empty(Directory.GetFiles(_tempDir, "settings.json.pnr-bak-*"));
+    }
+
     [Fact]
     public void SettingsSyncPreservesKeysAndBackups()
     {
@@ -1561,6 +1579,45 @@ public class GuardTests : IDisposable
         Assert.Contains("\"$PNR_HOME/.claude/settings.json\"", probe);
         Assert.DoesNotContain("/home/root/.claude", probe); // root's home is /root
         Assert.Contains("USER_HOME=$(getent passwd \"$USER_NAME\"", WslConfigGuard.BuildStartupScript("root", 18081));
+    }
+
+    [Fact]
+    public async Task WslUserNameWithAQuoteStaysOneBashWord()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => WslProbeInSync("o'neil") };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "o'neil")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.ReadAsync(CancellationToken.None);
+
+        var probe = Assert.Single(runner.Probes).Script;
+        Assert.Contains("getent passwd 'o'\\''neil' | cut", probe);
+        Assert.Contains("PNR_HOME='/home/o'\\''neil'", probe);
+        var script = WslConfigGuard.BuildStartupScript("o'neil", 18081);
+        Assert.Contains("USER_NAME='o'\\''neil'\n", script);
+        // the status reads the name back unescaped
+        Assert.Equal("o'neil", WslConfigGuard.ParseRead("SCRIPT=present\nUSER_NAME='o'\\''neil'\n").ScriptUser);
+    }
+
+    [Theory]
+    [InlineData("""{"env":"http://old:1"}""")]
+    [InlineData("""{"env":null}""")]
+    [InlineData("""[1]""")]
+    public async Task WslSyncRefusesADistroSettingsFileWhoseRootOrEnvIsNotAnObject(string json)
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => $"SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=present\n{json}\nSETTINGS=END\n",
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var d1 = Assert.Single(result.Distros);
+        Assert.True(d1.Failed);
+        Assert.Contains("not a JSON object", d1.Reason);
+        Assert.Empty(runner.Scripts); // nothing was written, the boot script refuses the same file
     }
 
     [Fact]

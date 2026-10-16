@@ -381,6 +381,13 @@ public sealed class WslConfigGuard(
 
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         var read = await ReadInsideAsync(distro, ct);
+        if (config.Wsl.SyncClaude && read.SettingsNotObject)
+        {
+            // the boot script refuses such a file as well: it holds the owner's permissions,
+            // hooks and model, and replacing it would lose them — nothing is written
+            throw new IOException(
+                $"~/.claude/settings.json of '{distro.User}' in '{distro.Name}': the top level or \"env\" is not a JSON object — fix it by hand, the distro is left untouched");
+        }
 
         // The Claude layer (wsl.syncClaude): the boot layer (the [boot] command of /etc/wsl.conf →
         // the marked runner that executes the startup directory), the full env in
@@ -592,7 +599,8 @@ public sealed class WslConfigGuard(
         string? WslConfText = null,
         WslBootRunnerState BootRunner = WslBootRunnerState.Missing,
         string? ScriptHost = null,
-        string? ProxyEnvHost = null);
+        string? ProxyEnvHost = null,
+        bool SettingsNotObject = false);
 
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
@@ -631,8 +639,8 @@ public sealed class WslConfigGuard(
             fi
             """;
         var probe = NormalizeLf($"""
-            PNR_HOME=$(getent passwd '{distro.User}' | cut -d: -f6)
-            [ -n "$PNR_HOME" ] || PNR_HOME="/home/{distro.User}"
+            PNR_HOME=$(getent passwd {BashQuote(distro.User)} | cut -d: -f6)
+            [ -n "$PNR_HOME" ] || PNR_HOME={BashQuote("/home/" + distro.User)}
             {scriptProbe}
             {envProbe}
             if [ -f {BashQuote(runnerPath)} ]; then
@@ -674,6 +682,7 @@ public sealed class WslConfigGuard(
         string? user = null, proxy = null, wslConf = null, scriptHost = null, proxyEnvHost = null;
         var bootRunner = WslBootRunnerState.Missing;
         JsonObject? root = null;
+        var settingsNotObject = false;
 
         var lines = output.Split('\n');
         for (var i = 0; i < lines.Length; i++)
@@ -719,7 +728,9 @@ public sealed class WslConfigGuard(
                     if (jsonText.Length > 0)
                     {
                         root = JsonNode.Parse(jsonText) as JsonObject;
-                        if (root?["env"]?["HTTPS_PROXY"] is { } node)
+                        // a root or an "env" that is not an object: the sync refuses, like the boot script
+                        settingsNotObject = root is null || (root.ContainsKey("env") && root["env"] is not JsonObject);
+                        if ((root?["env"] as JsonObject)?["HTTPS_PROXY"] is JsonValue node)
                         {
                             proxy = node.GetValue<string>();
                         }
@@ -751,14 +762,15 @@ public sealed class WslConfigGuard(
                     }
                     else if (line.StartsWith("USER_NAME=", StringComparison.Ordinal))
                     {
-                        user = line["USER_NAME=".Length..].Trim().Trim('\'', '"');
+                        // a single-quoted word, an embedded quote written as '\''
+                        user = line["USER_NAME=".Length..].Trim().Trim('\'', '"').Replace("'\\''", "'");
                     }
 
                     break;
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost, settingsNotObject);
     }
 
     /// <summary>
@@ -1141,7 +1153,7 @@ public sealed class WslConfigGuard(
         # safe to run by hand. Idempotent: NO_PROXY is not touched (it is synced from
         # Windows by the app), only HTTPS_PROXY/HTTP_PROXY are refreshed.
         TAG="[10-claude-proxy]"
-        USER_NAME='{{user}}'
+        USER_NAME={{BashQuote(user)}}
         USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
         [ -n "$USER_HOME" ] || USER_HOME="/home/$USER_NAME"
         SETTINGS="$USER_HOME/.claude/settings.json"

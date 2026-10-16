@@ -117,6 +117,13 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
     {
         var path = config.Claude.SettingsPath;
         var root = ReadRootOrEmpty(path);
+        // like the distro boot script: an "env" that is not an object is the owner's to fix — the
+        // file is left untouched rather than having it replaced
+        if (root.ContainsKey("env") && root["env"] is not JsonObject)
+        {
+            throw new InvalidDataException($"settings.json \"env\" is not a JSON object: {path} — fix it by hand, the file is left untouched");
+        }
+
         var env = root["env"] as JsonObject ?? [];
         var proxy = ClaudeEnvValues.WindowsProxyUrl(config);
         var noProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
