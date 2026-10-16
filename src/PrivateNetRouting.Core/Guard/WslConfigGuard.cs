@@ -74,7 +74,8 @@ public sealed record WslDistroSyncResult(
     bool UserCommandWritten = false,
     bool WslConfWritten = false,
     IReadOnlyList<string>? BootBackups = null,
-    bool Failed = false);
+    bool Failed = false,
+    bool ClaudeDirChowned = false);
 
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
@@ -403,6 +404,7 @@ public sealed class WslConfigGuard(
         List<string> bootBackups = [];
         var settingsOutput = "";
         var scriptOutput = "";
+        var claudeDirChowned = false;
         if (config.Wsl.SyncClaude)
         {
             // the boot pass always ensures the runner file itself (cmp makes it a no-op when
@@ -420,6 +422,13 @@ public sealed class WslConfigGuard(
                 .Where(l => l.StartsWith("BACKUP_", StringComparison.Ordinal))
                 .Select(l => l[(l.IndexOf('=') + 1)..].Trim())
                 .ToList();
+
+            // an older boot script created ~/.claude as root: the user-side write below could neither
+            // back up nor replace settings.json there, so a root step hands the directory back first
+            var ownerOutput = await wsl.RunAsync(
+                ["-d", distro.Name, "-u", "root", "--", "bash", "-s"], BuildClaudeDirOwnerScript(distro.User), Encoding.UTF8, ct);
+            RequireCompleted(ownerOutput, $"~/.claude ownership check in '{distro.Name}'");
+            claudeDirChowned = ownerOutput.Contains("CLAUDEDIR=chowned", StringComparison.Ordinal);
 
             // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
             // the backup is made only when the content actually changes
@@ -527,7 +536,8 @@ public sealed class WslConfigGuard(
             BootRunnerWritten: bootRunnerWritten,
             UserCommandWritten: userCommandWritten,
             WslConfWritten: wslConfWritten,
-            BootBackups: bootBackups);
+            BootBackups: bootBackups,
+            ClaudeDirChowned: claudeDirChowned);
     }
 
     /// <summary>
@@ -1144,6 +1154,37 @@ public sealed class WslConfigGuard(
         return NormalizeLf(sb.ToString());
     }
 
+    /// <summary>
+    /// The root step before the user-side settings.json write: a ~/.claude that belongs to root
+    /// (an older boot script created it with mkdir as root) is handed back to the user with the
+    /// user's primary group. Only the directory itself — its files keep their owners — and never
+    /// through a symlink or for the root user. Output: CLAUDEDIR=chowned when it acted, PNR=ok.
+    /// </summary>
+    internal static string BuildClaudeDirOwnerScript(string user) => NormalizeLf($$"""
+        USER_NAME={{BashQuote(user)}}
+        USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+        [ -n "$USER_HOME" ] || USER_HOME="/home/$USER_NAME"
+        {{ClaudeDirOwnerRepair("echo \"FAILED: cannot hand $USER_HOME/.claude back to $USER_NAME\"; exit 1")}}
+        echo PNR=ok
+        """);
+
+    /// <summary>
+    /// The repair itself, shared by the sync's root step and the boot-time startup script (both
+    /// run as root with USER_NAME and USER_HOME set). <paramref name="onFailure"/> — the shell
+    /// action of a failed chown: fatal for the sync step, a log line at boot (the proxy write
+    /// that follows must still happen).
+    /// </summary>
+    internal static string ClaudeDirOwnerRepair(string onFailure) => $$"""
+        if [ "$USER_NAME" != "root" ] && [ -d "$USER_HOME/.claude" ] && [ ! -L "$USER_HOME/.claude" ] &&
+            [ "$(stat -c %u "$USER_HOME/.claude")" = "0" ]; then
+            if chown "$USER_NAME:$(id -gn "$USER_NAME" 2>/dev/null || echo "$USER_NAME")" "$USER_HOME/.claude"; then
+                echo CLAUDEDIR=chowned
+            else
+                {{onFailure}}
+            fi
+        fi
+        """;
+
     /// <summary>Startup script text (proxy address and port come from the application config).</summary>
     internal static string BuildStartupScript(string user, int port, string? fixedHost = null) => NormalizeLf($$"""
         #!/bin/bash
@@ -1192,6 +1233,8 @@ public sealed class WslConfigGuard(
         # the primary group is looked up — it is not always named like the user.
         USER_GROUP=$(id -gn "$USER_NAME" 2>/dev/null || echo "$USER_NAME")
         [ -d "$USER_HOME/.claude" ] || install -d -o "$USER_NAME" -g "$USER_GROUP" -m 755 "$USER_HOME/.claude"
+        # a ~/.claude an older version of this script created as root is handed back to the user
+        {{ClaudeDirOwnerRepair("echo \"$TAG cannot hand $USER_HOME/.claude back to $USER_NAME\"")}}
         # An existing settings.json that cannot be parsed is never rewritten: it holds the
         # owner's permissions, hooks and model, and a boot-time writer has no way to ask.
         # The file is replaced through a temp file, so a failure never leaves it half written.

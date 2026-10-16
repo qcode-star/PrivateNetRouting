@@ -329,6 +329,11 @@ public sealed class GuardService(
                     what += $", boot layer: {string.Join(" + ", boot)} written";
                 }
 
+                if (distro.ClaudeDirChowned)
+                {
+                    what += ", ~/.claude handed back from root to the user";
+                }
+
                 var backups = new[] { distro.SettingsBackup, distro.ScriptBackup }
                     .Concat(distro.BootBackups ?? [])
                     .Where(b => b is not null)

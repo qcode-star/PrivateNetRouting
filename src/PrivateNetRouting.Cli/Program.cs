@@ -1093,6 +1093,10 @@ internal static class Program
                         || distro.BootRunnerWritten || distro.UserCommandWritten || distro.WslConfWritten
                         ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {(distro.ProxyEnvWritten ? "+ codex proxy env " : "")}written"
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
+                    if (distro.ClaudeDirChowned)
+                    {
+                        Console.WriteLine($"{distro.Distro}: ~/.claude belonged to root, handed back to the user");
+                    }
                 }
 
                 return wsl.Distros.Any(d => d.Failed) ? 1 : 0;

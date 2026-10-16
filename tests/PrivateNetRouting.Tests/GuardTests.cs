@@ -1542,8 +1542,8 @@ public class GuardTests : IDisposable
 
         await guard.SyncAsync(CancellationToken.None);
 
-        Assert.Equal(4, runner.Scripts.Count);
-        foreach (var (_, _, script) in runner.Scripts)
+        Assert.Equal(5, runner.Scripts.Count);
+        foreach (var (_, _, script) in runner.Scripts.Where(s => !s.Script.Contains("CLAUDEDIR=chowned")))
         {
             Assert.Contains("pnr_put()", script);
             Assert.DoesNotContain("cat \"$NEW\" >", script); // no unverified truncate-and-write
@@ -1560,6 +1560,49 @@ public class GuardTests : IDisposable
 
         // the user's settings directory is created by the script itself
         Assert.Contains(runner.Scripts, s => s.Script.Contains("mkdir -p \"$HOME/.claude\" ||"));
+    }
+
+    [Fact]
+    public async Task WslSyncHandsARootOwnedClaudeDirectoryBackBeforeTheSettingsWrite()
+    {
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => "SCRIPT=missing\nPROXYENV=missing\nRUNNER=missing\nWSLCONF=missing\nSETTINGS=missing\n",
+            WriteOutput = "CLAUDEDIR=chowned\nSETTINGS=written\nSCRIPT=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        // the root step runs right before the user-side settings write
+        var owner = runner.Scripts.FindIndex(s => s.Script.Contains("CLAUDEDIR=chowned"));
+        var settings = runner.Scripts.FindIndex(s => s.Script.Contains("SETTINGS=\"$HOME/.claude/settings.json\""));
+        Assert.True(owner >= 0 && settings == owner + 1);
+        Assert.Equal("root", runner.Scripts[owner].User);
+        Assert.Contains("USER_NAME='u1'", runner.Scripts[owner].Script);
+        Assert.True(result.Distros.Single().ClaudeDirChowned);
+    }
+
+    [Fact]
+    public void ClaudeDirectoryRepairTouchesOnlyARootOwnedDirectoryOfAnOrdinaryUser()
+    {
+        var script = WslConfigGuard.BuildClaudeDirOwnerScript("o'neil");
+        Assert.DoesNotContain('\r', script);
+        Assert.Contains("USER_NAME='o'\\''neil'", script);
+        Assert.Contains("[ \"$USER_NAME\" != \"root\" ]", script);
+        Assert.Contains("[ ! -L \"$USER_HOME/.claude\" ]", script);
+        Assert.Contains("[ \"$(stat -c %u \"$USER_HOME/.claude\")\" = \"0\" ]", script);
+        Assert.DoesNotContain("chown -R", script); // the directory only, its files keep their owners
+        Assert.Contains("exit 1", script); // a failed chown fails the sync step
+        Assert.EndsWith("echo PNR=ok", script.TrimEnd());
+
+        // the boot-time startup script repairs too, but a failed chown must not stop its proxy write
+        var startup = WslConfigGuard.BuildStartupScript("u1", 18081);
+        var repair = startup[startup.IndexOf("stat -c %u", StringComparison.Ordinal)..startup.IndexOf("python3 - ", StringComparison.Ordinal)];
+        Assert.Contains("echo CLAUDEDIR=chowned", repair);
+        Assert.DoesNotContain("exit 1", repair);
     }
 
     [Fact]
@@ -1808,9 +1851,9 @@ public class GuardTests : IDisposable
 
         await guard.SyncAsync(CancellationToken.None);
 
-        // every script piped to bash -s (boot, settings, startup, codex env), and every base64
-        // payload it embeds, is LF only — whatever the checkout the sources were compiled from
-        Assert.Equal(4, runner.Scripts.Count);
+        // every script piped to bash -s (boot, ~/.claude owner, settings, startup, codex env), and
+        // every base64 payload it embeds, is LF only — whatever the checkout the sources were compiled from
+        Assert.Equal(5, runner.Scripts.Count);
         foreach (var (_, _, script) in runner.Scripts)
         {
             Assert.DoesNotContain("\r", script);
