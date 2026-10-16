@@ -1292,28 +1292,18 @@ public partial class MainWindow : Window
     private bool ConfirmRestartOfRunningApp(RunningAppInfo running, string appNameKey) =>
         LaunchPrompts.ConfirmRestart(this, running, appNameKey);
 
-    /// <summary>The chain as it is right before a launch raises it (null when the snapshot fails).</summary>
-    private async Task<ChainState?> SnapshotChainAsync()
+    /// <summary>
+    /// A cancelled launch extinguishes only what it raised itself: the orchestrator recorded the
+    /// links the launch's bring-up started (under its operation lock), exactly those are stopped
+    /// and the links that were already up keep working.
+    /// </summary>
+    private async Task RollBackRaisedChainAsync(ChainRaisedLinks raised)
     {
-        try
+        if (raised.Any)
         {
-            return await _runtime.Chain.GetStateAsync(CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _runtime.Log.Warn($"chain snapshot before the launch failed: {ex.Message}");
-            return null;
+            await _runtime.Chain.StopRaisedAsync(raised, null, CancellationToken.None);
         }
     }
-
-    /// <summary>
-    /// A cancelled launch extinguishes only what it raised itself: with a snapshot, the links that
-    /// were already up stay; without one (the snapshot failed) the whole chain goes down.
-    /// </summary>
-    private Task RollBackRaisedChainAsync(ChainState? before) =>
-        before is null
-            ? _runtime.Chain.StopAsync(null, CancellationToken.None)
-            : _runtime.Chain.StopRaisedAsync(before, null, CancellationToken.None);
 
     private async Task RunLaunchAsync()
     {
@@ -1327,8 +1317,7 @@ public partial class MainWindow : Window
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
         var success = false;
-        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
-        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
+        var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1345,15 +1334,14 @@ public partial class MainWindow : Window
             // failed check, so the token is re-checked: a cancel here raised nothing to roll back
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15), cts.Token);
             cts.Token.ThrowIfCancellationRequested();
-            chainWasDown = !healthy;
             if (!healthy)
             {
-                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.Launcher.LaunchAsync(LaunchPrompts.OptionsFor(running), progress, cts.Token);
+            var result = await _runtime.Launcher.LaunchAsync(
+                LaunchPrompts.OptionsFor(running) with { RaisedLinks = raised }, progress, cts.Token);
             _viewModel.SetCheckResult(
                 result.RestartedExisting ? "Main.Launch.RestartedFmt" : "Main.Launch.DoneFmt",
                 Math.Round(result.Elapsed.TotalSeconds, 1));
@@ -1363,16 +1351,13 @@ public partial class MainWindow : Window
         {
             // Stop during the launch: the launch aborts (Claude is not started); a chain the
             // launch raised itself is brought down, one that was already up keeps working.
-            if (chainWasDown)
+            try
             {
-                try
-                {
-                    await RollBackRaisedChainAsync(chainBefore);
-                }
-                catch (Exception stopEx)
-                {
-                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
-                }
+                await RollBackRaisedChainAsync(raised);
+            }
+            catch (Exception stopEx)
+            {
+                _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
             }
 
             _viewModel.SetCheckResult("Main.Launch.Cancelled");
@@ -1435,8 +1420,7 @@ public partial class MainWindow : Window
     private async Task RunBrowserLaunchCoreAsync()
     {
         var success = false;
-        var chainWasDown = false; // set by the confirmation: the launch raises the chain only then
-        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
+        var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1504,15 +1488,14 @@ public partial class MainWindow : Window
                     return false;
                 }
 
-                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
-                chainWasDown = true;
                 return true;
             }).Task.Unwrap();
 
             var options = BrowserLauncherOptions.Default with
             {
                 ConfirmDeadEgress = confirmDeadEgress,
+                RaisedLinks = raised,
             };
             var result = await _runtime.Browser.LaunchAsync(options, new Progress<ChainStep>(OnChainStep), cts.Token);
             if (result.Outcome == BrowserLaunchOutcome.Cancelled)
@@ -1530,16 +1513,13 @@ public partial class MainWindow : Window
         {
             // Same contract as the Claude launch: abort, extinguish only a chain the launch
             // raised itself.
-            if (chainWasDown)
+            try
             {
-                try
-                {
-                    await RollBackRaisedChainAsync(chainBefore);
-                }
-                catch (Exception stopEx)
-                {
-                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
-                }
+                await RollBackRaisedChainAsync(raised);
+            }
+            catch (Exception stopEx)
+            {
+                _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
             }
 
             _viewModel.SetCheckResult("Main.Browser.Cancelled");
@@ -1612,8 +1592,7 @@ public partial class MainWindow : Window
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
         var success = false;
-        var chainWasDown = false; // the launch raises the chain only when the live CONNECT failed
-        ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
+        var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
         var cts = new CancellationTokenSource();
         _operationCts = cts;
         try
@@ -1630,15 +1609,14 @@ public partial class MainWindow : Window
             // failed check, so the token is re-checked: a cancel here raised nothing to roll back
             var healthy = await _runtime.CheckHealthAsync(TimeSpan.FromSeconds(15), cts.Token);
             cts.Token.ThrowIfCancellationRequested();
-            chainWasDown = !healthy;
             if (!healthy)
             {
-                chainBefore = await SnapshotChainAsync();
                 BeginOperation();
             }
 
             var progress = healthy ? null : new Progress<ChainStep>(OnChainStep);
-            var result = await _runtime.CodexLauncher.LaunchAsync(LaunchPrompts.OptionsFor(running), progress, cts.Token);
+            var result = await _runtime.CodexLauncher.LaunchAsync(
+                LaunchPrompts.OptionsFor(running) with { RaisedLinks = raised }, progress, cts.Token);
             _viewModel.SetCheckResult(
                 result.RestartedExisting ? "Main.Codex.RestartedFmt" : "Main.Codex.DoneFmt",
                 Math.Round(result.Elapsed.TotalSeconds, 1));
@@ -1648,16 +1626,13 @@ public partial class MainWindow : Window
         {
             // Same contract as the Claude launch: abort, extinguish only a chain the launch
             // raised itself.
-            if (chainWasDown)
+            try
             {
-                try
-                {
-                    await RollBackRaisedChainAsync(chainBefore);
-                }
-                catch (Exception stopEx)
-                {
-                    _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
-                }
+                await RollBackRaisedChainAsync(raised);
+            }
+            catch (Exception stopEx)
+            {
+                _viewModel.SetCheckResult("Main.ErrorFmt", stopEx.Message);
             }
 
             _viewModel.SetCheckResult("Main.Codex.Cancelled");

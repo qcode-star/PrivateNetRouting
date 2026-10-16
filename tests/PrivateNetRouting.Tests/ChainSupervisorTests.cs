@@ -475,16 +475,27 @@ public class ChainSupervisorTests : IDisposable
     public async Task StopRaisedLeavesTheLinksThatWereUpBefore()
     {
         var stoppedHooks = 0;
-        var supervisor = Create(chainStopped: _ =>
-        {
-            stoppedHooks++;
-            return Task.CompletedTask;
-        });
-        // daemon, keeper and node were up before the launch; only the proxy was missing
-        var before = new ChainState(true, true, true, "Running", ProxyRunning: false, ProxyHealthy: false);
+        // daemon, keeper and node were up before the launch; only the proxy was missing, and the
+        // launch was cancelled while the proxy was starting
+        var supervisor = Create(
+            proxy: new FakeProxy(_calls) { StartThrows = new OperationCanceledException() },
+            daemon: new FakeDaemon(_calls) { IsHttpListening = true, IsProcessAlive = true },
+            keeper: new FakeKeeper(_calls) { IsRunning = true },
+            cli: new FakeCli(_calls) { BackendState = "Running" },
+            chainStopped: _ =>
+            {
+                stoppedHooks++;
+                return Task.CompletedTask;
+            });
+        var raised = new ChainRaisedLinks();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            supervisor.EnsureRunningAsync(null, raised, CancellationToken.None));
+        _calls.Clear();
 
-        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+        await supervisor.StopRaisedAsync(raised, null, CancellationToken.None);
 
+        Assert.True(raised.Proxy);
+        Assert.False(raised.Daemon || raised.Keeper || raised.Node);
         Assert.Equal(["proxy.stop"], _calls);
         Assert.Equal(0, stoppedHooks); // the chain is still partly up — its idle stopper stays
     }
@@ -493,28 +504,88 @@ public class ChainSupervisorTests : IDisposable
     public async Task StopRaisedOfAChainThatWasFullyDownIsTheFullStop()
     {
         var stoppedHooks = 0;
-        var supervisor = Create(chainStopped: _ =>
-        {
-            stoppedHooks++;
-            return Task.CompletedTask;
-        });
-        var before = new ChainState(false, false, false, null, ProxyRunning: false, ProxyHealthy: false);
+        var supervisor = Create(
+            proxy: new FakeProxy(_calls) { StartThrows = new OperationCanceledException() },
+            cli: new FakeCli(_calls) { BackendState = "Stopped" },
+            chainStopped: _ =>
+            {
+                stoppedHooks++;
+                return Task.CompletedTask;
+            });
+        var raised = new ChainRaisedLinks();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            supervisor.EnsureRunningAsync(null, raised, CancellationToken.None));
+        _calls.Clear();
 
-        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+        await supervisor.StopRaisedAsync(raised, null, CancellationToken.None);
 
         Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
-        Assert.Equal(1, stoppedHooks);
+        Assert.Equal(1, stoppedHooks); // nothing of ours is left — the idle stopper goes too
     }
 
     [Fact]
     public async Task StopRaisedOfAChainThatWasFullyUpDoesNothing()
     {
-        var supervisor = Create();
-        var before = new ChainState(true, true, true, "Running", ProxyRunning: true, ProxyHealthy: true);
+        var supervisor = Create(
+            proxy: new FakeProxy(_calls) { IsRunning = true },
+            daemon: new FakeDaemon(_calls) { IsHttpListening = true, IsProcessAlive = true },
+            keeper: new FakeKeeper(_calls) { IsRunning = true },
+            cli: new FakeCli(_calls) { BackendState = "Running" });
+        var raised = new ChainRaisedLinks();
+        await supervisor.EnsureRunningAsync(null, raised, CancellationToken.None);
 
-        await supervisor.StopRaisedAsync(before, null, CancellationToken.None);
+        await supervisor.StopRaisedAsync(raised, null, CancellationToken.None);
 
+        Assert.False(raised.Any);
         Assert.Empty(_calls);
+    }
+
+    /// <summary>A stale daemon (alive without its listener) is killed and started anew by the bring-up: it is the bring-up's to roll back.</summary>
+    [Fact]
+    public async Task AStaleDaemonRestartedByTheBringUpIsRecordedAsRaised()
+    {
+        var supervisor = Create(
+            proxy: new FakeProxy(_calls) { StartThrows = new OperationCanceledException() },
+            daemon: new FakeDaemon(_calls) { IsHttpListening = false, IsProcessAlive = true },
+            keeper: new FakeKeeper(_calls) { IsRunning = true },
+            cli: new FakeCli(_calls) { BackendState = "Running" });
+        var raised = new ChainRaisedLinks();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            supervisor.EnsureRunningAsync(null, raised, CancellationToken.None));
+        _calls.Clear();
+
+        await supervisor.StopRaisedAsync(raised, null, CancellationToken.None);
+
+        Assert.True(raised.Daemon);
+        Assert.False(raised.Keeper);
+        Assert.Equal(["proxy.stop", "daemon.kill"], _calls);
+    }
+
+    /// <summary>
+    /// The record is made under the operation lock: a bring-up that waited for another one in
+    /// flight finds the links up and records nothing — the other caller's links are not its own.
+    /// </summary>
+    [Fact]
+    public async Task AConcurrentBringUpIsNotAttributedToTheWaitingOne()
+    {
+        var gate = new TaskCompletionSource();
+        var daemon = new FakeDaemon(_calls) { EnsureGate = gate };
+        var supervisor = Create(daemon: daemon, cli: new FakeCli(_calls) { BackendState = "Stopped" });
+        var first = new ChainRaisedLinks();
+        var second = new ChainRaisedLinks();
+
+        var firstRun = supervisor.EnsureRunningAsync(null, first, CancellationToken.None);
+        while (daemon.ConcurrentEnsures == 0)
+        {
+            await Task.Delay(10);
+        }
+
+        var secondRun = supervisor.EnsureRunningAsync(null, second, CancellationToken.None);
+        gate.SetResult();
+        await Task.WhenAll(firstRun, secondRun);
+
+        Assert.True(first.Daemon && first.Keeper && first.Node && first.Proxy);
+        Assert.False(second.Any);
     }
 
     /// <summary>

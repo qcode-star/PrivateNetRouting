@@ -77,7 +77,7 @@ public sealed class CodexLauncher(
         else
         {
             log.Info("codex-launcher: proxy is not responding — bringing the chain up");
-            await chain.EnsureRunningAsync(progress, ct);
+            await chain.EnsureRunningAsync(progress, options.RaisedLinks, ct);
             chainRaised = true;
         }
 

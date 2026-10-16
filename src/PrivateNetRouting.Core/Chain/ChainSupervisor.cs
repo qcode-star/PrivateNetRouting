@@ -59,6 +59,40 @@ public sealed record ChainState(
         && UpstreamReachable != true;
 }
 
+/// <summary>
+/// The links one bring-up started itself, recorded by the orchestrator as it starts them (under
+/// its operation lock, so a concurrent bring-up of another caller is never attributed here). A
+/// link is recorded before its start is attempted: a start cancelled or failed half-way may
+/// still have left a process behind, and a stale daemon that was killed and started anew counts
+/// as started. The rollback of a cancelled launch stops exactly these links.
+/// </summary>
+public sealed class ChainRaisedLinks
+{
+    private volatile bool _daemon;
+    private volatile bool _keeper;
+    private volatile bool _node;
+    private volatile bool _proxy;
+
+    public bool Daemon => _daemon;
+
+    public bool Keeper => _keeper;
+
+    /// <summary>The node was brought up (`tailscale up`, possibly after a login) — its rollback is `tailscale down`.</summary>
+    public bool Node => _node;
+
+    public bool Proxy => _proxy;
+
+    public bool Any => Daemon || Keeper || Node || Proxy;
+
+    internal void MarkDaemon() => _daemon = true;
+
+    internal void MarkKeeper() => _keeper = true;
+
+    internal void MarkNode() => _node = true;
+
+    internal void MarkProxy() => _proxy = true;
+}
+
 /// <summary>Proxy control on the orchestrator side (implementation — ForwardProxyService).</summary>
 public interface IProxyControl
 {
@@ -81,14 +115,21 @@ public interface IChainSupervisor
     /// </summary>
     Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct);
 
+    /// <summary>
+    /// The bring-up that records into <paramref name="raised"/> every link it starts itself (null —
+    /// nothing is recorded). The default forwards to the plain bring-up.
+    /// </summary>
+    Task EnsureRunningAsync(IProgress<ChainStep>? progress, ChainRaisedLinks? raised, CancellationToken ct) =>
+        EnsureRunningAsync(progress, ct);
+
     Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct);
 
     /// <summary>
-    /// Stops only the links that were down in <paramref name="before"/> - the snapshot taken
-    /// before an operation raised the chain - so a cancelled launch extinguishes what it raised
-    /// itself and leaves the links that already existed alone. The default is the full stop.
+    /// Stops only the links recorded in <paramref name="raised"/> by a bring-up — a cancelled
+    /// launch extinguishes what it raised itself and leaves the links that already existed alone.
+    /// The default is the full stop.
     /// </summary>
-    Task StopRaisedAsync(ChainState before, IProgress<ChainStep>? progress, CancellationToken ct) =>
+    Task StopRaisedAsync(ChainRaisedLinks raised, IProgress<ChainStep>? progress, CancellationToken ct) =>
         StopAsync(progress, ct);
 }
 
@@ -203,14 +244,17 @@ public sealed class ChainSupervisor(
     /// must not capture its context (a blocking wait on that thread would deadlock them).
     /// </summary>
     public Task EnsureRunningAsync(IProgress<ChainStep>? progress, CancellationToken ct) =>
-        Task.Run(() => EnsureRunningSerializedAsync(progress, ct));
+        EnsureRunningAsync(progress, null, ct);
 
-    private async Task EnsureRunningSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    public Task EnsureRunningAsync(IProgress<ChainStep>? progress, ChainRaisedLinks? raised, CancellationToken ct) =>
+        Task.Run(() => EnsureRunningSerializedAsync(progress, raised, ct));
+
+    private async Task EnsureRunningSerializedAsync(IProgress<ChainStep>? progress, ChainRaisedLinks? raised, CancellationToken ct)
     {
         await _operation.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await EnsureRunningCoreAsync(progress, ct).ConfigureAwait(false);
+            await EnsureRunningCoreAsync(progress, raised, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -221,17 +265,17 @@ public sealed class ChainSupervisor(
     public Task StopAsync(IProgress<ChainStep>? progress, CancellationToken ct) =>
         Task.Run(() => StopSerializedAsync(progress, ct));
 
-    public Task StopRaisedAsync(ChainState before, IProgress<ChainStep>? progress, CancellationToken ct) =>
-        Task.Run(() => StopSerializedAsync(progress, ct, before));
+    public Task StopRaisedAsync(ChainRaisedLinks raised, IProgress<ChainStep>? progress, CancellationToken ct) =>
+        Task.Run(() => StopSerializedAsync(progress, ct, raised));
 
-    private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainState? raisedFrom = null)
+    private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainRaisedLinks? raised = null)
     {
         // a stop is never abandoned while it waits for its turn (the steps run to the end even on
         // a cancelled token): the bring-up in flight is cancelled by its own owner and lets go
         await _operation.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            await StopCoreAsync(progress, ct, raisedFrom).ConfigureAwait(false);
+            await StopCoreAsync(progress, ct, raised).ConfigureAwait(false);
         }
         finally
         {
@@ -239,7 +283,7 @@ public sealed class ChainSupervisor(
         }
     }
 
-    private async Task EnsureRunningCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct)
+    private async Task EnsureRunningCoreAsync(IProgress<ChainStep>? progress, ChainRaisedLinks? raised, CancellationToken ct)
     {
         if (_proxyDisabledInTailscale)
         {
@@ -265,6 +309,7 @@ public sealed class ChainSupervisor(
             {
                 var needsUac = daemon.StartNeedsUac();
                 Report(progress, "Daemon", ChainStepStatus.Active, needsUac ? "starting (confirm UAC)" : "starting", needsUac);
+                raised?.MarkDaemon(); // a stale daemon killed and started anew is ours to roll back too
                 try
                 {
                     await daemon.EnsureStartedAsync(new Progress<string>(detail =>
@@ -286,6 +331,7 @@ public sealed class ChainSupervisor(
             else
             {
                 Report(progress, "Keeper", ChainStepStatus.Active, "starting watch-ipn");
+                raised?.MarkKeeper();
                 try
                 {
                     await keeper.EnsureStartedAsync(ct);
@@ -309,6 +355,7 @@ public sealed class ChainSupervisor(
             else
             {
                 Report(progress, "Node", ChainStepStatus.Active, "tailscale up");
+                raised?.MarkNode();
                 try
                 {
                     if (state is "NoState" or "NeedsLogin")
@@ -345,6 +392,7 @@ public sealed class ChainSupervisor(
             else
             {
                 Report(progress, "Proxy", ChainStepStatus.Active, "starting listener");
+                raised?.MarkProxy();
                 try
                 {
                     await proxy.StartAsync(ct);
@@ -425,17 +473,16 @@ public sealed class ChainSupervisor(
     }
 
     /// <summary>
-    /// raisedFrom - the snapshot before the operation being rolled back: only the links that were
-    /// down then are stopped (null - every link). The chain-stopped hook runs only when the whole
-    /// chain went down, because the idle stopper belongs to a chain that is still partly up.
+    /// raised - the links the bring-up being rolled back started itself: only those are stopped
+    /// (null - every link). The chain-stopped hook runs only when nothing of ours is left running
+    /// afterwards, because the idle stopper belongs to a chain that is still partly up.
     /// </summary>
-    private async Task StopCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainState? raisedFrom = null)
+    private async Task StopCoreAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainRaisedLinks? raised = null)
     {
-        var stopProxy = raisedFrom is null || raisedFrom.ProxyRunning != true;
-        var stopNode = raisedFrom is null || raisedFrom.BackendState != "Running";
-        var stopDaemon = raisedFrom is null || !raisedFrom.DaemonProcessAlive;
-        var stopKeeper = raisedFrom is null || !raisedFrom.KeeperRunning;
-        var wholeChain = stopProxy && (_external || (stopNode && stopDaemon && stopKeeper));
+        var stopProxy = raised is null || raised.Proxy;
+        var stopNode = raised is null || raised.Node;
+        var stopDaemon = raised is null || raised.Daemon;
+        var stopKeeper = raised is null || raised.Keeper;
 
         // every step runs even when an earlier one failed: a daemon that refuses to die must not
         // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end.
@@ -519,6 +566,9 @@ public sealed class ChainSupervisor(
             throw new ChainException(failures[0].Component, failures[0].Error);
         }
 
+        // a rollback leaves the links that were up before the bring-up; it ends the whole chain
+        // only when nothing of ours is running any more
+        var wholeChain = raised is null || NothingOfOursRunning();
         log.Info(wholeChain ? "chain: stopped" : "chain: stopped the links this operation raised, the links that were up before are left running");
 
         // the idle stopper exists only over a live chain: the stop is its end too. Its own token
@@ -528,6 +578,11 @@ public sealed class ChainSupervisor(
             await chainStopped(CancellationToken.None);
         }
     }
+
+    /// <summary>The local links of this shape are all down (the external upstream is not ours).</summary>
+    private bool NothingOfOursRunning() =>
+        (_skipProxy || !proxy.IsRunning)
+        && (_external || (!keeper.IsRunning && !daemon.IsProcessAlive && !daemon.IsHttpListening));
 
     /// <summary>
     /// The interactive login of a node that has none: `tailscale login` waits while the user

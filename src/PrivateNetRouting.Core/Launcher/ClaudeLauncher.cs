@@ -14,7 +14,8 @@ namespace PrivateNetRouting.Core.Launcher;
 /// The owner is asked about the restart by the caller (GUI dialog, CLI prompt) — this flag is
 /// the answer to that question, not a decision of the launcher itself.
 /// </summary>
-public sealed record LauncherOptions(bool CheckOnly, bool RestartRunning = false)
+/// <param name="RaisedLinks">Records the chain links the launch's bring-up starts itself (the GUI rolls exactly those back on a cancel); null — not recorded.</param>
+public sealed record LauncherOptions(bool CheckOnly, bool RestartRunning = false, ChainRaisedLinks? RaisedLinks = null)
 {
     public static LauncherOptions Default { get; } = new(CheckOnly: false);
 }
@@ -122,7 +123,7 @@ public sealed class ClaudeLauncher(
         else
         {
             log.Info("launcher: proxy is not responding — bringing the chain up");
-            await chain.EnsureRunningAsync(progress, ct);
+            await chain.EnsureRunningAsync(progress, options.RaisedLinks, ct);
             chainRaised = true;
         }
 

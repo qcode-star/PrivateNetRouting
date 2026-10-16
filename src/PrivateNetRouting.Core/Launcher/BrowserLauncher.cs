@@ -72,7 +72,10 @@ public sealed record BrowserLauncherOptions(
     /// raises the chain itself right after a confirmed answer (the egress is our chain's listener
     /// there). Null — a dead egress fails the launch without asking.
     /// </summary>
-    Func<CancellationToken, Task<bool>>? ConfirmDeadEgress = null)
+    Func<CancellationToken, Task<bool>>? ConfirmDeadEgress = null,
+
+    /// <summary>Records the chain links the launch's bring-up starts itself (the GUI rolls exactly those back on a cancel); null — not recorded.</summary>
+    ChainRaisedLinks? RaisedLinks = null)
 {
     public static BrowserLauncherOptions Default { get; } = new();
 }
@@ -222,7 +225,7 @@ public sealed class BrowserLauncher(
             if (ChainOwnsEgress)
             {
                 log.Info("browser: raising the chain (confirmed by the owner)");
-                await chain.EnsureRunningAsync(progress, ct).ConfigureAwait(false);
+                await chain.EnsureRunningAsync(progress, options.RaisedLinks, ct).ConfigureAwait(false);
 
                 // the answer is taken before the raise: report what the egress does now, not what it did
                 reachable = await IsEgressReachableAsync(ct).ConfigureAwait(false);
