@@ -36,6 +36,39 @@ public class WatchdogSupervisorTests : IDisposable
         Assert.Equal([11, 21, 22], WatchdogSupervisor.FindStopperPids(finder));
     }
 
+    /// <summary>A command line that merely mentions "watchdog" is not a stopper.</summary>
+    [Fact]
+    public void FindIgnoresCommandLinesThatOnlyMentionTheWatchdog()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["pnr.exe"] =
+        [
+            new(31, @"""C:\app\pnr.exe"" logs show watchdog"),
+            new(32, @"""C:\app\pnr.exe"" logs show watchdog-worker --tail 20"),
+            new(33, @"""C:\app\pnr.exe"" logs show --watchdog-worker"), // the marker, but not as the command
+            new(34, @"""C:\app\pnr.exe"" --watchdog-worker"),
+            new(35, @"""C:\app\pnr.exe"" watchdog"),
+            new(36, @"""C:\watchdog\pnr.exe"" status"), // the word in the path only
+        ];
+        finder.ByName["PrivateNetRouting.App.exe"] =
+        [
+            new(41, @"""C:\watchdog\PrivateNetRouting.App.exe"" --launch"),
+            new(42, @"""C:\app\PrivateNetRouting.App.exe"" --config ""C:\x\--watchdog-worker.json"""),
+            new(43, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
+        ];
+
+        Assert.Equal([43, 34, 35], WatchdogSupervisor.FindStopperPids(finder));
+    }
+
+    [Fact]
+    public void SplitArgumentsFollowsTheWindowsRules()
+    {
+        Assert.Equal(
+            [@"C:\Program Files\app\pnr.exe", "logs", "show", "a b", @"x\""y", @"c:\dir\"],
+            WatchdogSupervisor.SplitArguments(@"""C:\Program Files\app\pnr.exe"" logs  show ""a b"" x\\\""y ""c:\dir\\"""));
+        Assert.Equal(["pnr.exe"], WatchdogSupervisor.SplitArguments("pnr.exe"));
+    }
+
     [Fact]
     public void NothingRunningWhenNoStopperProcess()
     {

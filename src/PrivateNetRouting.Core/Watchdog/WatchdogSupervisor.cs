@@ -43,13 +43,126 @@ public sealed class WatchdogSupervisor(
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
 
-    /// <summary>Pids of the running stoppers: our executables with the worker marker, plus the CLI form. A static helper — diagnostics reads the same truth.</summary>
+    /// <summary>The CLI command of the foreground stopper (`pnr watchdog`).</summary>
+    public const string CliCommand = "watchdog";
+
+    /// <summary>
+    /// Pids of the running stoppers: our executables with the worker marker, plus the CLI form. A
+    /// static helper — diagnostics reads the same truth. The WMI lookup is a substring prefilter;
+    /// the command line is then split into arguments and must carry the marker as an argument of its
+    /// own (the GUI exe takes it anywhere, pnr — as its first argument) or be `pnr watchdog` —
+    /// `pnr logs show watchdog` is not a stopper.
+    /// </summary>
     public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder) =>
-        WorkerHostNames.SelectMany(name => finder.Find(name, WorkerMarker))
-            .Concat(finder.Find(CliProcessName, "watchdog"))
-            .Select(p => p.Id)
+        WorkerHostNames.SelectMany(name => finder.Find(name, WorkerMarker).Select(p => (Name: name, Process: p)))
+            .Concat(finder.Find(CliProcessName, CliCommand).Select(p => (Name: CliProcessName, Process: p)))
+            .Where(found => IsStopperCommandLine(found.Name, found.Process.CommandLine))
+            .Select(found => found.Process.Id)
             .Distinct()
             .ToList();
+
+    internal static bool IsStopperCommandLine(string processName, string commandLine)
+    {
+        var arguments = SplitArguments(commandLine);
+        if (arguments.Count < 2)
+        {
+            return false;
+        }
+
+        if (string.Equals(processName, CliProcessName, StringComparison.OrdinalIgnoreCase))
+        {
+            // the CLI dispatches on its first argument, exactly
+            return arguments[1] == WorkerMarker || arguments[1] == CliCommand;
+        }
+
+        // the GUI host recognizes the marker anywhere among its arguments (HeadlessHost)
+        return arguments.Skip(1).Any(argument => string.Equals(argument, WorkerMarker, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Splits a Windows command line the way the C runtime does (CommandLineToArgvW): the program
+    /// name ends at the first unquoted space and takes no escapes; in the arguments 2n backslashes
+    /// before a quote are n backslashes and a quote toggle, 2n+1 — n backslashes and a literal quote.
+    /// </summary>
+    internal static IReadOnlyList<string> SplitArguments(string commandLine)
+    {
+        var result = new List<string>();
+        var i = 0;
+        var text = commandLine;
+
+        // the program name
+        var name = new System.Text.StringBuilder();
+        var quoted = false;
+        while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+        {
+            if (text[i] == '"')
+            {
+                quoted = !quoted;
+            }
+            else
+            {
+                name.Append(text[i]);
+            }
+
+            i++;
+        }
+
+        if (name.Length > 0)
+        {
+            result.Add(name.ToString());
+        }
+
+        while (true)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i]))
+            {
+                i++;
+            }
+
+            if (i >= text.Length)
+            {
+                return result;
+            }
+
+            var argument = new System.Text.StringBuilder();
+            quoted = false;
+            while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+            {
+                var backslashes = 0;
+                while (i < text.Length && text[i] == '\\')
+                {
+                    backslashes++;
+                    i++;
+                }
+
+                if (i < text.Length && text[i] == '"')
+                {
+                    argument.Append('\\', backslashes / 2);
+                    if (backslashes % 2 == 1)
+                    {
+                        argument.Append('"');
+                    }
+                    else
+                    {
+                        quoted = !quoted;
+                    }
+
+                    i++;
+                }
+                else
+                {
+                    argument.Append('\\', backslashes);
+                    if (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+                    {
+                        argument.Append(text[i]);
+                        i++;
+                    }
+                }
+            }
+
+            result.Add(argument.ToString());
+        }
+    }
 
     public IReadOnlyList<int> FindStopperPids() => FindStopperPids(processes);
 
