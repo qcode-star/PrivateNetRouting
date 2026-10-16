@@ -162,6 +162,39 @@ public class AppConfigTests : IDisposable
         => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));
 
     [Fact]
+    public void ForwardProxyListenIsValidatedOnlyWhereTheLocalProxyRuns()
+    {
+        static AppConfig With(string mode, bool enabled, string listen)
+        {
+            var config = new AppConfig();
+            config.Chain.Mode = mode;
+            config.Chain.Socks5.Upstream = "192.0.2.10:1080";
+            config.Chain.Http.Upstream = "192.0.2.10:3128";
+            config.ForwardProxy.Enabled = enabled;
+            config.ForwardProxy.Listen = listen;
+            return config;
+        }
+
+        static bool ListenFlagged(AppConfig config) =>
+            AppConfigValidator.Validate(config).Any(error => error.StartsWith("forwardProxy.listen", StringComparison.Ordinal));
+
+        // the local proxy runs: a bad value or port 0 (clients could not connect to it) is rejected
+        Assert.True(ListenFlagged(With("tailscale", true, "localhost:18081")));
+        Assert.True(ListenFlagged(With("socks5", true, "127.0.0.1:0")));
+        Assert.True(ListenFlagged(With("tailscale", true, "")));
+
+        // the skipped shapes never read it
+        Assert.False(ListenFlagged(With("http", true, "")));
+        Assert.False(ListenFlagged(With("http", false, "not-an-endpoint")));
+        Assert.False(ListenFlagged(With("socks5", false, "127.0.0.1:0")));
+
+        // the upstream clients point at instead keeps its port check
+        var httpZero = With("http", true, "");
+        httpZero.Chain.Http.Upstream = "192.0.2.10:0";
+        Assert.Contains(AppConfigValidator.Validate(httpZero), error => error.StartsWith("chain.http.upstream", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TheHeadTimeoutHasItsOwnSettingAndMustBePositive()
     {
         var config = new AppConfig();

@@ -65,8 +65,14 @@ public static class AppConfigValidator
 
     private static void CheckEndpoints(AppConfig config, List<string> errors)
     {
-        // read by the local proxy and by every client pointed at it
-        Endpoint("forwardProxy.listen", config.ForwardProxy.Listen, errors);
+        // read by the local proxy and by every client pointed at it — only where the local proxy runs:
+        // in the skipped shapes (the http mode, socks5 + forwardProxy.enabled=false) the clients
+        // point at the upstream and the value is never read
+        if (!AppProxyEndpoint.IsSkipped(config))
+        {
+            Endpoint("forwardProxy.listen", config.ForwardProxy.Listen, errors);
+        }
+
         switch (config.Chain.EffectiveMode)
         {
             case ChainMode.Socks5:
