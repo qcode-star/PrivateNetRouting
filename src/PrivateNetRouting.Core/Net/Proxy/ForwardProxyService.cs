@@ -300,8 +300,37 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         }
     }
 
-    private async Task AcceptLoopAsync(TcpListener listener, CancellationToken token)
+    private Task AcceptLoopAsync(TcpListener listener, CancellationToken token) =>
+        RunAcceptLoopAsync(
+            ct => listener.AcceptTcpClientAsync(ct),
+            client => _ = Task.Run(() => HandleClientAsync(client, token), CancellationToken.None),
+            _log,
+            token);
+
+    /// <summary>The first pause after a failed accept; it doubles while the failures go on.</summary>
+    private static readonly TimeSpan AcceptRetryFirst = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>The longest pause between two accepts that keep failing.</summary>
+    private static readonly TimeSpan AcceptRetryMax = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// The accept loop of one listener. It runs fire-and-forget, so it never faults: a stopped
+    /// listener (the service stop, a WSL rebind that took the listener down — also during a retry
+    /// pause, when the next accept finds it no longer listening) ends it quietly. A socket error
+    /// of its own does not end it — the listener stays bound and would answer nobody — but the
+    /// retry backs off, and a failure is a Warn only the first time its error code shows up; a
+    /// successful accept resets both.
+    /// </summary>
+    internal static async Task RunAcceptLoopAsync(
+        Func<CancellationToken, ValueTask<TcpClient>> accept,
+        Action<TcpClient> handle,
+        FileLog log,
+        CancellationToken token,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
+        delay ??= Task.Delay;
+        var retry = AcceptRetryFirst;
+        var warned = new HashSet<SocketError>();
         while (!token.IsCancellationRequested)
         {
             TcpClient client;
@@ -309,11 +338,11 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             {
                 // without capturing the caller's context: the accept loop must not depend
                 // on the liveness of the UI thread (continuations — to the pool)
-                client = await listener.AcceptTcpClientAsync(token).ConfigureAwait(false);
+                client = await accept(token).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
             {
-                // the listener was taken down by the service stop
+                // the listener was taken down (the service stop, a rebind): "not listening" any more
                 return;
             }
             catch (SocketException ex) when (token.IsCancellationRequested
@@ -325,21 +354,33 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             catch (SocketException ex)
             {
                 // a client reset in the backlog or a transient resource shortage must not end the
-                // loop: the listener stays bound and would answer nobody
-                _log.Warn($"forward-proxy: accept failed ({ex.SocketErrorCode}), continuing: {ex.Message}");
+                // loop; a failure that repeats is not a Warn per round
+                var message = $"forward-proxy: accept failed ({ex.SocketErrorCode}), retrying in {retry.TotalMilliseconds:F0} ms: {ex.Message}";
+                if (warned.Add(ex.SocketErrorCode))
+                {
+                    log.Warn(message);
+                }
+                else
+                {
+                    log.Debug(message);
+                }
+
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(50), token).ConfigureAwait(false);
+                    await delay(retry, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
                     return;
                 }
 
+                retry = retry * 2 < AcceptRetryMax ? retry * 2 : AcceptRetryMax;
                 continue;
             }
 
-            _ = Task.Run(() => HandleClientAsync(client, token), CancellationToken.None);
+            retry = AcceptRetryFirst;
+            warned.Clear();
+            handle(client);
         }
     }
 

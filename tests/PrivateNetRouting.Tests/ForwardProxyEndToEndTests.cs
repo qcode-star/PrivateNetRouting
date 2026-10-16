@@ -598,6 +598,72 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A socket error that keeps repeating on accept: the loop backs off, warns once per error
+    /// code, and a listener taken down during the pause ("not listening") ends it without a fault.
+    /// </summary>
+    [Fact]
+    public async Task TheAcceptLoopBacksOffWarnsOnceAndEndsOnAStoppedListener()
+    {
+        var logPath = Path.Combine(_tempDir, "accept.log");
+        using var log = new FileLog(logPath);
+        var failures = 0;
+        var delays = new List<TimeSpan>();
+
+        var loop = ForwardProxyService.RunAcceptLoopAsync(
+            _ => ++failures switch
+            {
+                <= 6 => throw new SocketException((int)SocketError.ConnectionReset),
+                7 => throw new SocketException((int)SocketError.NoBufferSpaceAvailable),
+                _ => throw new InvalidOperationException("Not listening. You must call the Start() method before calling this method."),
+            },
+            _ => { },
+            log,
+            CancellationToken.None,
+            (pause, _) =>
+            {
+                delays.Add(pause);
+                return Task.CompletedTask;
+            });
+        await loop.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(loop.IsCompletedSuccessfully);
+        Assert.Equal(
+            [50, 100, 200, 400, 800, 1600, 2000],
+            delays.Select(d => (int)d.TotalMilliseconds));
+        var text = File.ReadAllText(logPath);
+        Assert.Equal(1, text.Split("accept failed (ConnectionReset)").Length - 1);
+        Assert.Equal(1, text.Split("accept failed (NoBufferSpaceAvailable)").Length - 1);
+    }
+
+    [Fact]
+    public async Task ASuccessfulAcceptResetsTheBackoffAndTheWarning()
+    {
+        var logPath = Path.Combine(_tempDir, "accept-reset.log");
+        using var log = new FileLog(logPath);
+        var calls = 0;
+        var delays = new List<TimeSpan>();
+
+        await ForwardProxyService.RunAcceptLoopAsync(
+            _ => ++calls switch
+            {
+                1 or 2 or 4 => throw new SocketException((int)SocketError.ConnectionReset),
+                3 => ValueTask.FromResult(new TcpClient()),
+                _ => throw new ObjectDisposedException("listener"),
+            },
+            client => client.Dispose(),
+            log,
+            CancellationToken.None,
+            (pause, _) =>
+            {
+                delays.Add(pause);
+                return Task.CompletedTask;
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal([50, 100, 50], delays.Select(d => (int)d.TotalMilliseconds));
+        Assert.Equal(2, File.ReadAllText(logPath).Split("accept failed (ConnectionReset)").Length - 1);
+    }
+
+    /// <summary>
     /// A client that connects and never sends its request (a port scan, an idle pre-connect) is
     /// closed without a 502 and is not a proxy failure.
     /// </summary>
