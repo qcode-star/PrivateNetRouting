@@ -23,6 +23,9 @@ public sealed class WatchdogService(
     FileLog log,
     Func<TimeSpan, CancellationToken, Task>? delay = null)
 {
+    /// <summary>Consecutive failed chain stops after which the stopper gives up and exits.</summary>
+    internal const int MaxFailedChainStops = 3;
+
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
 
     public async Task RunAsync(IProgress<ChainStep>? progress, CancellationToken ct)
@@ -30,6 +33,7 @@ public sealed class WatchdogService(
         log.Info($"watchdog: started (interval {config.CheckSeconds}s)");
         var idleWindow = TimeSpan.FromSeconds(config.CheckSeconds);
         string? previousReason = null;
+        var failedStops = 0;
         while (true)
         {
             // ConfigureAwait: the worker host blocks a thread on this call (App OnStartup) — the
@@ -43,15 +47,30 @@ public sealed class WatchdogService(
                     return;
                 }
 
+                // regained activity: a later idle stop starts its failure count afresh
+                failedStops = 0;
                 previousReason = outcome.Reason;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
+            catch (ChainStopFailedException ex)
+            {
+                // a stop that keeps failing (a declined UAC, nobody at the machine) must not raise a
+                // prompt and a full WSL pass every interval forever: after a few tries the stopper gives up
+                failedStops++;
+                if (failedStops >= MaxFailedChainStops)
+                {
+                    log.Error($"watchdog: the chain stop failed {failedStops} times in a row, giving up: {ex.InnerException!.Message}");
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                }
+
+                TryWarn($"watchdog: chain stop failed ({failedStops} of {MaxFailedChainStops}), will retry in {config.CheckSeconds}s: {ex.InnerException!.Message}");
+            }
             catch (Exception ex)
             {
-                // one failed tick (a probe or log I/O error, a declined UAC on the chain stop) must
+                // one failed tick (a probe or log I/O error) must
                 // not end the stopper: it would leave the chain up with nobody watching — retry next tick
                 TryWarn($"watchdog: tick failed, will retry in {config.CheckSeconds}s: {ex.Message}");
             }
@@ -94,7 +113,15 @@ public sealed class WatchdogService(
             }
         }
 
-        await chain.StopAsync(progress, ct).ConfigureAwait(false);
+        try
+        {
+            await chain.StopAsync(progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new ChainStopFailedException(ex);
+        }
+
         log.Info("watchdog: chain stopped, exiting");
         return new TickOutcome(true, null);
     }
@@ -112,4 +139,7 @@ public sealed class WatchdogService(
     }
 
     private sealed record TickOutcome(bool Done, string? Reason);
+
+    /// <summary>Marks a failure of the chain stop itself, counted apart from other tick failures.</summary>
+    private sealed class ChainStopFailedException(Exception inner) : Exception(inner.Message, inner);
 }

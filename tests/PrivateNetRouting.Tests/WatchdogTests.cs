@@ -85,6 +85,44 @@ public class WatchdogTests : IDisposable
     }
 
     [Fact]
+    public async Task ChainStopThatKeepsFailingGivesUpAfterThreeTries()
+    {
+        var events = new List<string>();
+        var chain = new FakeChain(events) { StopThrows = new ChainException("daemon", new IOException("UAC declined")) };
+        var watchdog = Create(usage: new FakeUsage(null), wsl: null, chain: chain);
+
+        var ex = await Assert.ThrowsAsync<ChainException>(() => watchdog.RunAsync(null, CancellationToken.None));
+
+        Assert.Same(chain.StopThrows, ex);
+        Assert.Equal(["chain.stop", "chain.stop", "chain.stop"], events);
+        using (var reader = new StreamReader(new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)))
+        {
+            Assert.Contains("giving up", reader.ReadToEnd());
+        }
+    }
+
+    [Fact]
+    public async Task RegainedActivityResetsTheFailedStopCount()
+    {
+        var events = new List<string>();
+        var chain = new FakeChain(events) { StopThrows = new ChainException("daemon", new IOException("UAC declined")), StopFailures = 4 };
+        // idle, idle, busy, idle, idle, idle: two failures, a reset, two more failures, then success
+        var usage = new SequenceUsage([null, null, "claude processes: 1", null, null, null]);
+        var watchdog = Create(usage: usage, wsl: null, chain: chain);
+
+        await watchdog.RunAsync(null, CancellationToken.None);
+
+        Assert.Equal(5, events.Count(e => e == "chain.stop"));
+    }
+
+    private sealed class SequenceUsage(IReadOnlyList<string?> reasons) : IClaudeUsageProbe
+    {
+        private int _index;
+
+        public string? GetInUseReason(TimeSpan idleWindow) => reasons[Math.Min(_index++, reasons.Count - 1)];
+    }
+
+    [Fact]
     public async Task ThrowingProbeDoesNotKillTheLoop()
     {
         var events = new List<string>();
@@ -388,7 +426,7 @@ public class WatchdogTests : IDisposable
     }
 
     private WatchdogService Create(
-        FakeUsage usage,
+        IClaudeUsageProbe usage,
         FakeWsl? wsl,
         FakeChain chain,
         List<string>? events = null)
