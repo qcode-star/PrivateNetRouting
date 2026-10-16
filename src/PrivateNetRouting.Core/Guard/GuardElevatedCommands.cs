@@ -125,13 +125,36 @@ public static class GuardElevatedCommands
         }
         else
         {
-            HostsFileBlock.Remove(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker);
+            // a hosts file the block cannot be cut out of (a begin marker without its end) is
+            // refused, but that must not keep the other layers in place: they are removed anyway
+            // and the hosts failure is reported afterwards
+            IOException? hostsFailure = null;
+            try
+            {
+                HostsFileBlock.Remove(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker);
+            }
+            catch (IOException ex)
+            {
+                hostsFailure = ex;
+                log.Error($"elevated ban off: hosts block left in place: {ex.Message}");
+            }
+
             ops.RemoveNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.RemoveFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
             FlushTolerantly(ops, log);
+            if (hostsFailure is not null)
+            {
+                throw new BanPartiallyRemovedException(
+                    $"NRPT rule and firewall rules removed; the hosts block was NOT removed: {hostsFailure.Message}",
+                    hostsFailure);
+            }
+
             return "ban removed: hosts block, NRPT rule, firewall rules; DNS cache flushed";
         }
     }
+
+    /// <summary>The ban removal reached every layer it could, but the hosts block stayed in place.</summary>
+    internal sealed class BanPartiallyRemovedException(string message, Exception inner) : IOException(message, inner);
 
     /// <summary>
     /// The DNS cache flush is the last, cosmetic step: its failure must not report the whole
@@ -151,11 +174,23 @@ public static class GuardElevatedCommands
 
     /// <summary>
     /// The combined action of the collapsed guards card: the three ban layers and the managed
-    /// policy in one elevation — "enable/disable all" costs one UAC prompt.
+    /// policy in one elevation — "enable/disable all" costs one UAC prompt. On disable a hosts
+    /// block that could not be removed does not keep the policy: it is removed too, and the
+    /// failure is reported after it.
     /// </summary>
     internal static string ApplyAll(AppConfig config, FileLog log, IBanSystemOps ops, IEgressPolicyStore policy, bool enable)
     {
-        var ban = ApplyBanLayers(config, log, ops, enable);
+        string ban;
+        try
+        {
+            ban = ApplyBanLayers(config, log, ops, enable);
+        }
+        catch (BanPartiallyRemovedException ex) when (!enable)
+        {
+            var removed = ApplyPolicy(config, policy, enable);
+            throw new BanPartiallyRemovedException($"{removed}; {ex.Message}", ex.InnerException ?? ex);
+        }
+
         var policyDetail = ApplyPolicy(config, policy, enable);
         return $"{ban}; {policyDetail}";
     }

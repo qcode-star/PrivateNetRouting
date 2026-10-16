@@ -2114,6 +2114,34 @@ public class GuardTests : IDisposable
         Assert.Contains("removed", removeDetail);
     }
 
+    [Fact]
+    public void ElevatedBanOffWithAnUnterminatedHostsBlockStillRemovesTheOtherLayers()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-unterminated");
+        var hosts = $"127.0.0.1 localhost\r\n{config.Guard.HostsBeginMarker}\r\n0.0.0.0 a.example\r\n192.0.2.7 kept.example\r\n";
+        File.WriteAllText(config.Guard.HostsFile, hosts);
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        using var log = new FileLog(Path.Combine(_tempDir, "elev-unterminated.log"));
+
+        var ops = new FakeBanSystemOps();
+        var ban = Assert.ThrowsAny<IOException>(() => GuardElevatedCommands.ApplyBanLayers(config, log, ops, enable: false));
+        Assert.Equal(["nrpt-off", "fw-off", "flush"], ops.Calls);
+        Assert.Contains("hosts block was NOT removed", ban.Message);
+        Assert.Contains("no matching end marker", ban.Message);
+        Assert.Equal(hosts, File.ReadAllText(config.Guard.HostsFile)); // still refused to rewrite
+
+        // "disable all": the policy goes too, the hosts failure is reported after it
+        var allOps = new FakeBanSystemOps();
+        var policy = new FakeEgressPolicyStore();
+        var all = Assert.ThrowsAny<IOException>(() => GuardElevatedCommands.ApplyAll(config, log, allOps, policy, enable: false));
+        Assert.Equal(["nrpt-off", "fw-off", "flush"], allOps.Calls);
+        Assert.True(policy.Removed);
+        Assert.Contains("egressProxyUrl and disableWslSessions removed", all.Message);
+        Assert.Contains("hosts block was NOT removed", all.Message);
+        Assert.Equal(hosts, File.ReadAllText(config.Guard.HostsFile));
+    }
+
     /// <summary>The combined action: ban layers first, then the policy — one helper run, one UAC.</summary>
     [Fact]
     public void ElevatedAllAppliesBanLayersThenPolicy()
