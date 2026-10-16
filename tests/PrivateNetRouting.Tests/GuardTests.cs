@@ -599,6 +599,16 @@ public class GuardTests : IDisposable
     [InlineData("features = { respect_system_proxy = false, other = 1 }\n", "features = { respect_system_proxy = true, other = 1 }\n")]
     // the table defined by top-level dotted keys
     [InlineData("features.other = true\n[desktop]\nx = 1\n", "features.other = true\nfeatures.respect_system_proxy = true\n[desktop]\nx = 1\n")]
+    // a multi-line value of the dotted sibling is not split: the flag goes after its last line
+    [InlineData("features.list = [\n  \"a\",\n  \"b]\",\n]\n\n[desktop]\nx = 1\n", "features.list = [\n  \"a\",\n  \"b]\",\n]\nfeatures.respect_system_proxy = true\n\n[desktop]\nx = 1\n")]
+    [InlineData("features.nested = [[1, 2],\n  [3]] # done\nother = 2\n", "features.nested = [[1, 2],\n  [3]] # done\nfeatures.respect_system_proxy = true\nother = 2\n")]
+    [InlineData("features.text = \"\"\"\nline [\n\"\"\"\n", "features.text = \"\"\"\nline [\n\"\"\"\nfeatures.respect_system_proxy = true\n")]
+    // a key-like line inside another key's multi-line array is not a sibling
+    [InlineData("x = [\n  \"features.y = 1\",\n]\n", "x = [\n  \"features.y = 1\",\n]\n\n[features]\nrespect_system_proxy = true\n")]
+    // a longer key ending in the flag's name is not the flag
+    [InlineData("features = { no_respect_system_proxy = false }\n", "features = { respect_system_proxy = true, no_respect_system_proxy = false }\n")]
+    [InlineData("features = { a.respect_system_proxy = false }\n", "features = { respect_system_proxy = true, a.respect_system_proxy = false }\n")]
+    [InlineData("features = { \"respect_system_proxy\" = false }\n", "features = { respect_system_proxy = true }\n")]
     // a """ inside a comment opens no string, so the real header after it is still seen
     [InlineData("# a \"\"\" b\n[features]\nother = 1\n", "# a \"\"\" b\n[features]\nrespect_system_proxy = true\nother = 1\n")]
     public void CodexSettingsApplyRecognizesEveryFormOfTheFeaturesTable(string existing, string expected)
@@ -615,6 +625,8 @@ public class GuardTests : IDisposable
     {
         Assert.Equal(false, CodexSettingsGuard.FindValue("features = { respect_system_proxy = false }\n"));
         Assert.Null(CodexSettingsGuard.FindValue("features = { other = 1 }\n"));
+        Assert.Null(CodexSettingsGuard.FindValue("features = { no_respect_system_proxy = false }\n"));
+        Assert.Null(CodexSettingsGuard.FindValue("features = { note = \"respect_system_proxy = true\" }\n"));
     }
 
     [Fact]

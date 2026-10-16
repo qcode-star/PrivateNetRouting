@@ -142,9 +142,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
         }
         else if (location.DottedSiblingIndex >= 0)
         {
-            // features.other = ... already defines the table by dotted keys; the flag joins them
-            // (the line is at the top level, so the new one right after it is too)
-            lines.Insert(location.DottedSiblingIndex + 1, $"{DottedKey} = true");
+            // features.other = ... already defines the table by dotted keys; the flag joins them,
+            // after the sibling's complete value (a multi-line array or string must not be split)
+            lines.Insert(AfterValue(StructuralLines(lines), location.DottedSiblingIndex), $"{DottedKey} = true");
         }
         else
         {
@@ -187,13 +187,15 @@ public sealed class CodexSettingsGuard(AppConfig config)
         int InlineIndex = -1,
         int DottedSiblingIndex = -1);
 
+    // the whole key, bare or quoted: not the tail of another bare key (no_respect_system_proxy)
+    // or of a dotted one (x.respect_system_proxy)
     private static readonly System.Text.RegularExpressions.Regex InlineFlag =
-        new($@"{KeyName}\s*=\s*(true|false)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new($@"(?<![\w.\-""'])([""']?){KeyName}\1\s*=\s*(true|false)\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static FlagLocation Locate(IReadOnlyList<string> lines)
     {
-        // lines inside multi-line strings are not structure: a section header or a key there means nothing
-        var inString = MultiLineFlags(lines);
+        // lines inside a multi-line value are not structure: a section header or a key there means nothing
+        var structural = StructuralLines(lines);
         var sectionStart = -1;
         var sectionEnd = -1;
         var current = "";
@@ -202,7 +204,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
         var siblingIndex = -1;
         for (var i = 0; i < lines.Count; i++)
         {
-            if (inString[i])
+            if (!structural[i])
             {
                 continue;
             }
@@ -241,7 +243,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 inlineIndex = i;
                 var match = InlineFlag.Match(ValueOf(trimmed));
-                inlineValue = match.Success ? ParseBool(match.Groups[1].Value) : null;
+                inlineValue = match.Success ? ParseBool(match.Groups[2].Value) : null;
             }
             else if (current.Length == 0 && siblingIndex < 0 && key.StartsWith(SectionName + ".", StringComparison.Ordinal))
             {
@@ -252,52 +254,111 @@ public sealed class CodexSettingsGuard(AppConfig config)
         return new FlagLocation(-1, false, inlineValue, sectionStart, sectionEnd < 0 ? lines.Count : sectionEnd, inlineIndex, siblingIndex);
     }
 
-    /// <summary>Marks the lines that are inside a multi-line basic (""") or literal (''') string.</summary>
-    private static bool[] MultiLineFlags(IReadOnlyList<string> lines)
+    /// <summary>
+    /// Marks the structural lines: those that start outside any value — not inside a multi-line
+    /// basic (""") or literal (''') string and not inside a multi-line array or inline table.
+    /// Only such a line can be a table header or begin a key; the rest continue the value of the
+    /// key above them (a section header or a key there means nothing).
+    /// </summary>
+    private static bool[] StructuralLines(IReadOnlyList<string> lines)
     {
-        var flags = new bool[lines.Count];
-        var open = "";
+        var structural = new bool[lines.Count];
+        var openString = ""; // the delimiter of an open multi-line string
+        var depth = 0; // open [ and { of a value
         for (var i = 0; i < lines.Count; i++)
         {
-            if (open.Length == 0)
+            var line = lines[i];
+            structural[i] = openString.Length == 0 && depth == 0;
+            var position = 0;
+            if (structural[i] && line.TrimStart().StartsWith('['))
             {
-                // a """ in a # comment opens nothing
-                var code = StripComment(lines[i]);
-                if (CountOf(code, "\"\"\"") % 2 == 1)
-                {
-                    open = "\"\"\"";
-                    flags[i] = true;
-                }
-                else if (CountOf(code, "'''") % 2 == 1)
-                {
-                    open = "'''";
-                    flags[i] = true;
-                }
-
+                // a table header: its brackets are not a value
                 continue;
             }
 
-            flags[i] = true;
-            if (CountOf(lines[i], open) % 2 == 1)
+            while (position < line.Length)
             {
-                open = "";
+                if (openString.Length > 0)
+                {
+                    var close = FindClosing(line, position, openString);
+                    if (close < 0)
+                    {
+                        break;
+                    }
+
+                    position = close + openString.Length;
+                    openString = "";
+                    continue;
+                }
+
+                var c = line[position];
+                if (c == '#')
+                {
+                    break;
+                }
+
+                if (line.AsSpan(position).StartsWith("\"\"\"") || line.AsSpan(position).StartsWith("'''"))
+                {
+                    openString = line.Substring(position, 3);
+                    position += 3;
+                    continue;
+                }
+
+                if (c is '"' or '\'')
+                {
+                    var close = FindClosing(line, position + 1, c.ToString());
+                    // an unterminated one-line string is invalid TOML: the rest of the line is its text
+                    position = close < 0 ? line.Length : close + 1;
+                    continue;
+                }
+
+                if (c is '[' or '{')
+                {
+                    depth++;
+                }
+                else if ((c is ']' or '}') && depth > 0)
+                {
+                    depth--;
+                }
+
+                position++;
             }
         }
 
-        return flags;
+        return structural;
     }
 
-    private static int CountOf(string line, string token)
+    /// <summary>The index of the closing delimiter at or after start; a backslash escapes in basic strings only.</summary>
+    private static int FindClosing(string line, int start, string delimiter)
     {
-        var count = 0;
-        var index = line.IndexOf(token, StringComparison.Ordinal);
-        while (index >= 0)
+        var escapes = delimiter[0] == '"';
+        for (var i = start; i <= line.Length - delimiter.Length; i++)
         {
-            count++;
-            index = line.IndexOf(token, index + token.Length, StringComparison.Ordinal);
+            if (escapes && line[i] == '\\')
+            {
+                i++;
+                continue;
+            }
+
+            if (string.CompareOrdinal(line, i, delimiter, 0, delimiter.Length) == 0)
+            {
+                return i;
+            }
         }
 
-        return count;
+        return -1;
+    }
+
+    /// <summary>The first line after the value that begins at keyLine: the next structural line (or the end).</summary>
+    private static int AfterValue(bool[] structural, int keyLine)
+    {
+        var next = keyLine + 1;
+        while (next < structural.Length && !structural[next])
+        {
+            next++;
+        }
+
+        return next;
     }
 
     /// <summary>"[features]" → "features"; "[[x]]" → "x"; dotted and quoted parts are normalized.</summary>
