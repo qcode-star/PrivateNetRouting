@@ -331,6 +331,9 @@ public partial class App : Application
             {
                 if (stopChain)
                 {
+                    // a bring-up or launch in flight holds the chain operation lock (a login, a UAC
+                    // wait): cancel it the way the card's Stop does, then the stop gets its turn
+                    (MainWindow as MainWindow)?.CancelChainOperation();
                     await runtime.Chain.StopAsync(null, CancellationToken.None);
                 }
                 else

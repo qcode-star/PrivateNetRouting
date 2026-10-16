@@ -1039,6 +1039,20 @@ public partial class MainWindow : Window
         await RefreshChainAsync();
     }
 
+    /// <summary>
+    /// Cancels a running bring-up or launch — the same cancel the card's Stop applies while one
+    /// is running (a running stop is not cancellable and is left to finish). The tray's "Exit with
+    /// full chain stop" calls it first: its own stop waits for the chain operation lock, and a
+    /// bring-up left running would hold that lock through a login or a UAC wait.
+    /// </summary>
+    public void CancelChainOperation()
+    {
+        if ((_chainBusy && _chainBusyCancellable) || _launchBusy)
+        {
+            _operationCts?.Cancel();
+        }
+    }
+
     private async Task<bool> RunChainBusy(bool bringUp, Func<CancellationToken, Task> action)
     {
         if (_chainBusy)
