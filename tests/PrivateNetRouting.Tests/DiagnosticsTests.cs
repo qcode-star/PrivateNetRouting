@@ -103,6 +103,36 @@ public class DiagnosticsTests : IDisposable
         Assert.Contains("192.0.2.77", line.Value);
     }
 
+    /// <summary>A LAN forwardProxy.listen is the main listener, not the WSL bind: it is neither shown there nor flagged stale.</summary>
+    [Fact]
+    public async Task ANonLoopbackListenAddressIsNotTakenForTheWslBind()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out var probe, out _);
+        config.ForwardProxy.Listen = "198.51.100.5:18082";
+        var proxyPort = ParsePort(config.ForwardProxy.Listen);
+        proxy.IsRunning = true;
+        table.Listeners[proxyPort] =
+        [
+            new TcpListenerEntry(IPAddress.Parse("198.51.100.5"), proxyPort, Environment.ProcessId, "testhost"),
+            new TcpListenerEntry(IPAddress.Parse("192.0.2.1"), proxyPort, Environment.ProcessId, "testhost"),
+        ];
+        probe.Result = HealthProbeResult.OkIn(10, "HTTP/1.1 200 Connection Established");
+
+        var line = Section(await service.GetSummaryAsync(CancellationToken.None), "proxy").Single(l => l.Name == "WSL bind");
+
+        Assert.Equal(DiagMark.Good, line.Mark);
+        Assert.Equal("192.0.2.1", line.Value);
+
+        // without the WSL bind the LAN listener alone is no WSL bind at all
+        config.ForwardProxy.BindWslGateway = false;
+        table.Listeners[proxyPort] = [new TcpListenerEntry(IPAddress.Parse("198.51.100.5"), proxyPort, Environment.ProcessId, "testhost")];
+
+        line = Section(await service.GetSummaryAsync(CancellationToken.None), "proxy").Single(l => l.Name == "WSL bind");
+
+        Assert.Equal("-", line.Value);
+        Assert.Equal(DiagMark.Neutral, line.Mark);
+    }
+
     [Fact]
     public async Task FullChainShowsOwnersKeeperNodeMarkerAndGuards()
     {

@@ -226,10 +226,16 @@ public sealed class DiagnosticsService(
                     DiagMark.Neutral)
                 : new DiagLine("forward proxy", "stopped", DiagMark.Warn);
 
-        var wslBind = proxyListeners
-            .Select(l => l.Address)
-            .Where(a => !IPAddress.IsLoopback(a) && !a.Equals(IPAddress.Any))
-            .ToList();
+        // the WSL bind is the extra listener next to the configured one: a non-loopback
+        // forwardProxy.listen (a LAN address) is the main listener itself, never the WSL bind
+        var configured = Socks5Client.ParseEndPoint(config.ForwardProxy.Listen).Address;
+        var wslBind = config.ForwardProxy.BindWslGateway
+            ? proxyListeners
+                .Select(l => l.Address)
+                .Where(a => !IPAddress.IsLoopback(a) && !a.Equals(IPAddress.Any) && !a.Equals(configured))
+                .Distinct()
+                .ToList()
+            : [];
         var lines = new List<DiagLine>
         {
             proxyLine,
