@@ -167,8 +167,8 @@ public class WatchdogTests : IDisposable
     public void StopScriptTargetsCodexByCodexHomeEnvOnly()
     {
         var script = WslAppHostStopper.Script(true, true);
-        Assert.Contains("grep -q '^CODEX_HOME='", script);
-        Assert.Contains("$p/environ", script);
+        Assert.Contains("CODEX_HOME=*)", script);
+        Assert.Contains("< \"$p/environ\"", script);
         Assert.DoesNotContain("pgrep codex", script);
         Assert.DoesNotContain("pkill codex", script);
     }
@@ -362,7 +362,28 @@ public class WatchdogTests : IDisposable
         var script = WslAppHostStopper.Script(stopClaude: true, stopCodex: true);
 
         Assert.Contains("q=$$", script);
-        Assert.Contains("case \"$self_pids\" in *\" ${p#/proc/} \"*) continue ;; esac", script);
+        Assert.Contains("case \"$self_pids\" in *\" $pid \"*) continue ;; esac", script);
+        Assert.DoesNotContain("\r", script);
+    }
+
+    /// <summary>
+    /// /proc/&lt;pid&gt;/environ is the exec-time environment: a forked subshell of the script shows
+    /// the inherited CODEX_HOME, so a scan wrapped in $(…) or a pipeline would count itself and
+    /// never reach 0. The variable is dropped up front and the scan is called directly.
+    /// </summary>
+    [Fact]
+    public void StopScriptScansCodexWithoutForkedCopiesOfItself()
+    {
+        var script = WslAppHostStopper.Script(stopClaude: false, stopCodex: true);
+
+        var unset = script.IndexOf("unset CODEX_HOME", StringComparison.Ordinal);
+        Assert.True(unset >= 0);
+        Assert.True(unset < script.IndexOf("codex_scan() {", StringComparison.Ordinal));
+        Assert.DoesNotContain("$(codex", script);
+        Assert.DoesNotContain("codex_scan |", script);
+        Assert.Contains("read -r -d '' entry", script);
+        Assert.Contains("kill -TERM $CODEX_PIDS", script);
+        Assert.Contains("kill -KILL $CODEX_PIDS", script);
         Assert.DoesNotContain("\r", script);
     }
 

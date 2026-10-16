@@ -219,26 +219,44 @@ public sealed class WslAppHostStopper(
         # --- codex: leftover processes of the desktop app (env carries CODEX_HOME) ---
         # This script and its ancestors are never targets: a CODEX_HOME forwarded through WSLENV
         # (or exported by the user's profile) would otherwise make the stopper kill itself.
+        # /proc/<pid>/environ is the environment a process was exec'd with, so every subshell the
+        # script forks shows the inherited CODEX_HOME too: the variable is dropped here (helpers
+        # exec'd from now on do not carry it), and the scan runs in this very shell - builtins
+        # only, no command substitution or pipeline around it - so no forked copy of the script
+        # exists while /proc is being read.
+        unset CODEX_HOME
         self_pids=" "
         q=$$
         while [ -n "$q" ] && [ "$q" -gt 0 ] 2>/dev/null; do
             self_pids="$self_pids$q "
             q=$(sed -e 's/^.*) //' "/proc/$q/stat" 2>/dev/null | awk '{print $2}')
         done
-        codex_pids() {
+        CODEX_PIDS=""
+        CODEX_N=0
+        codex_scan() {
+            local p pid entry
+            CODEX_PIDS=""
+            CODEX_N=0
             for p in /proc/[0-9]*; do
-                case "$self_pids" in *" ${p#/proc/} "*) continue ;; esac
-                if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -q '^CODEX_HOME='; then
-                    echo "${p#/proc/}"
-                fi
+                pid=${p#/proc/}
+                case "$self_pids" in *" $pid "*) continue ;; esac
+                [ -r "$p/environ" ] || continue
+                while IFS= read -r -d '' entry; do
+                    case "$entry" in
+                        CODEX_HOME=*)
+                            CODEX_PIDS="$CODEX_PIDS $pid"
+                            CODEX_N=$((CODEX_N + 1))
+                            break
+                            ;;
+                    esac
+                done 2>/dev/null < "$p/environ"
             done
         }
-        codex_count() { codex_pids | wc -l | tr -d ' '; }
         codex_wait_empty() {
-            local i=0 left
+            local i=0
             while [ "$i" -lt "$1" ]; do
-                left=$(codex_count)
-                [ "$left" = "0" ] && return 0
+                codex_scan
+                [ "$CODEX_N" -eq 0 ] && return 0
                 sleep 1
                 i=$((i + 1))
             done
@@ -248,17 +266,19 @@ public sealed class WslAppHostStopper(
         was_any=0
         codex_left=0
         if [ "$STOP_CODEX" = "1" ]; then
-            codex_left=$(codex_count)
+            codex_scan
+            codex_left=$CODEX_N
             if [ "$codex_left" -gt 0 ]; then
                 was_any=1
                 echo "CODEX=$codex_left (CODEX_HOME env) - SIGTERM"
-                kill -TERM $(codex_pids) 2>/dev/null
+                kill -TERM $CODEX_PIDS 2>/dev/null
                 if ! codex_wait_empty 10; then
-                    echo "ESCALATE: SIGTERM did not help, codex left $(codex_count) - SIGKILL"
-                    kill -KILL $(codex_pids) 2>/dev/null
+                    echo "ESCALATE: SIGTERM did not help, codex left $CODEX_N - SIGKILL"
+                    kill -KILL $CODEX_PIDS 2>/dev/null
                     sleep 2
                 fi
-                codex_left=$(codex_count)
+                codex_scan
+                codex_left=$CODEX_N
                 echo "CODEX_REMAIN=$codex_left"
             fi
         fi
