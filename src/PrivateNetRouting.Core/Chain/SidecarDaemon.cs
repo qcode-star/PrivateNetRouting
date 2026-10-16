@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.Pipes;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
