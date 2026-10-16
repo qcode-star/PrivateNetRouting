@@ -397,7 +397,9 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             string route;
             if (_passHostName)
             {
-                // the socks5 mode: the name rides the CONNECT, the trusted upstream resolves
+                // the socks5 mode: the name rides the CONNECT, the trusted upstream resolves. The
+                // resolved address never surfaces here, so the resolved-IP refusal of the by-IP
+                // path cannot apply — the upstream resolving honestly is that mode's contract.
                 upstreamSocket = await _socks.ConnectAsync(
                     target.Host, target.Port, TimeSpan.FromSeconds(_config.SocksTimeoutSeconds), stopToken);
                 route = "upstream resolves";
@@ -410,9 +412,25 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                     ? new ResolveResult(literal, "literal", null)
                     : await resolver.ResolveAsync(target.Host, stopToken);
 
-                // a name with several addresses: the first one that the upstream manages to dial
+                // a resolved address is a dial target just as much as the CONNECT literal: a name
+                // that resolves into the upstream host's own loopback/link-local must not be
+                // dialed (DNS rebinding, a hostile or misconfigured resolver)
                 IPAddress[] addresses = [destination.Ip, .. destination.Alternates ?? []];
-                (upstreamSocket, var dialed) = await DialFirstAsync(addresses, target, stopToken);
+                var dialable = addresses.Where(address => !ConnectTargetPolicy.IsForbidden(address)).ToArray();
+                if (dialable.Length == 0)
+                {
+                    await stream.WriteAsync(ForbiddenResponse, stopToken);
+                    _log.Warn($"forward-proxy: {DescribeRemote(client)} -> {target}: refused (resolved to a loopback or link-local address, which would reach the upstream's own host)");
+                    return;
+                }
+
+                if (dialable.Length < addresses.Length)
+                {
+                    _log.Warn($"forward-proxy: {target}: dropped {addresses.Length - dialable.Length} loopback/link-local address(es) of the resolution, dialing the rest only");
+                }
+
+                // a name with several addresses: the first one that the upstream manages to dial
+                (upstreamSocket, var dialed) = await DialFirstAsync(dialable, target, stopToken);
                 route = $"{dialed} ({destination.Source})";
             }
 

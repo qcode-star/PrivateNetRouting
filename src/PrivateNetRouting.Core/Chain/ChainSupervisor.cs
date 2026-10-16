@@ -397,7 +397,19 @@ public sealed class ChainSupervisor(
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var remaining = deadline - DateTime.UtcNow;
             attemptCts.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
-            if (await _upstreamCheck(attemptCts.Token))
+            bool alive;
+            try
+            {
+                alive = await _upstreamCheck(attemptCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // the attempt's own deadline (or the check's internal one) fired while the caller
+                // still waits: "not reachable yet", never the caller's cancellation
+                alive = false;
+            }
+
+            if (alive)
             {
                 Report(progress, "Egress", ChainStepStatus.Done, "egress is alive");
                 return;
@@ -426,7 +438,10 @@ public sealed class ChainSupervisor(
         var wholeChain = stopProxy && (_external || (stopNode && stopDaemon && stopKeeper));
 
         // every step runs even when an earlier one failed: a daemon that refuses to die must not
-        // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end
+        // leave the keeper (and a still-listening proxy) behind; the failures are raised at the end.
+        // The stop links run with no token on purpose: a stop runs to the end even on a cancelled
+        // token (a cancelled stop must still leave no daemon and no idle stoppers), so the links
+        // must not observe the caller's cancellation — only the wait for the semaphore above does.
         var failures = new List<(string Component, Exception Error)>();
 
         // the skipped shape has no local proxy to stop; the external upstream is not ours
@@ -453,7 +468,7 @@ public sealed class ChainSupervisor(
                 Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
                 try
                 {
-                    await cli.DownAsync(ct);
+                    await cli.DownAsync(CancellationToken.None);
                     Report(progress, "Node", ChainStepStatus.Done, "down");
                 }
                 catch (Exception ex)
@@ -468,7 +483,7 @@ public sealed class ChainSupervisor(
                 Report(progress, "Daemon", ChainStepStatus.Active, "stopping");
                 try
                 {
-                    await daemon.KillAsync(ct);
+                    await daemon.KillAsync(CancellationToken.None);
                     Report(progress, "Daemon", ChainStepStatus.Done, "stopped");
                 }
                 catch (Exception ex)
@@ -483,7 +498,7 @@ public sealed class ChainSupervisor(
                 Report(progress, "Keeper", ChainStepStatus.Active, "stopping");
                 try
                 {
-                    await keeper.KillAsync(ct);
+                    await keeper.KillAsync(CancellationToken.None);
                     Report(progress, "Keeper", ChainStepStatus.Done, "stopped");
                 }
                 catch (Exception ex)

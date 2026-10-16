@@ -110,7 +110,7 @@ public static class GuardElevatedCommands
             HostsFileBlock.Apply(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, config.BanHosts);
             ops.ApplyNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.ApplyFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ops.FlushDnsCacheAsync(CancellationToken.None).GetAwaiter().GetResult();
+            FlushTolerantly(ops, log);
             var probes = guard.BanProbes.Count > 0 ? guard.BanProbes : ["www.anthropic.com"];
             var blocked = probes.ToDictionary(probe => probe, ProbeBlocked);
             if (blocked.Any(pair => !pair.Value))
@@ -128,8 +128,24 @@ public static class GuardElevatedCommands
             HostsFileBlock.Remove(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker);
             ops.RemoveNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.RemoveFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ops.FlushDnsCacheAsync(CancellationToken.None).GetAwaiter().GetResult();
+            FlushTolerantly(ops, log);
             return "ban removed: hosts block, NRPT rule, firewall rules; DNS cache flushed";
+        }
+    }
+
+    /// <summary>
+    /// The DNS cache flush is the last, cosmetic step: its failure must not report the whole
+    /// operation failed after every layer was applied — a warning is enough.
+    /// </summary>
+    private static void FlushTolerantly(IBanSystemOps ops, FileLog log)
+    {
+        try
+        {
+            ops.FlushDnsCacheAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            log.Warn($"elevated ban: the DNS cache flush failed (the layers are applied): {ex.Message}");
         }
     }
 

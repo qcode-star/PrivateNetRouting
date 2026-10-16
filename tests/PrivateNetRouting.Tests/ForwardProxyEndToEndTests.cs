@@ -21,6 +21,9 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-e2e-").FullName;
     private readonly List<TcpListener> _listeners = [];
 
+    /// <summary>A documentation-range address (RFC 5737) the fixtures dial through the fake upstream: real-looking, not forbidden by the target policy, not routable.</summary>
+    private static readonly IPAddress FixtureIp = IPAddress.Parse("192.0.2.10");
+
     [Fact]
     public async Task ConnectsTunnelsAndCounts()
     {
@@ -29,7 +32,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -61,7 +64,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync("alice", "s3cret");
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300),
+            host => new ResolveResult(FixtureIp, "fake", 300),
             "alice",
             "s3cret");
 
@@ -80,7 +83,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -117,7 +120,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         var alive = await ProxyHealthCheck.CheckAsync(
             "127.0.0.1", proxyEndpoint.Port, "health.example", originPort, TimeSpan.FromSeconds(5));
@@ -133,7 +136,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (_, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
         var markerPath = Path.Combine(_tempDir, "marker");
 
         var alive = await ProxyHealthCheck.CheckAsync(
@@ -219,7 +222,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -264,7 +267,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, _) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         await proxy.StopAsync();
         await proxy.StartAsync(CancellationToken.None);
@@ -292,7 +295,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (_, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -339,7 +342,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (_, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -365,7 +368,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, _) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300));
+            host => new ResolveResult(FixtureIp, "fake", 300));
         await proxy.StopAsync();
 
         for (var round = 0; round < 20; round++)
@@ -410,7 +413,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             };
             var proxy = new ForwardProxyService(
                 config,
-                new FakeResolver(host => new ResolveResult(IPAddress.Loopback, "fake", 300)),
+                new FakeResolver(host => new ResolveResult(FixtureIp, "fake", 300)),
                 new Socks5Client("127.0.0.1:1"),
                 new ActivityMarker(Path.Combine(_tempDir, "marker-context"), TimeSpan.FromSeconds(60)),
                 log);
@@ -480,6 +483,86 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The 403 policy covers the resolved addresses too: a name that resolves into the upstream
+    /// host's own loopback or link-local (DNS rebinding, a hostile or misconfigured resolver) is
+    /// refused without a single dial.
+    /// </summary>
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("169.254.169.254")]
+    public async Task RefusesANameThatResolvesToAForbiddenAddress(string resolved)
+    {
+        var socksUpstream = await StartCountingSocksAsync();
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(IPAddress.Parse(resolved), "fake", 300));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync("CONNECT target.example:22 HTTP/1.1\r\n\r\n"u8.ToArray());
+
+        var status = await ReadLineAsync(stream);
+        Assert.StartsWith("HTTP/1.1 403", status);
+        Assert.Equal(0, _upstreamDials); // nothing was sent towards the upstream
+        Assert.Equal(0, proxy.FailedConnections); // a refusal is policy, not a failure
+    }
+
+    /// <summary>A mixed resolution: the forbidden alternate is dropped, the allowed one is dialed — the name still works.</summary>
+    [Fact]
+    public async Task DialsOnlyTheAllowedAddressesOfAMixedResolution()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(FixtureIp, "fake", 300, [IPAddress.Loopback]));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.StartsWith("HTTP/1.1 200", await ReadLineAsync(stream, timeout.Token));
+
+        await stream.WriteAsync("ping"u8.ToArray());
+        var echo = new byte[16];
+        var read = await stream.ReadAsync(echo, timeout.Token);
+        Assert.Equal("pong"u8.ToArray(), echo[..read]);
+        Assert.Equal(0, proxy.FailedConnections);
+    }
+
+    private int _upstreamDials;
+
+    /// <summary>SOCKS5 upstream that only counts handshakes: the refusal tests assert nothing ever reaches it.</summary>
+    private async Task<string> StartCountingSocksAsync()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        _listeners.Add(listener);
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                TcpClient session;
+                try
+                {
+                    session = await listener.AcceptTcpClientAsync();
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref _upstreamDials);
+                session.Dispose();
+            }
+        });
+        return ((IPEndPoint)listener.LocalEndpoint).ToString();
+    }
+
+    /// <summary>
     /// A client that connects and never sends its request (a port scan, an idle pre-connect) is
     /// closed without a 502 and is not a proxy failure.
     /// </summary>
@@ -489,7 +572,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(IPAddress.Loopback, "fake", 300),
+            host => new ResolveResult(FixtureIp, "fake", 300),
             headerTimeoutSeconds: 1);
 
         using var client = new TcpClient();
@@ -649,8 +732,11 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// SOCKS5 upstream that really connects to the requested IP:port and relays bytes;
-    /// with credentials — the RFC 1929 subnegotiation first, and only the exact pair opens the tunnel.
+    /// SOCKS5 upstream that accepts the CONNECT and relays bytes; the requested address is
+    /// ignored (the fixtures dial a documentation-range address nothing here can route), only its
+    /// port is — the relay connects to that port on the loopback, standing in for "the upstream
+    /// reached the target". With credentials — the RFC 1929 subnegotiation first, and only the
+    /// exact pair opens the tunnel.
     /// </summary>
     private async Task<string> StartRelaySocksAsync(string? user = null, string? password = null)
     {
@@ -726,14 +812,14 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
                         return;
                     }
 
-                    var ip = new IPAddress(request[4..8]);
+                    // the requested address is ignored (see the helper's doc comment), the port is what the tunnel aims at
                     var port = BinaryPrimitives.ReadUInt16BigEndian(request.AsSpan(8, 2));
                     await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
 
                     try
                     {
                         using var target = new TcpClient();
-                        await target.ConnectAsync(ip, port);
+                        await target.ConnectAsync(IPAddress.Loopback, port);
                         var targetStream = target.GetStream();
                         await Task.WhenAll(
                             RelayAsync(stream, targetStream),

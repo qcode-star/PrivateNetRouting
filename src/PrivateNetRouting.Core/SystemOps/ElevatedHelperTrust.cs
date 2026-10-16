@@ -49,4 +49,11 @@ public static partial class ElevatedHelperTrust
     /// <summary>The system hosts file.</summary>
     public static string SystemHostsFile() =>
         Path.Combine(Environment.SystemDirectory, "drivers", "etc", "hosts");
+
+    /// <summary>The standard per-machine Tailscale install — the only binaries the elevated chain helper executes.</summary>
+    public static string SystemTailscaled() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale", "tailscaled.exe");
+
+    public static string SystemTailscaleCli() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale", "tailscale.exe");
 }

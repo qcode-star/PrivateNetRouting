@@ -169,21 +169,36 @@ internal static class Program
             Console.WriteLine("note: forwardProxy.detached=true — the detached worker may hold the port; stop it first (pnr chain down)");
         }
 
+        config.ForwardProxy.Detached = false; // the foreground mode overrides the config — for this run only
         await using var consoleRuntime = ProxyRuntime.FromConfig(config);
         try
         {
-            await consoleRuntime.ProxyService!.StartAsync(Interrupt.Token);
-            Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyService.ListenerEndpoints)}");
+            // through the supervisor, not the raw service: only that start registers the proxy stop
+            // channel, so the detached idle stopper (and `pnr chain down`) can ask this process to
+            // stop its own listener instead of leaving a half-stopped chain behind
+            await consoleRuntime.ProxyControl.StartAsync(Interrupt.Token);
+            if (consoleRuntime.ProxyService is not { } service || !service.IsRunning)
+            {
+                Console.Error.WriteLine("forward proxy: the port is held by another owner — nothing to run in this process (see the log)");
+                return 1;
+            }
+
+            Console.WriteLine($"forward proxy: listening on {string.Join(", ", consoleRuntime.ProxyControl.ListenerEndpoints)}");
             Console.WriteLine($"log: {consoleRuntime.Log.FilePath}");
             Console.WriteLine("Ctrl+C to stop");
-            await Task.Delay(Timeout.Infinite, Interrupt.Token);
+            while (!Interrupt.Token.IsCancellationRequested && service.IsRunning)
+            {
+                // a channel-requested stop (the idle stopper) releases the listener without a
+                // Ctrl+C — this loop is what ends the command then
+                await Task.Delay(500, Interrupt.Token);
+            }
         }
         catch (OperationCanceledException)
         {
             // Ctrl+C is how this command is meant to end
-            Console.WriteLine("forward proxy: stopped");
         }
 
+        Console.WriteLine("forward proxy: stopped");
         return 0;
     }
 

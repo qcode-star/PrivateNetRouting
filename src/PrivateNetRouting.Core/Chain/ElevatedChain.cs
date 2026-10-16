@@ -43,6 +43,7 @@ public static class ElevatedChainCommands
             var stateDir = config.Chain.Tailscale.StateDir;
             Directory.CreateDirectory(stateDir);
 
+            PinChainLocations(config, log);
             var detail = command switch
             {
                 StartDaemon => StartDaemonCore(config, log),
@@ -65,6 +66,35 @@ public static class ElevatedChainCommands
 
             return 1;
         }
+    }
+
+    /// <summary>
+    /// The chain binaries are executed as administrator, so the user-writable config does not name
+    /// them: like the guard half, the helper pins them to the standard per-machine Tailscale
+    /// install (logged when they differed) and refuses the whole run when that install is missing.
+    /// </summary>
+    internal static void PinChainLocations(AppConfig config, FileLog log, string? tailscaled = null, string? cli = null)
+    {
+        tailscaled ??= ElevatedHelperTrust.SystemTailscaled();
+        cli ??= ElevatedHelperTrust.SystemTailscaleCli();
+        if (!File.Exists(tailscaled) || !File.Exists(cli))
+        {
+            throw new FileNotFoundException(
+                $"the elevated chain helper executes only the standard Tailscale install ({tailscaled}); it is missing, refusing to run");
+        }
+
+        if (!string.Equals(Path.GetFullPath(config.Chain.Tailscale.TailscaledPath), tailscaled, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Warn($"elevated helper: chain.tailscale.tailscaledPath '{config.Chain.Tailscale.TailscaledPath}' ignored, using the standard Tailscale install");
+        }
+
+        if (!string.Equals(Path.GetFullPath(config.Chain.Tailscale.CliPath), cli, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Warn($"elevated helper: chain.tailscale.cliPath '{config.Chain.Tailscale.CliPath}' ignored, using the standard Tailscale install");
+        }
+
+        config.Chain.Tailscale.TailscaledPath = tailscaled;
+        config.Chain.Tailscale.CliPath = cli;
     }
 
     private static string StartDaemonCore(AppConfig config, FileLog log)

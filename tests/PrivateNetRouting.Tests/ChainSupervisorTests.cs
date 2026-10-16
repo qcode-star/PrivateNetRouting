@@ -464,13 +464,19 @@ public class ChainSupervisorTests : IDisposable
     /// <summary>
     /// A completed stop ends with the chain-stopped hook — the idle stopper is taken down through
     /// it, in both modes. The hook runs even when the caller's token is already cancelled (a
-    /// cancelled chain stop must still leave no stoppers), and it receives no leftover token.
+    /// cancelled chain stop must still leave no stoppers): the stop links receive
+    /// <see cref="CancellationToken.None"/> — the fakes honor their token, so this passes only
+    /// when the supervisor really detaches the stop from the caller's cancellation — and the hook
+    /// receives no leftover token.
     /// </summary>
     [Fact]
     public async Task CompletedStopFiresTheChainStoppedHook()
     {
+        var daemon = new FakeDaemon(_calls);
+        var keeper = new FakeKeeper(_calls);
+        var cli = new FakeCli(_calls);
         var tokens = new List<CancellationToken>();
-        var supervisor = Create(chainStopped: ct =>
+        var supervisor = Create(daemon: daemon, keeper: keeper, cli: cli, chainStopped: ct =>
         {
             tokens.Add(ct);
             return Task.CompletedTask;
@@ -481,6 +487,9 @@ public class ChainSupervisorTests : IDisposable
         await supervisor.StopAsync(null, cancelled.Token);
 
         Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+        Assert.Equal([CancellationToken.None], daemon.KillTokens);
+        Assert.Equal([CancellationToken.None], keeper.KillTokens);
+        Assert.Equal([CancellationToken.None], cli.DownTokens);
         Assert.Equal([CancellationToken.None], tokens);
 
         _calls.Clear();
@@ -618,6 +627,39 @@ public class ChainSupervisorTests : IDisposable
             supervisor.EnsureRunningAsync(null, cts.Token));
 
         Assert.DoesNotContain("proxy.start", _calls); // the proxy never came up past a cancelled egress
+    }
+
+    /// <summary>
+    /// A hanging upstream must end as a <see cref="ChainException"/> at the health deadline, never
+    /// as a cancellation: the egress check's own deadlines (its SOCKS timeout, the attempt
+    /// deadline) fire while the caller token is live, and the caller would see a false
+    /// "Cancelled" instead of "the upstream does not pass the check".
+    /// </summary>
+    [Fact]
+    public async Task HangingUpstreamEgressEndsAtTheDeadlineNotAsACancellation()
+    {
+        using var caller = new CancellationTokenSource();
+        async Task<bool> Upstream(CancellationToken attempt)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, attempt);
+            }
+            catch (OperationCanceledException) when (!caller.IsCancellationRequested)
+            {
+                return false; // the check's internal deadline, folded into "not reachable yet"
+            }
+
+            return false;
+        }
+
+        var supervisor = Create(mode: "socks5", upstream: Upstream, healthWaitSeconds: 2);
+
+        var error = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.EnsureRunningAsync(null, caller.Token));
+
+        Assert.Contains("egress", error.Message);
+        Assert.DoesNotContain("proxy.start", _calls); // nothing came up past a dead egress
     }
 
     [Fact]
@@ -898,6 +940,9 @@ public class ChainSupervisorTests : IDisposable
 
         public Exception? KillThrows { get; init; }
 
+        /// <summary>The tokens the stop link received: production must hand it CancellationToken.None.</summary>
+        public List<CancellationToken> KillTokens { get; } = [];
+
         public bool NeedsUac { get; init; }
 
         public bool StartNeedsUac() => NeedsUac;
@@ -929,6 +974,8 @@ public class ChainSupervisorTests : IDisposable
 
         public Task KillAsync(CancellationToken ct)
         {
+            KillTokens.Add(ct);
+            ct.ThrowIfCancellationRequested(); // the fake honours the token exactly like production would
             calls.Add("daemon.kill");
             if (KillThrows is not null)
             {
@@ -947,6 +994,8 @@ public class ChainSupervisorTests : IDisposable
 
         public IOException? EnsureThrows { get; init; }
 
+        public List<CancellationToken> KillTokens { get; } = [];
+
         public Task EnsureStartedAsync(CancellationToken ct)
         {
             calls.Add("keeper.ensure");
@@ -961,6 +1010,8 @@ public class ChainSupervisorTests : IDisposable
 
         public Task KillAsync(CancellationToken ct)
         {
+            KillTokens.Add(ct);
+            ct.ThrowIfCancellationRequested();
             IsRunning = false;
             calls.Add("keeper.kill");
             return Task.CompletedTask;
@@ -981,6 +1032,9 @@ public class ChainSupervisorTests : IDisposable
 
         public IOException? LoginThrows { get; init; }
 
+        /// <summary>The tokens the stop link received: production must hand it CancellationToken.None.</summary>
+        public List<CancellationToken> DownTokens { get; } = [];
+
         public Task<CliResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken ct) =>
             Task.FromResult(new CliResult(0, string.Join(' ', arguments)));
 
@@ -996,6 +1050,8 @@ public class ChainSupervisorTests : IDisposable
 
         public Task<CliResult> DownAsync(CancellationToken ct)
         {
+            DownTokens.Add(ct);
+            ct.ThrowIfCancellationRequested();
             calls.Add("cli.down");
             BackendState = "Stopped";
             return Task.FromResult(new CliResult(0, "down"));

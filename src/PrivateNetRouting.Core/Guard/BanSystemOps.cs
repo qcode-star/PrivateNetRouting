@@ -37,6 +37,10 @@ public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor
         var name = PsLiteral(config.Guard.NrptRuleName);
         var group = PsLiteral(config.Guard.FirewallGroup);
         var (code, output) = await powershell.RunScriptAsync($$"""
+            $ErrorActionPreference = 'Stop'
+            # a dead firewall/DNS service must end in a non-zero exit (the caller reads the layer as
+            # unknown), not as an honest "no rules" — the profile read proves the service answers
+            Get-NetFirewallProfile | Out-Null
             $nrpt = @(Get-DnsClientNrptRule | Where-Object { $_.DisplayName -eq {{name}} })
             $fw = @(Get-NetFirewallRule -Group {{group}} -ErrorAction SilentlyContinue)
             $ns = @($nrpt | ForEach-Object { $_.Namespace })
@@ -64,19 +68,25 @@ public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor
         ThrowIfFailed(what, code, output);
     }
 
-    /// <summary>One NRPT rule for all subtrees: apex + ".apex"; the rule is removed first — applying is idempotent.</summary>
+    /// <summary>
+    /// One NRPT rule for all subtrees: apex + ".apex"; the rule is removed first — applying is
+    /// idempotent. The scripts stop at the first cmdlet error: with <c>powershell -Command</c>
+    /// the exit code is the last statement's success alone, so an unchecked earlier failure would
+    /// be masked by a succeeding final one.
+    /// </summary>
     internal string BuildNrptScript(bool apply)
     {
         var name = PsLiteral(config.Guard.NrptRuleName);
         var remove = $"Get-DnsClientNrptRule | Where-Object {{ $_.DisplayName -eq {name} }} | Remove-DnsClientNrptRule -Force";
         if (!apply)
         {
-            return remove;
+            return $"$ErrorActionPreference = 'Stop'\n{remove}";
         }
 
         var namespaces = string.Join(",", config.BanTrees.SelectMany(t => new[] { t, "." + t }).Select(PsLiteral));
         var comment = PsLiteral(config.Guard.NrptComment);
         return $"""
+            $ErrorActionPreference = 'Stop'
             {remove}
             Add-DnsClientNrptRule -Namespace @({namespaces}) -NameServers @('127.0.0.1') -DisplayName {name} -Comment {comment} | Out-Null
             """;
@@ -89,7 +99,7 @@ public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor
         var remove = $"Get-NetFirewallRule -Group {group} -ErrorAction SilentlyContinue | Remove-NetFirewallRule";
         if (!apply)
         {
-            return remove;
+            return $"$ErrorActionPreference = 'Stop'\n{remove}";
         }
 
         var name = config.Guard.NrptRuleName;
@@ -98,7 +108,7 @@ public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor
             .Select(family => $"""
                 New-NetFirewallRule -DisplayName {PsLiteral($"{name}: {family.Key}")} -Group {group} -Direction Outbound -Action Block -Profile Any -RemoteAddress @({string.Join(",", family.Select(PsLiteral))}) | Out-Null
                 """);
-        return $"{remove}\n{string.Join("\n", rules)}";
+        return $"$ErrorActionPreference = 'Stop'\n{remove}\n{string.Join("\n", rules)}";
     }
 
     internal static BanLayersState ParseLayersState(string json)

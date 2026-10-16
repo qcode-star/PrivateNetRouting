@@ -1241,9 +1241,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_launchBusy)
+        if (_chainBusy || _launchBusy)
         {
-            return;
+            return; // the same interlock the tray path applies: a launch must not race a chain operation
         }
 
         bool claudeRunning;
@@ -1317,7 +1317,9 @@ public partial class MainWindow : Window
 
     private async Task RunLaunchAsync()
     {
-        if (_launchBusy)
+        // one chain/launch operation at a time: the launch writes the same _operationCts slot the
+        // card's operations use, so a concurrent start would leave Stop cancelling the wrong one
+        if (_chainBusy || _launchBusy)
         {
             return;
         }
@@ -1410,45 +1412,28 @@ public partial class MainWindow : Window
 
     private async Task RunBrowserLaunchAsync()
     {
-        if (_launchBusy)
+        // one chain/launch operation at a time, and the flag goes up before the first await: two
+        // quick signals must not both pass the guard while the first scan is in flight
+        if (_chainBusy || _launchBusy)
         {
-            return;
-        }
-
-        if (!_runtime.Browser.IsConfigured)
-        {
-            // The first click without a profile: a warning with an offer to create one right here.
-            if (!OfferBrowserProfileCreation())
-            {
-                _viewModel.SetCheckResult("Main.Browser.NotConfigured");
-                return;
-            }
-
-            if (!_runtime.Browser.IsConfigured)
-            {
-                return; // the dialog was closed without creating anything
-            }
-        }
-
-        bool browserRunning;
-        try
-        {
-            browserRunning = await Task.Run(() => _runtime.Browser.IsOurBrowserRunning());
-        }
-        catch (Exception ex)
-        {
-            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
-            return;
-        }
-
-        if (browserRunning)
-        {
-            _viewModel.SetCheckResult("Main.Browser.AlreadyRunning");
             return;
         }
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
+        try
+        {
+            await RunBrowserLaunchCoreAsync();
+        }
+        finally
+        {
+            _launchBusy = false;
+            _viewModel.SetLaunchBusy(false);
+        }
+    }
+
+    private async Task RunBrowserLaunchCoreAsync()
+    {
         var success = false;
         var chainWasDown = false; // set by the confirmation: the launch raises the chain only then
         ChainState? chainBefore = null; // the links that existed before the raise: a cancel leaves them running
@@ -1456,6 +1441,38 @@ public partial class MainWindow : Window
         _operationCts = cts;
         try
         {
+            if (!_runtime.Browser.IsConfigured)
+            {
+                // The first click without a profile: a warning with an offer to create one right here.
+                if (!OfferBrowserProfileCreation())
+                {
+                    _viewModel.SetCheckResult("Main.Browser.NotConfigured");
+                    return;
+                }
+
+                if (!_runtime.Browser.IsConfigured)
+                {
+                    return; // the dialog was closed without creating anything
+                }
+            }
+
+            bool browserRunning;
+            try
+            {
+                browserRunning = await Task.Run(() => _runtime.Browser.IsOurBrowserRunning());
+            }
+            catch (Exception ex)
+            {
+                _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+                return;
+            }
+
+            if (browserRunning)
+            {
+                _viewModel.SetCheckResult("Main.Browser.AlreadyRunning");
+                return;
+            }
+
             // The question about an egress that did not answer, asked by the launcher before the
             // launch. When the egress is ours to raise (the forward proxy while the chain runs
             // it, the sidecar's listener in the tailscale mode), yes makes the launcher raise the
@@ -1535,8 +1552,6 @@ public partial class MainWindow : Window
         {
             _operationCts = null;
             cts.Dispose();
-            _launchBusy = false;
-            _viewModel.SetLaunchBusy(false);
             EndOperation();
             SettleChainCardAfterOperation(success);
             await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
@@ -1588,7 +1603,8 @@ public partial class MainWindow : Window
 
     private async Task RunCodexLaunchAsync()
     {
-        if (_launchBusy)
+        // the same single-operation rule as the Claude launch (one _operationCts slot)
+        if (_chainBusy || _launchBusy)
         {
             return;
         }

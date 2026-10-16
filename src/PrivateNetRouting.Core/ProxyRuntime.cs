@@ -420,6 +420,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
                 ct);
             return true;
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // the check's own deadline (the SOCKS timeout) fired while the caller still waits:
+            // "not reachable yet", like every transport error — the poll retries to its deadline.
+            // Only the caller's own cancellation surfaces as OperationCanceledException.
+            log.Debug("chain: egress check timed out");
+            return false;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             log.Debug($"chain: egress check failed: {ex.Message}");

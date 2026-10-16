@@ -136,6 +136,40 @@ public class ElevatedHelperTests : IDisposable
         Assert.StartsWith("fail", File.ReadAllText(resultFile));
     }
 
+    // ----- the elevated chain helper executes only the standard Tailscale install -----
+
+    [Fact]
+    public void ChainBinariesArePinnedToTheStandardInstall()
+    {
+        var tailscaled = Path.Combine(_dir, "tailscaled.exe");
+        var cli = Path.Combine(_dir, "tailscale.exe");
+        File.WriteAllText(tailscaled, "stub");
+        File.WriteAllText(cli, "stub");
+        var config = new AppConfig();
+        config.Chain.Tailscale.TailscaledPath = @"C:\untrusted\tailscaled.exe";
+        config.Chain.Tailscale.CliPath = @"C:\untrusted\tailscale.exe";
+        using var log = new FileLog(Path.Combine(_dir, "pin.log"));
+
+        ElevatedChainCommands.PinChainLocations(config, log, tailscaled, cli);
+
+        Assert.Equal(tailscaled, config.Chain.Tailscale.TailscaledPath);
+        Assert.Equal(cli, config.Chain.Tailscale.CliPath);
+        var pinLog = File.ReadAllText(Path.Combine(_dir, "pin.log"));
+        Assert.Contains("tailscaledPath", pinLog);
+        Assert.Contains("ignored", pinLog);
+        Assert.Contains("cliPath", pinLog);
+    }
+
+    [Fact]
+    public void AChainHelperRunWithoutTheStandardInstallIsRefused()
+    {
+        var config = new AppConfig();
+        using var log = new FileLog(Path.Combine(_dir, "pin-missing.log"));
+
+        Assert.Throws<FileNotFoundException>(() =>
+            ElevatedChainCommands.PinChainLocations(config, log, Path.Combine(_dir, "absent.exe"), Path.Combine(_dir, "also-absent.exe")));
+    }
+
     // ----- P2-22: the in-process path -----
 
     [Fact]

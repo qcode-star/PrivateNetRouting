@@ -739,11 +739,14 @@ public class GuardTests : IDisposable
         var ops = new PowerShellBanSystemOps(config, new StubPowerShell());
 
         var script = ops.BuildNrptScript(apply: true);
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'", script); // a failing statement must not be masked by a succeeding last one
         Assert.Contains("Remove-DnsClientNrptRule", script); // idempotence: remove first
         Assert.Contains("-Namespace @('claude.ai','.claude.ai','openai.com','.openai.com')", script);
         Assert.Contains("-NameServers @('127.0.0.1')", script);
         Assert.Contains("-DisplayName 'ai''direct'", script);
-        Assert.DoesNotContain("Add-DnsClientNrptRule", ops.BuildNrptScript(apply: false));
+        var remove = ops.BuildNrptScript(apply: false);
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'", remove);
+        Assert.DoesNotContain("Add-DnsClientNrptRule", remove);
     }
 
     [Fact]
@@ -754,11 +757,13 @@ public class GuardTests : IDisposable
         var ops = new PowerShellBanSystemOps(config, new StubPowerShell());
 
         var script = ops.BuildFirewallScript(apply: true);
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'", script); // a failing IPv4 rule must not be masked by a succeeding IPv6 one
         Assert.Contains("Remove-NetFirewallRule", script);
         Assert.Contains("-DisplayName 'ai-direct-ban: IPv4' -Group 'ai-direct-ban'", script);
         Assert.Contains("-RemoteAddress @('160.79.104.0/21')", script);
         Assert.Contains("-DisplayName 'ai-direct-ban: IPv6'", script);
         Assert.Contains("-RemoteAddress @('2607:6bc0::/48','2607:6bc0:11::/48')", script);
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'", ops.BuildFirewallScript(apply: false));
     }
 
     [Fact]
