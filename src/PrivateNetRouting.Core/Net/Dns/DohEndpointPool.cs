@@ -14,7 +14,11 @@ namespace PrivateNetRouting.Core.Net.Dns;
 /// current set remains — endpoints found earlier are not dropped. A pool that has no live
 /// endpoint — built before the chain came up, or the chain was down at the last refresh — is
 /// refreshed on demand (<see cref="EnsureLiveAsync"/>, single-flight and throttled) and retried
-/// on a short timer instead of waiting out the long refresh interval.
+/// on a short timer instead of waiting out the long refresh interval. Both retries back off while
+/// the pool stays empty (the chain is down: every round spawns `tailscale debug netmap` and
+/// probes) — the timer doubles from <see cref="EmptyRetryInterval"/> up to the refresh interval,
+/// the on-demand gap from <see cref="OnDemandMinGap"/> up to <see cref="EmptyRetryInterval"/> —
+/// and a refresh that finds a live endpoint resets them.
 /// </summary>
 public sealed partial class DohEndpointPool : IDisposable
 {
@@ -40,11 +44,14 @@ public sealed partial class DohEndpointPool : IDisposable
     private Task? _inflight;
     private DateTimeOffset _lastAttempt = DateTimeOffset.MinValue;
 
-    /// <summary>While no endpoint is live the background refresh retries this often (capped by the refresh interval).</summary>
-    private static readonly TimeSpan EmptyRetryInterval = TimeSpan.FromSeconds(15);
+    /// <summary>Consecutive finished refreshes that found no live endpoint (0 — the last one found some).</summary>
+    private int _emptyStreak;
 
-    /// <summary>The minimum gap between two on-demand refreshes of a pool that stays empty.</summary>
-    private static readonly TimeSpan OnDemandMinGap = TimeSpan.FromSeconds(5);
+    /// <summary>While no endpoint is live the background refresh first retries this soon, then backs off.</summary>
+    internal static readonly TimeSpan EmptyRetryInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>The first gap between two on-demand refreshes of a pool that stays empty, then it backs off.</summary>
+    internal static readonly TimeSpan OnDemandMinGap = TimeSpan.FromSeconds(5);
 
     public DohEndpointPool(
         Socks5Client socks,
@@ -143,13 +150,40 @@ public sealed partial class DohEndpointPool : IDisposable
                 return;
             }
 
-            if (_inflight is null && _time.GetUtcNow() - _lastAttempt < OnDemandMinGap)
+            if (_inflight is null && _time.GetUtcNow() - _lastAttempt < Backoff(OnDemandMinGap, EmptyRetryInterval, _emptyStreak))
             {
                 return;
             }
         }
 
         await RefreshAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The background loop's wait before the next refresh: the refresh interval over a live pool,
+    /// a doubling retry (from <see cref="EmptyRetryInterval"/>, capped by the refresh interval)
+    /// over an empty one.
+    /// </summary>
+    internal TimeSpan NextRefreshDelay()
+    {
+        lock (_gate)
+        {
+            return _lastLive is { Count: > 0 }
+                ? _refreshInterval
+                : Backoff(EmptyRetryInterval, _refreshInterval, _emptyStreak);
+        }
+    }
+
+    /// <summary><paramref name="first"/> after one empty refresh, doubled with every further one, never above <paramref name="cap"/>.</summary>
+    private static TimeSpan Backoff(TimeSpan first, TimeSpan cap, int emptyStreak)
+    {
+        var delay = first;
+        for (var i = 1; i < emptyStreak && delay < cap; i++)
+        {
+            delay += delay;
+        }
+
+        return delay < cap ? delay : cap;
     }
 
     private async Task RefreshForeverAsync()
@@ -159,10 +193,7 @@ public sealed partial class DohEndpointPool : IDisposable
             // waiting first: the refresh that started this loop is already running or done
             while (!_stopToken.IsCancellationRequested)
             {
-                var delay = HasLive
-                    ? _refreshInterval
-                    : TimeSpan.FromTicks(Math.Min(_refreshInterval.Ticks, EmptyRetryInterval.Ticks));
-                await Task.Delay(delay, _stopToken).ConfigureAwait(false);
+                await Task.Delay(NextRefreshDelay(), _stopToken).ConfigureAwait(false);
                 await SafeRefreshAsync().ConfigureAwait(false);
             }
         }
@@ -267,6 +298,7 @@ public sealed partial class DohEndpointPool : IDisposable
             lock (_gate)
             {
                 _lastAttempt = _time.GetUtcNow();
+                _emptyStreak = _lastLive is { Count: > 0 } ? 0 : _emptyStreak + 1;
                 _inflight = null;
             }
         }

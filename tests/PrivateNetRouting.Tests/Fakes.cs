@@ -122,3 +122,14 @@ internal sealed class FakeAppCloser : IRunningAppCloser
         }
     }
 }
+
+/// <summary>A DoH discovery source that hangs (a slow netmap call) until the test releases it.</summary>
+internal sealed class BlockingDohSource : IDohEndpointSource
+{
+    private readonly TaskCompletionSource<IReadOnlyList<DohEndpoint>> _release =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task<IReadOnlyList<DohEndpoint>> GetEndpointsAsync(CancellationToken ct) => _release.Task.WaitAsync(ct);
+
+    public void Release(IReadOnlyList<DohEndpoint> endpoints) => _release.TrySetResult(endpoints);
+}

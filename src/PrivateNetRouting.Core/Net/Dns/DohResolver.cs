@@ -22,6 +22,7 @@ public sealed class DohResolver : IDnsResolver
 
     private readonly DohEndpointPool _pool;
     private readonly TimeSpan _hedgeDelay;
+    private readonly TimeSpan _refreshWait;
     private readonly Func<DohEndpoint, string, CancellationToken, Task<DnsAnswer>> _query;
 
     public DohResolver(
@@ -29,10 +30,13 @@ public sealed class DohResolver : IDnsResolver
         DohEndpointPool pool,
         TimeSpan timeout,
         TimeSpan? hedgeDelay = null,
-        Func<DohEndpoint, string, CancellationToken, Task<DnsAnswer>>? query = null)
+        Func<DohEndpoint, string, CancellationToken, Task<DnsAnswer>>? query = null,
+        TimeSpan? refreshWait = null)
     {
         _pool = pool;
         _hedgeDelay = hedgeDelay ?? DefaultHedgeDelay;
+        // a lookup waits for an on-demand pool refresh no longer than one DoH query may take
+        _refreshWait = refreshWait ?? timeout;
         _query = query ?? ((endpoint, host, ct) => DohClient.QueryAsync(socks, endpoint, host, timeout, ct));
     }
 
@@ -41,10 +45,27 @@ public sealed class DohResolver : IDnsResolver
     public async Task<ResolveResult> ResolveAsync(string host, CancellationToken ct)
     {
         // a pool built before the chain came up (or refreshed over a down chain) holds nothing
-        // answering: refresh it now instead of waiting for the next timer tick
-        await _pool.EnsureLiveAsync(ct).ConfigureAwait(false);
+        // answering: refresh it now instead of waiting for the next timer tick — but a refresh
+        // can take the whole netmap timeout plus the probes, so the lookup waits only a bounded
+        // time and then goes on with what the pool already knows (the refresh keeps running)
+        using (var refreshBound = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            refreshBound.CancelAfter(_refreshWait);
+            try
+            {
+                await _pool.EnsureLiveAsync(refreshBound.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+            }
+        }
 
         var candidates = _pool.SnapshotAlive();
+        if (candidates.Count == 0)
+        {
+            throw new IOException($"doh: no endpoint known yet for {host} (the pool is still being refreshed)");
+        }
+
         using var race = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var running = new List<Task<Attempt>>();
         var next = 0;

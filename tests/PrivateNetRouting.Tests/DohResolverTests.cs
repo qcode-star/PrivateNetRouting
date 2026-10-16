@@ -190,6 +190,42 @@ public class DohResolverTests : IDisposable
         Assert.Equal([Ep(2)], pool.SnapshotAlive()); // only the answering one is alive again
     }
 
+    /// <summary>An on-demand refresh can take the whole netmap timeout: the lookup goes on with the known endpoints after a short wait.</summary>
+    [Fact]
+    public async Task ALookupDoesNotWaitOutASlowPoolRefresh()
+    {
+        var source = new BlockingDohSource();
+        using var pool = new DohEndpointPool(
+            new Socks5Client("127.0.0.1:1"),
+            [Ep(1)],
+            _log,
+            refreshInterval: TimeSpan.FromHours(1),
+            probeTimeout: TimeSpan.FromSeconds(1),
+            deadCooldown: TimeSpan.FromMinutes(5),
+            probeName: "example.com",
+            source: source,
+            prober: (_, _) => Task.FromResult(true));
+        var resolver = new DohResolver(
+            new Socks5Client("127.0.0.1:1"),
+            pool,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMinutes(1),
+            (_, _, _) => Task.FromResult(Answer("198.51.100.9")),
+            refreshWait: TimeSpan.FromMilliseconds(100));
+
+        try
+        {
+            var result = await resolver.ResolveAsync("name.example", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3));
+
+            Assert.Equal(IPAddress.Parse("198.51.100.9"), result.Ip);
+            Assert.False(pool.HasLive); // the refresh is still running in the background
+        }
+        finally
+        {
+            source.Release([Ep(1)]);
+        }
+    }
+
     [Fact]
     public async Task AllEndpointsFailingIsOneIoError()
     {

@@ -149,6 +149,62 @@ public class DohEndpointPoolTests : IDisposable
         Assert.Equal(callsWhenLive, source.Calls);
     }
 
+    /// <summary>Over a down chain every round spawns discovery and probes: the empty-pool retry backs off and resets on success.</summary>
+    [Fact]
+    public async Task EmptyPoolRetryBacksOffAndResetsOnceLive()
+    {
+        var time = new ManualTimeProvider();
+        var source = new SwitchableSource();
+        using var pool = CreatePool([], (_, _) => Task.FromResult(true), time, source);
+
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Equal(TimeSpan.FromSeconds(15), pool.NextRefreshDelay());
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Equal(TimeSpan.FromSeconds(30), pool.NextRefreshDelay());
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Equal(TimeSpan.FromSeconds(60), pool.NextRefreshDelay());
+
+        for (var i = 0; i < 10; i++)
+        {
+            await pool.RefreshAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(TimeSpan.FromHours(1), pool.NextRefreshDelay()); // capped by the refresh interval
+
+        source.Endpoints = [Ep(9)];
+        await pool.RefreshAsync(CancellationToken.None);
+        Assert.Equal(TimeSpan.FromHours(1), pool.NextRefreshDelay());
+
+        // the chain goes down again and the probes fail: the retry starts over from the short step
+        source.Endpoints = null;
+        using var dying = CreatePool([Ep(1)], (_, _) => Task.FromResult(false), time, source);
+        await dying.RefreshAsync(CancellationToken.None);
+        Assert.Equal(TimeSpan.FromSeconds(15), dying.NextRefreshDelay());
+    }
+
+    /// <summary>A pool that keeps coming back empty is not refreshed on demand every few seconds of lookups.</summary>
+    [Fact]
+    public async Task OnDemandRefreshGapBacksOffWhileThePoolStaysEmpty()
+    {
+        var time = new ManualTimeProvider();
+        var source = new SwitchableSource();
+        using var pool = CreatePool([], (_, _) => Task.FromResult(true), time, source);
+
+        await pool.RefreshAsync(CancellationToken.None);
+        await pool.RefreshAsync(CancellationToken.None);
+        await pool.RefreshAsync(CancellationToken.None);
+        var calls = source.Calls;
+
+        source.Endpoints = [Ep(9)];
+        time.Advance(TimeSpan.FromSeconds(10)); // past the first gap, not past the backed-off one
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.Equal(calls, source.Calls);
+
+        time.Advance(TimeSpan.FromSeconds(6)); // the gap never grows past the empty-pool retry step
+        await pool.EnsureLiveAsync(CancellationToken.None);
+        Assert.True(pool.HasLive);
+    }
+
     /// <summary>Every `pnr` command composes a runtime: a pool nobody asks must not spawn discovery or probe anything.</summary>
     [Fact]
     public async Task AnUnusedPoolDoesNoBackgroundWork()
