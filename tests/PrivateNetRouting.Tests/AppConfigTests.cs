@@ -219,6 +219,75 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentUpdatesNeitherCollideNorLoseAChange()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+
+        await Task.WhenAll(
+            Task.Run(() => AppConfigStore.Update(config => config.Ui.Language = "ru", _path)),
+            Task.Run(() => AppConfigStore.Update(config => config.Ui.ChainCardExpanded = !new AppConfig().Ui.ChainCardExpanded, _path)),
+            Task.Run(() => AppConfigStore.Update(config => config.Ui.GuardsCardExpanded = !new AppConfig().Ui.GuardsCardExpanded, _path)),
+            Task.Run(() => AppConfigStore.Update(config => config.Watchdog.AutoStart = !new AppConfig().Watchdog.AutoStart, _path)));
+
+        var reloaded = AppConfigStore.LoadOrCreate(_path);
+        Assert.Equal("ru", reloaded.Ui.Language);
+        Assert.Equal(!new AppConfig().Ui.ChainCardExpanded, reloaded.Ui.ChainCardExpanded);
+        Assert.Equal(!new AppConfig().Ui.GuardsCardExpanded, reloaded.Ui.GuardsCardExpanded);
+        Assert.Equal(!new AppConfig().Watchdog.AutoStart, reloaded.Watchdog.AutoStart);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(_path)!, Path.GetFileName(_path) + ".*.tmp"));
+    }
+
+    /// <summary>The existing file is replaced in place (File.Replace): its attributes survive the save.</summary>
+    [Fact]
+    public void SaveKeepsTheAttributesOfTheExistingFile()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        File.SetAttributes(_path, File.GetAttributes(_path) | FileAttributes.Hidden);
+        try
+        {
+            AppConfigStore.Update(config => config.Ui.Language = "ru", _path);
+
+            Assert.True(File.GetAttributes(_path).HasFlag(FileAttributes.Hidden));
+            Assert.Equal("ru", AppConfigStore.LoadOrCreate(_path).Ui.Language);
+        }
+        finally
+        {
+            File.SetAttributes(_path, FileAttributes.Normal);
+        }
+    }
+
+    /// <summary>A symlinked config is written through to its target; the link stays a link.</summary>
+    [Fact]
+    public void SaveWritesThroughASymlinkedConfig()
+    {
+        var dir = Directory.CreateTempSubdirectory("pnr-config-link-").FullName;
+        try
+        {
+            var target = Path.Combine(dir, "real.json");
+            var link = Path.Combine(dir, "appsettings.json");
+            AppConfigStore.LoadOrCreate(target);
+            try
+            {
+                File.CreateSymbolicLink(link, target);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return; // creating symlinks needs the privilege (developer mode or admin): nothing to check here
+            }
+
+            AppConfigStore.Update(config => config.Ui.Language = "ru", link);
+
+            Assert.NotNull(new FileInfo(link).LinkTarget);
+            Assert.Equal("ru", AppConfigStore.LoadOrCreate(target).Ui.Language);
+            Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AFailedSaveKeepsThePreviousConfigIntact()
     {
         AppConfigStore.LoadOrCreate(_path);

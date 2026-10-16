@@ -69,6 +69,14 @@ public static class AppConfigStore
     public static void Update(Action<AppConfig> mutate, string? path = null)
     {
         path ??= GetDefaultConfigPath();
+        lock (WriteGate)
+        {
+            UpdateLocked(mutate, path);
+        }
+    }
+
+    private static void UpdateLocked(Action<AppConfig> mutate, string path)
+    {
         if (!File.Exists(path))
         {
             var fresh = new AppConfig();
@@ -149,19 +157,55 @@ public static class AppConfigStore
         WriteAtomic(path, JsonSerializer.Serialize(config, JsonOptions));
     }
 
+    /// <summary>Serializes the writes of this process (Update is a read-modify-write: two at once would lose one change).</summary>
+    private static readonly object WriteGate = new();
+
     /// <summary>
-    /// The file is replaced in one step (a temp file next to it, then a move over it): a worker
+    /// The file is replaced in one step (a temp file next to it, then a replace over it): a worker
     /// starting during the write reads the old or the new content, never an empty or half-written
-    /// file, and a crash mid-write leaves the previous config in place.
+    /// file, and a crash mid-write leaves the previous config in place. A symlinked config is
+    /// written through to its final target (the link stays a link), and an existing target is
+    /// swapped by File.Replace, which keeps its ACL and attributes; the temp name is unique per
+    /// write, so concurrent writers never share one.
     /// </summary>
     internal static void WriteAtomic(string path, string content)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temp = $"{path}.{Environment.ProcessId}.tmp";
+        lock (WriteGate)
+        {
+            WriteAtomicLocked(path, content);
+        }
+    }
+
+    /// <summary>The file a write lands in: the final target of a symlink, the path itself otherwise.</summary>
+    internal static string ResolveWriteTarget(string path)
+    {
+        var full = Path.GetFullPath(path);
+        try
+        {
+            return new FileInfo(full).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? full;
+        }
+        catch (IOException)
+        {
+            return full; // a link loop or an unreadable reparse point: write the path itself
+        }
+    }
+
+    private static void WriteAtomicLocked(string path, string content)
+    {
+        var target = ResolveWriteTarget(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        var temp = $"{target}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
         try
         {
             File.WriteAllText(temp, content, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(temp, path, overwrite: true);
+            if (File.Exists(target))
+            {
+                File.Replace(temp, target, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(temp, target);
+            }
         }
         catch
         {
@@ -169,7 +213,7 @@ public static class AppConfigStore
             {
                 File.Delete(temp);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // the temp file is leftover garbage, not the config
             }
