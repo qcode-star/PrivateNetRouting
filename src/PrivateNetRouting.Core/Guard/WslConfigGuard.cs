@@ -311,7 +311,9 @@ public sealed class WslConfigGuard(
             # pnr_bak <file> <prefix>: copy <file> to <file>.pnr-bak-<n> unless an identical
             # .pnr-bak- copy already exists — a state is preserved only once (then just touched,
             # so mtime order mirrors the recently preserved states).
-            local f="$1" prefix="$2" b n slot
+            # A directory the writer cannot create files in (e.g. a ~/.claude made by root) can still
+            # hold writable slot files: then the slot preserved longest ago is overwritten in place.
+            local f="$1" prefix="$2" b n slot=""
             for b in "$f".pnr-bak-*; do
                 [ -f "$b" ] || continue
                 if cmp -s "$f" "$b"; then
@@ -319,14 +321,20 @@ public sealed class WslConfigGuard(
                     return 0
                 fi
             done
-            for n in 1 2 3; do
-                if [ ! -e "$f.pnr-bak-$n" ]; then
-                    slot="$f.pnr-bak-$n"
-                    break
-                fi
-            done
+            if [ -w "$(dirname "$f")" ]; then
+                for n in 1 2 3; do
+                    if [ ! -e "$f.pnr-bak-$n" ]; then
+                        slot="$f.pnr-bak-$n"
+                        break
+                    fi
+                done
+            fi
             if [ -z "$slot" ]; then
                 slot=$(ls -1t "$f".pnr-bak-[123] 2>/dev/null | tail -n 1)
+            fi
+            if [ -z "$slot" ]; then
+                echo "FAILED: no backup slot for $f ($(dirname "$f") is not writable by $(id -un))"
+                return 1
             fi
             cp -p "$f" "$slot" && touch "$slot" && echo "$prefix=$slot"
         }
@@ -335,10 +343,20 @@ public sealed class WslConfigGuard(
             # non-empty (a failed decode or a full /tmp leaves an empty one), and the write goes
             # through a temp file next to <dest>, so a failure never leaves a truncated file
             # behind; mode and owner of an existing file are kept, a symlink is followed.
+            # A directory the writer cannot create files in (a ~/.claude made by root by an older
+            # boot script) with a writable file in it: the file is rewritten in place and the
+            # result is compared with the payload (the caller has already preserved it).
             local new="$1" dest tmp
             dest=$(readlink -f "$2" 2>/dev/null)
             [ -n "$dest" ] || dest="$2"
             [ -s "$new" ] || { echo "FAILED: empty payload for $2"; return 1; }
+            if [ -f "$dest" ] && [ -w "$dest" ] && [ ! -w "$(dirname "$dest")" ]; then
+                if cat "$new" > "$dest" && cmp -s "$new" "$dest"; then
+                    return 0
+                fi
+                echo "FAILED: in-place write of $dest did not complete"
+                return 1
+            fi
             tmp="$dest.pnr-tmp"
             cat "$new" > "$tmp" || { rm -f "$tmp"; echo "FAILED: cannot write $tmp"; return 1; }
             if [ -f "$dest" ]; then

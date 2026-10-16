@@ -1490,6 +1490,22 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void WslPutFallsBackToAVerifiedInPlaceWriteInANonWritableDirectory()
+    {
+        // an older boot script created ~/.claude as root: the user can write the file but cannot
+        // create the temp file next to it — the write goes in place and is compared afterwards
+        var put = WslConfigGuard.PnrBakFn[WslConfigGuard.PnrBakFn.IndexOf("pnr_put()", StringComparison.Ordinal)..];
+        Assert.Contains("[ -f \"$dest\" ] && [ -w \"$dest\" ] && [ ! -w \"$(dirname \"$dest\")\" ]", put);
+        Assert.Contains("if cat \"$new\" > \"$dest\" && cmp -s \"$new\" \"$dest\"; then", put);
+        Assert.Contains("FAILED: in-place write of $dest", put);
+        // the backup reuses a writable slot file there instead of creating one, or fails honestly
+        var bak = WslConfigGuard.PnrBakFn[..WslConfigGuard.PnrBakFn.IndexOf("pnr_put()", StringComparison.Ordinal)];
+        Assert.Contains("if [ -w \"$(dirname \"$f\")\" ]; then", bak);
+        Assert.Contains("FAILED: no backup slot for $f", bak);
+        Assert.DoesNotContain('\r', WslConfigGuard.NormalizeLf(WslConfigGuard.PnrBakFn));
+    }
+
+    [Fact]
     public async Task WslProbeResolvesTheUsersRealHome()
     {
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => WslProbeInSync("root") };
