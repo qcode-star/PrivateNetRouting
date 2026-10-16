@@ -38,7 +38,7 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         // the HttpClient has no global timeout (long fragments): a stalled egress would hold the
         // size query forever, so it gets the per-request limit
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.ChunkTimeoutSeconds)));
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.HeadTimeoutSeconds)));
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Head, url);
@@ -52,7 +52,7 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new IOException($"HEAD timed out after {config.ChunkTimeoutSeconds}s — the egress accepts connections but does not answer");
+            throw new IOException($"HEAD timed out after {config.HeadTimeoutSeconds}s — the egress accepts connections but does not answer");
         }
     }
 

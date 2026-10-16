@@ -48,19 +48,22 @@ public class FragmentDownloaderTests : IDisposable
     public async Task HeadTimesOutOnAStalledEgress()
     {
         using var http = new HttpClient(new StallingHandler());
-        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { ChunkTimeoutSeconds = 1 }, _log);
+        // the HEAD has its own limit: the long per-chunk one does not hold it
+        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { HeadTimeoutSeconds = 1, ChunkTimeoutSeconds = 1800 }, _log);
 
+        var started = System.Diagnostics.Stopwatch.StartNew();
         var error = await Assert.ThrowsAsync<IOException>(
             () => downloader.GetLengthAsync("https://pkg.example.com/app.msix", CancellationToken.None));
 
-        Assert.Contains("timed out", error.Message);
+        Assert.Contains("timed out after 1s", error.Message);
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(30));
     }
 
     [Fact]
     public async Task HeadCancellationByTheCallerIsNotATimeout()
     {
         using var http = new HttpClient(new StallingHandler());
-        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { ChunkTimeoutSeconds = 30 }, _log);
+        var downloader = new FragmentDownloader(http, new ClaudeUpdateConfig { HeadTimeoutSeconds = 30 }, _log);
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(

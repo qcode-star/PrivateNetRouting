@@ -162,6 +162,17 @@ public class AppConfigTests : IDisposable
         => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));
 
     [Fact]
+    public void TheHeadTimeoutHasItsOwnSettingAndMustBePositive()
+    {
+        var config = new AppConfig();
+        Assert.Equal(30, config.Claude.Update.HeadTimeoutSeconds);
+
+        config.Claude.Update.HeadTimeoutSeconds = 0;
+
+        Assert.Contains(AppConfigValidator.Validate(config), error => error.Contains("claude.update.headTimeoutSeconds"));
+    }
+
+    [Fact]
     public void SaveReplacesTheFileInOneStepAndLeavesNoTempFile()
     {
         AppConfigStore.LoadOrCreate(_path);

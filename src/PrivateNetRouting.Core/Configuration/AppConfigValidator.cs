@@ -94,6 +94,7 @@ public static class AppConfigValidator
         Positive("claude.update.parallelChunks", config.Claude.Update.ParallelChunks, errors);
         NotNegative("claude.update.chunkRetries", config.Claude.Update.ChunkRetries, errors);
         Positive("claude.update.chunkTimeoutSeconds", config.Claude.Update.ChunkTimeoutSeconds, errors);
+        Positive("claude.update.headTimeoutSeconds", config.Claude.Update.HeadTimeoutSeconds, errors);
         Positive("chain.healthWaitSeconds", config.Chain.HealthWaitSeconds, errors);
         Positive("forwardProxy.socksTimeoutSeconds", config.ForwardProxy.SocksTimeoutSeconds, errors);
         Positive("forwardProxy.headerTimeoutSeconds", config.ForwardProxy.HeaderTimeoutSeconds, errors);

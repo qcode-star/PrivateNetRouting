@@ -196,6 +196,9 @@ public sealed class ClaudeUpdateConfig
 
     /// <summary>Timeout of a single chunk attempt, sec.</summary>
     public int ChunkTimeoutSeconds { get; set; } = 1800;
+
+    /// <summary>Timeout of the HEAD request that asks the package size before the download, sec.</summary>
+    public int HeadTimeoutSeconds { get; set; } = 30;
 }
 
 /// <summary>
