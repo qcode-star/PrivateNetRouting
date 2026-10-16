@@ -132,7 +132,9 @@ public static class DnsWire
 
 /// <summary>
 /// A valid negative answer — the name does not exist (NXDOMAIN) or has no A record (NODATA). The
-/// endpoint worked: it must not be marked dead, and the answer is cached for a short time.
+/// endpoint worked, so it is not marked dead; but a route-only (split-DNS) resolver answers this
+/// for every name outside its zones, so the resolver fails over to the other endpoints and the
+/// answer is final (and cached for a short time) only when every tried endpoint gave it.
 /// </summary>
 public sealed class DnsNegativeAnswerException(string message) : FormatException(message);
 

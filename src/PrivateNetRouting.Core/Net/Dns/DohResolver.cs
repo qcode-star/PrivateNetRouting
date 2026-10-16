@@ -6,8 +6,11 @@ namespace PrivateNetRouting.Core.Net.Dns;
 /// Resolution via a pool of DoH endpoints over a SOCKS5 upstream. Candidates are tried in pool
 /// order, but a slow one does not hold the lookup for its whole timeout: after a short stagger
 /// the next candidate is started in parallel and the first answer wins (the losers are
-/// cancelled). A failing endpoint is marked dead (cooldown in the pool), one that answered with
-/// a negative answer stays alive.
+/// cancelled). A failing endpoint is marked dead (cooldown in the pool). A negative answer
+/// (NXDOMAIN/NODATA) does not end the lookup while candidates remain: a route-only (split-DNS)
+/// resolver of the tailnet answers NXDOMAIN for every general name, so the lookup fails over
+/// (a running hedge is waited for) and only a lookup where every tried endpoint answered
+/// negatively is a final negative. A negative answer neither marks the endpoint dead nor alive.
 /// </summary>
 public sealed class DohResolver : IDnsResolver
 {
@@ -46,6 +49,8 @@ public sealed class DohResolver : IDnsResolver
         var running = new List<Task<Attempt>>();
         var next = 0;
         Exception? lastError = null;
+        DnsNegativeAnswerException? negative = null;
+        var failures = 0;
         try
         {
             while (true)
@@ -89,17 +94,20 @@ public sealed class DohResolver : IDnsResolver
                 }
 
                 ct.ThrowIfCancellationRequested();
-                if (attempt.Error is DnsNegativeAnswerException negative)
+                if (attempt.Error is DnsNegativeAnswerException miss)
                 {
-                    // the endpoint answered: the name simply has no address, so it stays alive
-                    _pool.MarkAlive(attempt.Endpoint);
-                    throw negative;
+                    // the endpoint answered, but it may be a route-only resolver that knows only
+                    // its own zones: the others still get their say, and the endpoint is neither
+                    // promoted (it did not resolve anything) nor put into cooldown (it works)
+                    negative = miss;
+                    continue;
                 }
 
                 // any endpoint failure (including a bad certificate) fails over to the next one;
                 // only the caller's own cancellation aborts the lookup
                 _pool.MarkDead(attempt.Endpoint);
                 lastError = attempt.Error;
+                failures++;
             }
         }
         finally
@@ -107,7 +115,15 @@ public sealed class DohResolver : IDnsResolver
             await race.CancelAsync().ConfigureAwait(false); // the losers of the race stop here
         }
 
-        throw new IOException($"doh: all endpoints failed for {host}: {lastError?.Message}", lastError);
+        // a final negative (cacheable) only when every tried endpoint said so; a mix with failed
+        // endpoints is not one — a failed endpoint might have known the name
+        if (negative is not null && failures == 0)
+        {
+            throw negative;
+        }
+
+        var reason = negative is null ? lastError?.Message : $"{lastError?.Message}; others: {negative.Message}";
+        throw new IOException($"doh: all endpoints failed for {host}: {reason}", lastError);
     }
 
     /// <summary>One query as a value: a failure is data (it must not fault a task nobody awaits any more).</summary>

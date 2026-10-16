@@ -302,6 +302,12 @@ public sealed partial class DohEndpointPool : IDisposable
     private async Task<bool> ProbeAsync(DohEndpoint endpoint, CancellationToken ct) =>
         await _probe(endpoint, ct);
 
+    /// <summary>
+    /// An endpoint is live when it resolves the probe name to an address. Any failure counts as
+    /// dead — deliberately including a negative answer (NXDOMAIN/NODATA): the probe name is a
+    /// general one, so an endpoint denying it is a route-only (split-DNS) resolver, and it is
+    /// kept at the back of the pool instead of being tried first for every lookup.
+    /// </summary>
     private async Task<bool> DefaultProbeAsync(DohEndpoint endpoint, CancellationToken ct)
     {
         try

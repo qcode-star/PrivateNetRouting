@@ -108,15 +108,86 @@ public class DohResolverTests : IDisposable
         Assert.Equal([Ep(2)], pool.SnapshotAlive());
     }
 
+    /// <summary>A route-only (split-DNS) resolver denies general names: its NXDOMAIN must not end the lookup.</summary>
     [Fact]
-    public async Task ANegativeAnswerEndsTheLookupAndKeepsTheEndpointAlive()
+    public async Task ANegativeAnswerFailsOverToTheNextEndpoint()
     {
         using var pool = Pool(Ep(1), Ep(2));
-        var resolver = Resolver(pool, TimeSpan.FromMinutes(1), (_, _, _) => throw new DnsNegativeAnswerException("nxdomain"));
+        var resolver = Resolver(pool, TimeSpan.FromMinutes(1), (endpoint, _, _) =>
+            endpoint == Ep(1) ? throw new DnsNegativeAnswerException("nxdomain") : Task.FromResult(Answer("198.51.100.9")));
+
+        var result = await resolver.ResolveAsync("name.example", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(IPAddress.Parse("198.51.100.9"), result.Ip); // no waiting for the stagger
+        Assert.Equal([Ep(1), Ep(2)], pool.SnapshotAlive()); // the denying endpoint is not put into cooldown
+    }
+
+    /// <summary>With the hedge running, a fast negative must not beat a slower positive.</summary>
+    [Fact]
+    public async Task AFastNegativeDoesNotBeatASlowerPositive()
+    {
+        using var pool = Pool(Ep(1), Ep(2));
+        var resolver = Resolver(pool, TimeSpan.FromMilliseconds(50), async (endpoint, _, ct) =>
+        {
+            if (endpoint == Ep(2))
+            {
+                throw new DnsNegativeAnswerException("nxdomain");
+            }
+
+            await Task.Delay(300, ct);
+            return Answer("198.51.100.9");
+        });
+
+        var result = await resolver.ResolveAsync("name.example", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(IPAddress.Parse("198.51.100.9"), result.Ip);
+        Assert.Contains("203.0.113.1", result.Source);
+    }
+
+    [Fact]
+    public async Task EveryEndpointAnsweringNegativelyIsAFinalNegative()
+    {
+        using var pool = Pool(Ep(1), Ep(2));
+        var asked = 0;
+        var resolver = Resolver(pool, TimeSpan.FromMinutes(1), (_, _, _) =>
+        {
+            Interlocked.Increment(ref asked);
+            throw new DnsNegativeAnswerException("nxdomain");
+        });
 
         await Assert.ThrowsAsync<DnsNegativeAnswerException>(() => resolver.ResolveAsync("typo.example", CancellationToken.None));
 
+        Assert.Equal(2, asked);
         Assert.Equal([Ep(1), Ep(2)], pool.SnapshotAlive());
+    }
+
+    /// <summary>A failed endpoint might have known the name: negatives mixed with failures are not a final (cacheable) negative.</summary>
+    [Fact]
+    public async Task NegativesMixedWithFailuresAreNotAFinalNegative()
+    {
+        using var pool = Pool(Ep(1), Ep(2));
+        var resolver = Resolver(pool, TimeSpan.FromMinutes(1), (endpoint, _, _) =>
+            endpoint == Ep(1) ? throw new IOException("endpoint down") : throw new DnsNegativeAnswerException("nxdomain"));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => resolver.ResolveAsync("name.example", CancellationToken.None));
+
+        Assert.Contains("all endpoints failed", error.Message);
+    }
+
+    /// <summary>A negative answer resolves nothing: it must not bring a cooling endpoint back.</summary>
+    [Fact]
+    public async Task ANegativeAnswerDoesNotPromoteTheEndpoint()
+    {
+        using var pool = Pool(Ep(1), Ep(2));
+        await pool.RefreshAsync(CancellationToken.None); // a later refresh would clear the cooldowns
+        pool.MarkDead(Ep(1));
+        pool.MarkDead(Ep(2)); // all cooling: the snapshot hands out all of them
+        var resolver = Resolver(pool, TimeSpan.FromMinutes(1), (endpoint, _, _) =>
+            endpoint == Ep(1) ? throw new DnsNegativeAnswerException("nxdomain") : Task.FromResult(Answer("198.51.100.9")));
+
+        await resolver.ResolveAsync("name.example", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal([Ep(2)], pool.SnapshotAlive()); // only the answering one is alive again
     }
 
     [Fact]
