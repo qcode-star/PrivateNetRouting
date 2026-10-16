@@ -15,12 +15,12 @@ public class DohClientTests
     [Fact]
     public void ParsesSuccessResponse()
     {
-        var raw = Head(200).Concat(BuildResponse("1.2.3.4", ttl: 240)).ToArray();
+        var raw = Head(200).Concat(BuildResponse("203.0.113.4", ttl: 240)).ToArray();
 
         var answer = DohClient.ParseHttpResponse(raw);
 
         Assert.Single(answer.Ips);
-        Assert.Equal(IPAddress.Parse("1.2.3.4"), answer.Ips[0]);
+        Assert.Equal(IPAddress.Parse("203.0.113.4"), answer.Ips[0]);
         Assert.Equal(240u, answer.MinTtl);
     }
 
@@ -29,7 +29,7 @@ public class DohClientTests
     [InlineData(204)]
     public void ThrowsOnNon200(int status)
     {
-        var raw = Head(status).Concat(BuildResponse("1.2.3.4", ttl: 60)).ToArray();
+        var raw = Head(status).Concat(BuildResponse("203.0.113.4", ttl: 60)).ToArray();
         Assert.Throws<FormatException>(() => DohClient.ParseHttpResponse(raw));
     }
 
@@ -53,39 +53,39 @@ public class DohClientTests
     [Fact]
     public async Task StopsAtContentLengthWithoutWaitingForTheServerToClose()
     {
-        var body = BuildResponse("1.2.3.4", ttl: 240);
+        var body = BuildResponse("203.0.113.4", ttl: 240);
         var response = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n").Concat(body).ToArray();
         using var stream = new ScriptedStream(response, closeAfter: false);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
 
-        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+        Assert.Equal([IPAddress.Parse("203.0.113.4")], answer.Ips);
     }
 
     [Fact]
     public async Task ContentLengthAnswerSplitAcrossReadsIsAssembled()
     {
-        var body = BuildResponse("1.2.3.4", ttl: 240);
+        var body = BuildResponse("203.0.113.4", ttl: 240);
         var response = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n").Concat(body).ToArray();
         using var stream = new ScriptedStream(response, closeAfter: false, chunkSize: 7);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
 
-        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+        Assert.Equal([IPAddress.Parse("203.0.113.4")], answer.Ips);
     }
 
     [Fact]
     public async Task WithoutContentLengthTheClosureEndsTheResponse()
     {
-        var response = Head(200).Concat(BuildResponse("1.2.3.4", ttl: 240)).ToArray();
+        var response = Head(200).Concat(BuildResponse("203.0.113.4", ttl: 240)).ToArray();
         using var stream = new ScriptedStream(response, closeAfter: true);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         var answer = await DohClient.QueryOverStreamAsync(stream, new DohEndpoint(IPAddress.Loopback, 80), "probe.example", cts.Token);
 
-        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+        Assert.Equal([IPAddress.Parse("203.0.113.4")], answer.Ips);
     }
 
     [Fact]

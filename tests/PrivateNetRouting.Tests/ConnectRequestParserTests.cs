@@ -62,7 +62,7 @@ public class ConnectRequestParserTests
     [InlineData("CONNECT 0x7f000001:443 HTTP/1.1")]
     [InlineData("CONNECT 127.000.000.001:443 HTTP/1.1")] // non-canonical octets
     [InlineData("CONNECT 256.1.1.1:443 HTTP/1.1")]       // not an address and not a name
-    [InlineData("CONNECT 1.2.3.4.5:443 HTTP/1.1")]
+    [InlineData("CONNECT 203.0.113.4.5:443 HTTP/1.1")]
     [InlineData("CONNECT host.123:443 HTTP/1.1")]        // a numeric last label
     [InlineData("CONNECT a..b:443 HTTP/1.1")]            // empty label
     [InlineData("CONNECT .:443 HTTP/1.1")]               // nothing left after the trailing dot

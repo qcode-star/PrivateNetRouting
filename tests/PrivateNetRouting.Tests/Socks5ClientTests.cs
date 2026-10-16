@@ -14,7 +14,7 @@ public class Socks5ClientTests
         var (upstream, connectTask) = await StartFakeUpstreamAsync(refuseAuth: false);
         var client = new Socks5Client(upstream);
 
-        var socket = await client.ConnectAsync(IPAddress.Parse("10.1.2.3"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var socket = await client.ConnectAsync(IPAddress.Parse("198.51.100.3"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
         using var _ = socket;
 
         var stream = new NetworkStream(socket, ownsSocket: false);
@@ -24,7 +24,7 @@ public class Socks5ClientTests
         Assert.Equal("pong"u8.ToArray(), buffer[..read]);
 
         var (seenTarget, seenPort, seenAtyp) = await connectTask;
-        Assert.Equal("10.1.2.3", seenTarget);
+        Assert.Equal("198.51.100.3", seenTarget);
         Assert.Equal(8443, seenPort);
         Assert.Equal(0x01, seenAtyp);
     }
@@ -56,11 +56,11 @@ public class Socks5ClientTests
         var (upstream, connectTask) = await StartFakeUpstreamAsync();
         var client = new Socks5Client(upstream);
 
-        using var socket = await client.ConnectAsync("10.1.2.3", 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
+        using var socket = await client.ConnectAsync("198.51.100.3", 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
 
         var (seenTarget, _, seenAtyp) = await connectTask;
         Assert.Equal(0x01, seenAtyp);
-        Assert.Equal("10.1.2.3", seenTarget);
+        Assert.Equal("198.51.100.3", seenTarget);
     }
 
     [Fact]
@@ -83,11 +83,11 @@ public class Socks5ClientTests
         var (upstream, connectTask) = await StartFakeUpstreamAsync();
         var client = new Socks5Client(upstream);
 
-        using var socket = await client.ConnectAsync(IPAddress.Parse("::ffff:10.1.2.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
+        using var socket = await client.ConnectAsync(IPAddress.Parse("::ffff:198.51.100.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
 
         var (seenTarget, _, seenAtyp) = await connectTask;
         Assert.Equal(0x01, seenAtyp);
-        Assert.Equal("10.1.2.3", seenTarget);
+        Assert.Equal("198.51.100.3", seenTarget);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class Socks5ClientTests
         });
 
         using var socket = await new Socks5Client(endpoint).ConnectAsync(
-            IPAddress.Parse("10.1.2.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
+            IPAddress.Parse("198.51.100.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None);
 
         await accepted;
         listener.Stop();
@@ -160,7 +160,7 @@ public class Socks5ClientTests
         var (upstream, connectTask) = await StartFakeUpstreamAsync(user: "alice", password: "s3cret");
         var client = new Socks5Client(upstream, "alice", "s3cret");
 
-        var socket = await client.ConnectAsync(IPAddress.Parse("10.1.2.3"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var socket = await client.ConnectAsync(IPAddress.Parse("198.51.100.3"), 8443, TimeSpan.FromSeconds(5), CancellationToken.None);
         using var _ = socket;
 
         var stream = new NetworkStream(socket, ownsSocket: false);
@@ -170,7 +170,7 @@ public class Socks5ClientTests
         Assert.Equal("pong"u8.ToArray(), buffer[..read]);
 
         var (seenTarget, seenPort, seenAtyp) = await connectTask;
-        Assert.Equal("10.1.2.3", seenTarget);
+        Assert.Equal("198.51.100.3", seenTarget);
         Assert.Equal(8443, seenPort);
         Assert.Equal(0x01, seenAtyp);
     }

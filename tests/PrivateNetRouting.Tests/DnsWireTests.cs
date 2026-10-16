@@ -69,11 +69,11 @@ public class DnsWireTests
         WriteQuestion(writer, "example.com");
         writer.WriteByte(0xC0);
         writer.WriteByte(0x0C);
-        WriteResourceData(writer, type: 1, ttl: 60, rdata: [1, 2, 3, 4]);
+        WriteResourceData(writer, type: 1, ttl: 60, rdata: [203, 0, 113, 4]);
 
         var answer = DnsWire.ParseResponse(writer.ToArray());
 
-        Assert.Equal([IPAddress.Parse("1.2.3.4")], answer.Ips);
+        Assert.Equal([IPAddress.Parse("203.0.113.4")], answer.Ips);
     }
 
     [Fact]
