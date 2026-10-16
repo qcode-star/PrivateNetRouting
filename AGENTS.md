@@ -259,7 +259,9 @@ src/
                              # the windowless roles (the detached proxy worker, the idle stopper,
                              # the elevated helper commands) run from Program.Main through
                              # HeadlessHost, before WPF starts — no Application, no dispatcher; the
-                             # helper gets the asking user's config through --config
+                             # helper gets the asking user's config through --config and
+                             # the user's APPDATA/LOCALAPPDATA/USERPROFILE through --env (the
+                             # config paths expand with them, not with the administrator's)
     LanguageFlag.cs          # the language selector's option data (LanguageOption) and the drawn
                              # mark of a language: the Union Jack / three stripes
     Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary

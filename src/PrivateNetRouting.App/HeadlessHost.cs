@@ -66,9 +66,10 @@ internal static class HeadlessHost
 
         // the config of the user who asked: under over-the-shoulder UAC this process runs as another account
         var configPath = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ConfigOption);
+        var profileEnvironment = ElevatedHelperArguments.ParseOptions(args, ElevatedHelperArguments.EnvOption);
         exitCode = Run(() => Task.FromResult(GuardElevatedCommands.IsCommand(command)
-            ? GuardElevatedCommands.Execute(command, resultFile, configPath)
-            : ElevatedChainCommands.Execute(command, resultFile, configPath)));
+            ? GuardElevatedCommands.Execute(command, resultFile, configPath, profileEnvironment)
+            : ElevatedChainCommands.Execute(command, resultFile, configPath, profileEnvironment)));
         return true;
     }
 

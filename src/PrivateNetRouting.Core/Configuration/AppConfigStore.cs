@@ -36,8 +36,13 @@ public static class AppConfigStore
             "PrivateNetRouting",
             "appsettings.json");
 
-    /// <summary>Loads the config; if the file is absent, creates it from the default values.</summary>
-    public static AppConfig LoadOrCreate(string? path = null)
+    /// <summary>
+    /// Loads the config; if the file is absent, creates it from the default values.
+    /// <paramref name="environment"/> — values of environment variables that win over this
+    /// process's own when the paths are expanded (the elevated helper gets the asking user's
+    /// profile variables: under over-the-shoulder UAC its own %APPDATA% is the administrator's).
+    /// </summary>
+    public static AppConfig LoadOrCreate(string? path = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         path ??= GetDefaultConfigPath();
         if (File.Exists(path))
@@ -45,7 +50,7 @@ public static class AppConfigStore
             var config = Deserialize(ReadShared(path), path);
             // per-key messages now, instead of a FormatException from deep inside the composition
             AppConfigValidator.ThrowIfInvalid(config, path);
-            config.ExpandEnvironmentVariables();
+            config.ExpandEnvironmentVariables(environment);
             return config;
         }
 
@@ -53,7 +58,7 @@ public static class AppConfigStore
         // in-memory copy is expanded afterwards
         var fresh = new AppConfig();
         Save(fresh, path);
-        fresh.ExpandEnvironmentVariables();
+        fresh.ExpandEnvironmentVariables(environment);
         return fresh;
     }
 
@@ -359,22 +364,46 @@ public static class AppConfigStore
 
 file static class AppConfigExtensions
 {
-    /// <summary>Expands environment variables in path properties (%APPDATA% etc.).</summary>
-    public static void ExpandEnvironmentVariables(this AppConfig config)
+    /// <summary>Expands environment variables in path properties (%APPDATA% etc.); <paramref name="overrides"/> win over this process's own values.</summary>
+    public static void ExpandEnvironmentVariables(this AppConfig config, IReadOnlyDictionary<string, string>? overrides)
     {
-        config.Logging.Directory = Environment.ExpandEnvironmentVariables(config.Logging.Directory);
-        config.PowerShellPath = Environment.ExpandEnvironmentVariables(config.PowerShellPath);
+        string Expand(string text) => ConfigEnvironment.Expand(text, overrides);
+
+        config.Logging.Directory = Expand(config.Logging.Directory);
+        config.PowerShellPath = Expand(config.PowerShellPath);
         config.ForwardProxy.ActivityMarkerPath =
-            Environment.ExpandEnvironmentVariables(config.ForwardProxy.ActivityMarkerPath);
-        config.Chain.Tailscale.StateDir = Environment.ExpandEnvironmentVariables(config.Chain.Tailscale.StateDir);
-        config.Claude.AliasPath = Environment.ExpandEnvironmentVariables(config.Claude.AliasPath);
-        config.Claude.SettingsPath = Environment.ExpandEnvironmentVariables(config.Claude.SettingsPath);
-        config.Claude.Update.CacheDir = Environment.ExpandEnvironmentVariables(config.Claude.Update.CacheDir);
-        config.Codex.SettingsPath = Environment.ExpandEnvironmentVariables(config.Codex.SettingsPath);
-        config.Codex.EnvPath = Environment.ExpandEnvironmentVariables(config.Codex.EnvPath);
-        config.Browser.ExecutablePath = Environment.ExpandEnvironmentVariables(config.Browser.ExecutablePath);
-        config.Browser.ProfileDir = Environment.ExpandEnvironmentVariables(config.Browser.ProfileDir);
-        config.Browser.ShortcutPath = Environment.ExpandEnvironmentVariables(config.Browser.ShortcutPath);
-        config.Guard.HostsFile = Environment.ExpandEnvironmentVariables(config.Guard.HostsFile);
+            Expand(config.ForwardProxy.ActivityMarkerPath);
+        config.Chain.Tailscale.StateDir = Expand(config.Chain.Tailscale.StateDir);
+        config.Claude.AliasPath = Expand(config.Claude.AliasPath);
+        config.Claude.SettingsPath = Expand(config.Claude.SettingsPath);
+        config.Claude.Update.CacheDir = Expand(config.Claude.Update.CacheDir);
+        config.Codex.SettingsPath = Expand(config.Codex.SettingsPath);
+        config.Codex.EnvPath = Expand(config.Codex.EnvPath);
+        config.Browser.ExecutablePath = Expand(config.Browser.ExecutablePath);
+        config.Browser.ProfileDir = Expand(config.Browser.ProfileDir);
+        config.Browser.ShortcutPath = Expand(config.Browser.ShortcutPath);
+        config.Guard.HostsFile = Expand(config.Guard.HostsFile);
+    }
+}
+
+/// <summary>Expansion of %VAR% in config paths with an explicit variable map.</summary>
+public static class ConfigEnvironment
+{
+    /// <summary>
+    /// Expands %NAME% of <paramref name="text"/>: the names in <paramref name="overrides"/> take
+    /// their values from the map (case-insensitive, like Windows), everything else is expanded
+    /// from this process's environment.
+    /// </summary>
+    public static string Expand(string text, IReadOnlyDictionary<string, string>? overrides)
+    {
+        if (overrides is not null)
+        {
+            foreach (var (name, value) in overrides)
+            {
+                text = text.Replace($"%{name}%", value, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return Environment.ExpandEnvironmentVariables(text);
     }
 }

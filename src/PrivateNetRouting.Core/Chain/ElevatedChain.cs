@@ -18,9 +18,10 @@ public static class ElevatedChainCommands
     /// <summary>
     /// Runs in an already elevated process (App or pnr). Returns the exit code;
     /// the result is written to a file with a nonce so the non-elevated parent waits for
-    /// exactly its own launch, guarded against a stale one).
+    /// exactly its own launch, guarded against a stale one). <paramref name="profileEnvironment"/> —
+    /// the raw `--env` entries of the asking user's profile variables (see ElevatedHelperArguments).
     /// </summary>
-    public static int Execute(string command, string resultFile, string? configPath = null)
+    public static int Execute(string command, string resultFile, string? configPath = null, IReadOnlyList<string>? profileEnvironment = null)
     {
         // an administrator must not write wherever the caller points: only our own result file shape
         if (!ElevatedHelperTrust.IsValidResultFile(resultFile))
@@ -36,7 +37,7 @@ public static class ElevatedChainCommands
                 throw new InvalidOperationException("the config path of the elevated helper is not an absolute .json path");
             }
 
-            var config = AppConfigStore.LoadOrCreate(configPath);
+            var config = AppConfigStore.LoadOrCreate(configPath, ElevatedHelperArguments.ToProfileEnvironment(profileEnvironment));
             log = new FileLog(
                 Path.Combine(config.Logging.Directory, "chain-elevated.log"),
                 config.Logging.EffectiveLevel);
@@ -307,7 +308,8 @@ public sealed class ElevatedRunner(
             {
                 UseShellExecute = true,
                 Verb = "runas",
-                Arguments = ElevatedHelperArguments.Build(command, resultPath, _configPath),
+                Arguments = ElevatedHelperArguments.Build(
+                    command, resultPath, _configPath, ElevatedHelperArguments.CurrentProfileEnvironment()),
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
         }

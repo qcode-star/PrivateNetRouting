@@ -145,6 +145,89 @@ public class ElevatedHelperTests : IDisposable
         Assert.Null(ElevatedHelperArguments.ParseOption([ElevatedChainCommands.StopChain], "--result-file"));
     }
 
+    // ----- the helper expands the config with the asking user's profile variables -----
+
+    [Fact]
+    public void HelperArgumentsCarryTheProfileVariablesAndParseBack()
+    {
+        var environment = new Dictionary<string, string>
+        {
+            ["APPDATA"] = @"C:\Users\asker\AppData\Roaming",
+            ["LOCALAPPDATA"] = @"C:\Users\asker\AppData\Local",
+            ["USERPROFILE"] = @"C:\Users\asker",
+        };
+
+        var line = ElevatedHelperArguments.Build(ElevatedChainCommands.StopChain, @"C:\s\r.result", @"C:\c\appsettings.json", environment);
+
+        Assert.Contains(@"--env ""APPDATA=C:\Users\asker\AppData\Roaming""", line);
+        Assert.Contains(@"--env ""USERPROFILE=C:\Users\asker""", line);
+        // what the helper parses back out of its argument vector (the shell has removed the quotes)
+        string[] args =
+        [
+            ElevatedChainCommands.StopChain, "--result-file", @"C:\s\r.result", "--config", @"C:\c\appsettings.json",
+            "--env", @"APPDATA=C:\Users\asker\AppData\Roaming", "--env", @"LOCALAPPDATA=C:\Users\asker\AppData\Local",
+            "--env", @"USERPROFILE=C:\Users\asker",
+        ];
+        var parsed = ElevatedHelperArguments.ToProfileEnvironment(ElevatedHelperArguments.ParseOptions(args, ElevatedHelperArguments.EnvOption));
+        Assert.Equal(environment, parsed);
+    }
+
+    [Theory]
+    [InlineData(@"PATH=C:\Windows")] // not a profile variable of ours
+    [InlineData(@"APPDATA=relative\dir")]
+    [InlineData(@"APPDATA=C:\x"" --config ""C:\evil.json")]
+    [InlineData(@"APPDATA=C:\%TEMP%")]
+    [InlineData(@"APPDATA=C:\x\")]
+    [InlineData("APPDATA")]
+    [InlineData(@"=C:\x")]
+    public void TheHelperRefusesAnUnexpectedEnvironmentEntry(string entry) =>
+        Assert.Throws<InvalidOperationException>(() => ElevatedHelperArguments.ToProfileEnvironment([entry]));
+
+    [Fact]
+    public void InvalidProfileValuesAreNotPassedToTheHelper()
+    {
+        var line = ElevatedHelperArguments.Build(
+            ElevatedChainCommands.StopChain,
+            @"C:\s\r.result",
+            null,
+            new Dictionary<string, string> { ["APPDATA"] = @"relative", ["PATH"] = @"C:\Windows" });
+
+        Assert.DoesNotContain("--env", line);
+    }
+
+    [Fact]
+    public void TheExplicitVariableMapWinsOverTheProcessEnvironment()
+    {
+        var map = new Dictionary<string, string> { ["APPDATA"] = @"C:\Users\asker\AppData\Roaming" };
+
+        Assert.Equal(@"C:\Users\asker\AppData\Roaming\PrivateNetRouting\sidecar",
+            ConfigEnvironment.Expand(@"%APPDATA%\PrivateNetRouting\sidecar", map));
+        Assert.Equal(@"C:\Users\asker\AppData\Roaming\x", ConfigEnvironment.Expand(@"%appdata%\x", map)); // case-insensitive
+        // a variable outside the map comes from the process itself
+        Assert.Equal(Environment.ExpandEnvironmentVariables(@"%SystemRoot%\x"), ConfigEnvironment.Expand(@"%SystemRoot%\x", map));
+        Assert.Equal(Environment.ExpandEnvironmentVariables(@"%APPDATA%\x"), ConfigEnvironment.Expand(@"%APPDATA%\x", null));
+    }
+
+    [Fact]
+    public void TheHelperConfigIsExpandedWithTheAskingUsersVariables()
+    {
+        var configPath = Path.Combine(_dir, "appsettings.json");
+        var map = new Dictionary<string, string>
+        {
+            ["APPDATA"] = @"C:\Users\asker\AppData\Roaming",
+            ["LOCALAPPDATA"] = @"C:\Users\asker\AppData\Local",
+        };
+
+        var config = AppConfigStore.LoadOrCreate(configPath, map); // the fresh file keeps the %VAR% defaults
+
+        Assert.StartsWith(@"C:\Users\asker\AppData\Roaming\", config.Chain.Tailscale.StateDir);
+        Assert.StartsWith(@"C:\Users\asker\AppData\Local\", config.Logging.Directory);
+        Assert.Contains("%APPDATA%", File.ReadAllText(configPath)); // nothing expanded is written back
+
+        var reloaded = AppConfigStore.LoadOrCreate(configPath, map);
+        Assert.Equal(config.Chain.Tailscale.StateDir, reloaded.Chain.Tailscale.StateDir);
+    }
+
     [Theory]
     [InlineData(@"C:\Users\someone\AppData\Roaming\PrivateNetRouting\appsettings.json", true)]
     [InlineData(@"relative\appsettings.json", false)]

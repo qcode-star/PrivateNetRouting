@@ -24,7 +24,7 @@ public static class GuardElevatedCommands
         argument is BanOn or BanOff or PolicyOn or PolicyOff or AllOn or AllOff;
 
     /// <summary>Runs in an already elevated process (App or pnr); returns the exit code.</summary>
-    public static int Execute(string command, string resultFile, string? configPath = null)
+    public static int Execute(string command, string resultFile, string? configPath = null, IReadOnlyList<string>? profileEnvironment = null)
     {
         // an administrator must not write wherever the caller points: only our own result file shape
         if (!ElevatedHelperTrust.IsValidResultFile(resultFile))
@@ -40,7 +40,8 @@ public static class GuardElevatedCommands
                 throw new InvalidOperationException("the config path of the elevated helper is not an absolute .json path");
             }
 
-            var config = AppConfigStore.LoadOrCreate(configPath);
+            // the paths are expanded with the asking user's profile variables, not the administrator's
+            var config = AppConfigStore.LoadOrCreate(configPath, ElevatedHelperArguments.ToProfileEnvironment(profileEnvironment));
             log = new FileLog(
                 Path.Combine(config.Logging.Directory, "guard-elevated.log"),
                 config.Logging.EffectiveLevel);

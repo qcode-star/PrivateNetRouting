@@ -57,9 +57,10 @@ internal static class Program
 
             // the config of the user who asked: this process may run as another account (over-the-shoulder UAC)
             var configPath = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ConfigOption);
+            var profileEnvironment = ElevatedHelperArguments.ParseOptions(args, ElevatedHelperArguments.EnvOption);
             return GuardElevatedCommands.IsCommand(first)
-                ? GuardElevatedCommands.Execute(first, resultFile, configPath)
-                : ElevatedChainCommands.Execute(first, resultFile, configPath);
+                ? GuardElevatedCommands.Execute(first, resultFile, configPath, profileEnvironment)
+                : ElevatedChainCommands.Execute(first, resultFile, configPath, profileEnvironment);
         }
 
         // the text carries em dashes, arrows and ellipses: an OEM code page would mangle them
