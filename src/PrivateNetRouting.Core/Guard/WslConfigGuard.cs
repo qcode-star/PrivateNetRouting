@@ -796,14 +796,17 @@ public sealed class WslConfigGuard(
                 _pnr_host_ip=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
             fi
             if [ -n "$_pnr_host_ip" ]; then
-                export HTTP_PROXY="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT"
+                # an IPv6 literal goes into the URL in brackets
+                _pnr_url_host="$_pnr_host_ip"
+                case "$_pnr_host_ip" in *:*) _pnr_url_host="[$_pnr_host_ip]" ;; esac
+                export HTTP_PROXY="http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT"
                 export HTTPS_PROXY="$HTTP_PROXY"
                 export ALL_PROXY="$HTTP_PROXY"
                 export NO_PROXY="{{noProxy}}"
                 _pnr_env="$CODEX_HOME/.env"
-                if [ -f "$_pnr_env" ] && ! grep -q "^HTTP_PROXY=http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT$" "$_pnr_env"; then
+                if [ -f "$_pnr_env" ] && ! grep -qxF "HTTP_PROXY=$HTTP_PROXY" "$_pnr_env"; then
                     _pnr_tmp=$(mktemp "${_pnr_env}.pnr-XXXXXX")
-                    awk -v _proxy="http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT" -v _no_proxy='{{noProxy}}' '
+                    awk -v _proxy="$HTTP_PROXY" -v _no_proxy='{{noProxy}}' '
                         BEGIN { _h=0; _s=0; _a=0; _n=0 }
                         /^[ \t]*(export[ \t]+)?HTTP_PROXY[ \t]*=/  { print "HTTP_PROXY=" _proxy;  _h=1; next }
                         /^[ \t]*(export[ \t]+)?HTTPS_PROXY[ \t]*=/ { print "HTTPS_PROXY=" _proxy; _s=1; next }
@@ -818,7 +821,7 @@ public sealed class WslConfigGuard(
                         }' "$_pnr_env" > "$_pnr_tmp" && cat "$_pnr_tmp" > "$_pnr_env"
                     rm -f "$_pnr_tmp"
                 fi
-                unset _pnr_env _pnr_tmp
+                unset _pnr_env _pnr_tmp _pnr_url_host
             fi
             unset _pnr_host_ip
         fi
@@ -1160,7 +1163,10 @@ public sealed class WslConfigGuard(
             echo "$TAG default route not found - exiting without changes"
             exit 0
         fi
-        PROXY="http://$HOST_IP:$PORT"
+        # an IPv6 literal goes into the URL in brackets; /dev/tcp below takes it bare
+        URL_HOST="$HOST_IP"
+        case "$HOST_IP" in *:*) URL_HOST="[$HOST_IP]" ;; esac
+        PROXY="http://$URL_HOST:$PORT"
 
         # Proxy liveness does not gate the config write: the Windows chain may come up later.
         if timeout 3 bash -c "</dev/tcp/$HOST_IP/$PORT" 2>/dev/null; then

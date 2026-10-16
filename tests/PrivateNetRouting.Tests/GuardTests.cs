@@ -902,6 +902,49 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task WslSkippedShapeBracketsAnIpv6UpstreamInEveryUrl()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var config = WslSkippedShapeConfig("[2001:db8::1]:1080");
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        Assert.Equal("2001:db8::1", ClaudeEnvValues.WslFixedHost(config)); // bare: the status compares it
+        Assert.Equal("http://[2001:db8::1]:1080", ClaudeEnvValues.WslProxyUrl(null, config));
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        Assert.Equal("http://[2001:db8::1]:1080", Assert.Single(result.Distros).ProxyUrl);
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var settingsJson = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
+        Assert.Contains("\"HTTPS_PROXY\": \"http://[2001:db8::1]:1080\"", settingsJson);
+
+        // the scripts bake the bare address (bash /dev/tcp takes it so) and bracket it in the URL
+        var startup = Assert.Single(runner.Scripts, s => s.Script.Contains("10-claude-proxy.sh"));
+        var script = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(startup.Script, "SCRIPT='/etc/wsl.d/startup/10-claude-proxy.sh'")));
+        Assert.Contains("PNR_PROXY_HOST='2001:db8::1'", script);
+        Assert.Contains("case \"$HOST_IP\" in *:*) URL_HOST=\"[$HOST_IP]\" ;; esac", script);
+        Assert.Contains("PROXY=\"http://$URL_HOST:$PORT\"", script);
+        Assert.Contains("</dev/tcp/$HOST_IP/$PORT", script);
+        var envPass = Assert.Single(runner.Scripts, s => s.Script.Contains("ENVFILE="));
+        var env = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(envPass.Script, "ENVFILE='/etc/profile.d/20-pnr-codex-proxy.sh'")));
+        Assert.Contains("PNR_CODEX_PROXY_HOST='2001:db8::1'", env);
+        Assert.Contains("case \"$_pnr_host_ip\" in *:*) _pnr_url_host=\"[$_pnr_host_ip]\" ;; esac", env);
+        // brackets are a character class to a grep regex: the .env check is a fixed-string match
+        Assert.Contains("grep -qxF \"HTTP_PROXY=$HTTP_PROXY\"", env);
+        Assert.DoesNotContain('\r', script);
+        Assert.DoesNotContain('\r', env);
+
+        // the status reads the bare address back and finds the distro in sync
+        runner.ProbeOutput = _ => "SCRIPT=present\nPORT=1080\nPNR_PROXY_HOST='2001:db8::1'\nUSER_NAME='u1'\n"
+            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=1080\nPNR_CODEX_PROXY_HOST='2001:db8::1'\n"
+            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://[2001:db8::1]:1080\"}}\nSETTINGS=END\n";
+        var status = await guard.ReadAsync(CancellationToken.None);
+        Assert.Equal(GuardState.On, status.Distros[0].State);
+    }
+
+    [Fact]
     public async Task WslLocalShapeKeepsTheGatewayAndBakesNoHost()
     {
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
@@ -1010,7 +1053,7 @@ public class GuardTests : IDisposable
         Assert.Contains("*codex*|*Codex*)", script);
         // the address is the WSL NAT gateway recomputed at every shell start, not 127.0.0.1
         Assert.Contains("ip route show default", script);
-        Assert.Contains("export HTTP_PROXY=\"http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT\"", script);
+        Assert.Contains("export HTTP_PROXY=\"http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT\"", script);
         Assert.Contains("export NO_PROXY=\"localhost,127.0.0.1,.local,corp.example.com,.corp.example.com\"", script);
         // the port line is what `pnr guard status` reads back
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", script);
@@ -1018,7 +1061,7 @@ public class GuardTests : IDisposable
         // the .env of CODEX_HOME is rewritten to the gateway address: the Codex core loads it over
         // the inherited environment, so the exports alone would be overridden by the loopback form
         Assert.Contains("_pnr_env=\"$CODEX_HOME/.env\"", script);
-        Assert.Contains("grep -q \"^HTTP_PROXY=http://$_pnr_host_ip:$PNR_CODEX_PROXY_PORT$\"", script);
+        Assert.Contains("grep -qxF \"HTTP_PROXY=$HTTP_PROXY\"", script);
         Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
         Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
         Assert.Contains("cat \"$_pnr_tmp\" > \"$_pnr_env\"", script);

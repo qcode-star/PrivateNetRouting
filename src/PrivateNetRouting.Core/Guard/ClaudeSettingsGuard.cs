@@ -34,8 +34,12 @@ public static class ClaudeEnvValues
     /// </summary>
     public static string? WslProxyUrl(System.Net.IPAddress? gateway, AppConfig config) =>
         WslFixedHost(config) is { } host
-            ? $"http://{host}:{Port(config)}"
-            : gateway is null ? null : $"http://{gateway}:{Port(config)}";
+            ? $"http://{UrlHost(host)}:{Port(config)}"
+            : gateway is null ? null : $"http://{UrlHost(gateway.ToString())}:{Port(config)}";
+
+    /// <summary>A literal IP as the host part of a URL: an IPv6 address goes in brackets (RFC 3986).</summary>
+    public static string UrlHost(string host) =>
+        host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
 
     public static int Port(AppConfig config) => AppProxyEndpoint.Port(config);
 
