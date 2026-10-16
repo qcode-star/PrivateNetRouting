@@ -38,11 +38,18 @@ internal sealed class FakeProxyInstance : IForwardProxyInstance
         return Task.CompletedTask;
     }
 
-    public Task StopAsync()
+    /// <summary>Runs inside the stop before the instance counts as stopped (a test can hold the stop here).</summary>
+    public Func<Task>? OnStop { get; set; }
+
+    public async Task StopAsync()
     {
+        if (OnStop is not null)
+        {
+            await OnStop();
+        }
+
         StopCount++;
         IsRunning = false;
-        return Task.CompletedTask;
     }
 }
 
@@ -533,6 +540,72 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         Assert.True(channel2.ListenerDisposed);
     }
 
+    /// <summary>An elevated owner's event cannot be opened (ACCESS_DENIED): it is a foreign owner, not a failed stop.</summary>
+    [Fact]
+    public async Task Stop_AnOwnerThatCannotBeSignalledIsLeftAloneAsForeign()
+    {
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18082] = [Entry(7, "PrivateNetRouting.App")];
+        var channel = new FakeStopChannel { Throws = new UnauthorizedAccessException("Access to the path is denied.") };
+        var kills = new List<int>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Listen = "127.0.0.1:18082", WorkerStopWaitSeconds = 0 },
+            new FakeProxyInstance(),
+            ports,
+            tcp,
+            new FakeFinderById(),
+            kill: kills.Add,
+            channel: channel);
+
+        await supervisor.StopAsync(); // does not throw
+
+        Assert.Equal([18082], channel.Requested);
+        Assert.Empty(kills);
+        Assert.True(ports.Listening);
+    }
+
+    /// <summary>A stop request queued for a listener that a stop and a restart replaced must not take down the new one.</summary>
+    [Fact]
+    public async Task AStaleStopRequestDoesNotStopTheRestartedListener()
+    {
+        var inner = new FakeProxyInstance();
+        var channel = new FakeStopChannel();
+        var supervisor = Make(new ForwardProxyConfig(), inner, new FakePortProbe(), new FakeTcpTable(), new FakeFinderById(), channel: channel);
+        await supervisor.StartAsync(CancellationToken.None);
+        var staleHandler = channel.Handler!;
+        await supervisor.StopAsync();
+        await supervisor.StartAsync(CancellationToken.None);
+
+        await staleHandler();
+
+        Assert.True(inner.IsRunning);
+        Assert.Equal(1, inner.StopCount);
+    }
+
+    /// <summary>A stop request and a start are serialized: the request waits for the running start to finish.</summary>
+    [Fact]
+    public async Task AStopRequestWaitsForARunningStart()
+    {
+        var inner = new FakeProxyInstance();
+        var channel = new FakeStopChannel();
+        var supervisor = Make(new ForwardProxyConfig(), inner, new FakePortProbe(), new FakeTcpTable(), new FakeFinderById(), channel: channel);
+        await supervisor.StartAsync(CancellationToken.None);
+        var handler = channel.Handler!;
+
+        var stopGate = new TaskCompletionSource();
+        inner.OnStop = () => stopGate.Task;
+        var stop = supervisor.StopAsync(); // holds the lifecycle while the inner stop hangs
+        var request = handler();
+        await Task.Delay(100);
+        Assert.False(request.IsCompleted);
+
+        stopGate.SetResult();
+        await stop;
+        await request.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, inner.StopCount); // the request found the listener gone and did nothing
+    }
+
     [Fact]
     public async Task NamedEventChannelDeliversARequestToTheListeningOwner()
     {
@@ -571,10 +644,17 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             return new Disposer(this);
         }
 
+        public Exception? Throws { get; init; }
+
         public bool Request(int port)
         {
             Requested.Add(port);
             OnRequest?.Invoke();
+            if (Throws is not null)
+            {
+                throw Throws;
+            }
+
             return Answers;
         }
 

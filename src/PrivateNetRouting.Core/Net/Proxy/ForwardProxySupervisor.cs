@@ -72,7 +72,30 @@ public sealed class ForwardProxySupervisor(
 
     public long FailedConnections => skipped ? 0 : inner!.FailedConnections;
 
+    /// <summary>
+    /// Serializes the lifecycle operations of this supervisor — start, detach, stop and a stop
+    /// requested by another process through the channel (it arrives on a thread-pool thread at
+    /// any moment). None of them calls another while holding it, so it is never re-entered.
+    /// </summary>
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+
+    /// <summary>Bumped with every stop-request listener; a request queued for an older listener is stale.</summary>
+    private int _listenerGeneration;
+
     public async Task StartAsync(CancellationToken ct)
+    {
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await StartLockedAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task StartLockedAsync(CancellationToken ct)
     {
         if (skipped)
         {
@@ -111,7 +134,8 @@ public sealed class ForwardProxySupervisor(
     private void StartListeningForStopRequests()
     {
         StopListeningForStopRequests();
-        _stopListener = stopChannel?.Listen(Port, HandleStopRequestAsync);
+        var generation = ++_listenerGeneration;
+        _stopListener = stopChannel?.Listen(Port, () => HandleStopRequestAsync(generation));
     }
 
     private void StopListeningForStopRequests()
@@ -120,10 +144,19 @@ public sealed class ForwardProxySupervisor(
         _stopListener = null;
     }
 
-    private async Task HandleStopRequestAsync()
+    private async Task HandleStopRequestAsync(int generation)
     {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (generation != _listenerGeneration || _stopListener is null || !inner!.IsRunning)
+            {
+                // a stop, a detach or a restart ran first: the request was meant for a listener
+                // that is gone, and must not take down the one started after it
+                log.Debug("forward-proxy: a stale stop request ignored");
+                return;
+            }
+
             log.Info("forward-proxy: another process (the idle stopper) asked this one to stop its listener");
             StopListeningForStopRequests();
             await inner!.StopAsync().ConfigureAwait(false);
@@ -131,6 +164,10 @@ public sealed class ForwardProxySupervisor(
         catch (Exception ex)
         {
             log.Warn($"forward-proxy: stopping the listener on request failed: {ex.Message}");
+        }
+        finally
+        {
+            _lifecycle.Release();
         }
     }
 
@@ -225,6 +262,19 @@ public sealed class ForwardProxySupervisor(
     /// </summary>
     public async Task DetachAsync(CancellationToken ct)
     {
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await DetachLockedAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task DetachLockedAsync(CancellationToken ct)
+    {
         if (skipped)
         {
             log.Info(SkippedMessage);
@@ -249,6 +299,19 @@ public sealed class ForwardProxySupervisor(
 
     public async Task StopAsync()
     {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopLockedAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task StopLockedAsync()
+    {
         if (skipped)
         {
             return; // the skipped shape has no local proxy: nothing of ours is on the port
@@ -270,7 +333,7 @@ public sealed class ForwardProxySupervisor(
         var workerPids = owners.Select(owner => owner.ProcessId).Distinct().Where(IsOurWorker).ToList();
         if (workerPids.Count == 0)
         {
-            if (stopChannel is not null && stopChannel.Request(Port))
+            if (RequestOwnerStop())
             {
                 // an in-process owner of ours (the GUI in the tray, a foreground pnr proxy)
                 log.Info($"forward-proxy: port {Port} is held by {DescribeOwners(owners)} — asked it to stop its listener");
@@ -296,6 +359,29 @@ public sealed class ForwardProxySupervisor(
         }
 
         await WaitForPortReleaseAsync("worker stopped").ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks an in-process owner of ours through the channel. An owner this process may not signal
+    /// (an elevated one: opening its event is ACCESS_DENIED) is not ours to stop — it is treated
+    /// as the foreign owner it looks like from here, and the stop goes on.
+    /// </summary>
+    private bool RequestOwnerStop()
+    {
+        if (stopChannel is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return stopChannel.Request(Port);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            log.Debug($"forward-proxy: the stop channel of port {Port} cannot be signalled: {ex.Message}");
+            return false;
+        }
     }
 
     private async Task WaitForPortReleaseAsync(string stoppedMessage)
