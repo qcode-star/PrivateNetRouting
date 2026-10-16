@@ -754,9 +754,16 @@ public partial class MainWindow : Window
 
             await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
             var wsl = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
+            var failed = wsl.Distros.Where(d => d.Failed).ToList();
             if (wsl.LayerDisabled)
             {
                 _viewModel.SetCheckResult("Main.Guard.All.EnabledNoWslFmt", dns, direct, LocalizeWslReason(wsl.Reason ?? ""));
+            }
+            else if (failed.Count > 0)
+            {
+                // a distro that failed its sync is not "synced": the result line names it
+                _viewModel.SetCheckResult(
+                    "Main.Guard.All.EnabledWslFailedFmt", dns, direct, string.Join("; ", failed.Select(LocalizeDistroFailure)));
             }
             else
             {
@@ -917,7 +924,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var lines = result.Distros.Select(d => d.Skipped
+        // a failed distro carries Skipped as well: the failure is checked first and named as such
+        var lines = result.Distros.Select(d => d.Failed
+            ? LocalizeDistroFailure(d)
+            : d.Skipped
             ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
             : d.SettingsWritten || d.ScriptWritten || d.ProxyEnvWritten
                 || d.BootRunnerWritten || d.UserCommandWritten || d.WslConfWritten
@@ -925,6 +935,15 @@ public partial class MainWindow : Window
                 : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten)));
         _viewModel.SetCheckText(string.Join("; ", lines));
     });
+
+    /// <summary>A distro whose sync failed: its name and the error (the core's "sync failed:" prefix is the word of the line).</summary>
+    private static string LocalizeDistroFailure(WslDistroSyncResult distro)
+    {
+        const string prefix = "sync failed: ";
+        var reason = distro.Reason ?? "";
+        var detail = reason.StartsWith(prefix, StringComparison.Ordinal) ? reason[prefix.Length..] : reason;
+        return Loc.F("Main.Guard.Wsl.DistroFailedFmt", distro.Distro, detail);
+    }
 
     /// <summary>The Codex proxy env part of a sync result line ("codex env written" / "up to date").</summary>
     private static string LocalizeCodexWritten(bool written) => written

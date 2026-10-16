@@ -180,6 +180,7 @@
     <s:String x:Key="Main.Guard.Summary.Mixed">partially on</s:String>
     <s:String x:Key="Main.Guard.Summary.AllOff">all off</s:String>
     <s:String x:Key="Main.Guard.All.EnabledFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json and WSL synced.</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledWslFailedFmt">Guards on except WSL: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json synced; WSL sync FAILED — {2}</s:String>
     <s:String x:Key="Main.Guard.All.EnabledNoWslFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json synced; WSL skipped ({2}).</s:String>
     <s:String x:Key="Main.Guard.All.DisabledFmt">Guards off: ban removed (DNS: {0}, direct: {1}), egress policy removed.</s:String>
     <s:String x:Key="Main.Guard.Unknown">state unknown</s:String>
@@ -232,6 +233,7 @@
     <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">codex env up to date</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: skipped — {1}</s:String>
+    <s:String x:Key="Main.Guard.Wsl.DistroFailedFmt">{0}: sync FAILED — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroDoneFmt">{0}: proxy {1} written ({2})</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroUnchangedFmt">{0}: already up to date (proxy {1}, {2})</s:String>
 
