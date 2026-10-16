@@ -43,7 +43,6 @@ public static class ElevatedChainCommands
             var stateDir = config.Chain.Tailscale.StateDir;
             Directory.CreateDirectory(stateDir);
 
-            PinChainLocations(config, log);
             var detail = command switch
             {
                 StartDaemon => StartDaemonCore(config, log),
@@ -69,9 +68,10 @@ public static class ElevatedChainCommands
     }
 
     /// <summary>
-    /// The chain binaries are executed as administrator, so the user-writable config does not name
-    /// them: like the guard half, the helper pins them to the standard per-machine Tailscale
-    /// install (logged when they differed) and refuses the whole run when that install is missing.
+    /// The daemon start executes the chain binaries as administrator, so the user-writable config
+    /// does not name them: like the guard half, the helper pins them to the standard per-machine
+    /// Tailscale install (logged when they differed) and refuses the start when that install is
+    /// missing. The stop executes nothing but an optional `tailscale down` (see TryPinCli).
     /// </summary>
     internal static void PinChainLocations(AppConfig config, FileLog log, string? tailscaled = null, string? cli = null)
     {
@@ -97,8 +97,41 @@ public static class ElevatedChainCommands
         config.Chain.Tailscale.CliPath = cli;
     }
 
+    /// <summary>
+    /// The stop's only executed binary is the CLI of its `tailscale down` step: pinned to the
+    /// standard install when that CLI is there, otherwise the step is skipped (false) — the kill
+    /// by image name and statedir/socket executes nothing, so a non-standard install can still be
+    /// taken down.
+    /// </summary>
+    internal static bool TryPinCli(AppConfig config, FileLog log, string? cli = null)
+    {
+        cli ??= ElevatedHelperTrust.SystemTailscaleCli();
+        if (!File.Exists(cli))
+        {
+            log.Warn($"elevated helper: the standard Tailscale CLI ({cli}) is missing, the node is not downed — the processes are stopped by the kill alone");
+            return false;
+        }
+
+        if (!string.Equals(Path.GetFullPath(config.Chain.Tailscale.CliPath), cli, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Warn($"elevated helper: chain.tailscale.cliPath '{config.Chain.Tailscale.CliPath}' ignored, using the standard Tailscale install");
+        }
+
+        config.Chain.Tailscale.CliPath = cli;
+        return true;
+    }
+
+    /// <summary>
+    /// The dev flag of the elevated start follows the version of the binary the helper actually
+    /// executes (the pinned one), not the one the asking side probed: a 1.104.1+ daemon refuses a
+    /// custom socket without --windows-mode=dev even elevated, an older one does not know the flag;
+    /// an unknown version starts without it.
+    /// </summary>
+    internal static bool ElevatedDevMode(Version? pinnedVersion) => !SidecarDaemon.VersionNeedsElevation(pinnedVersion);
+
     private static string StartDaemonCore(AppConfig config, FileLog log)
     {
+        PinChainLocations(config, log);
         var chain = config.Chain;
         var daemon = new SidecarDaemon(
             chain.Tailscale,
@@ -112,7 +145,10 @@ public static class ElevatedChainCommands
             return "daemon is already listening";
         }
 
-        daemon.StartProcess(devMode: false);
+        var version = new TailscaleVersionProbe(chain.Tailscale.TailscaledPath).GetVersion();
+        var devMode = ElevatedDevMode(version);
+        log.Info($"elevated: starting the standard tailscaled {version?.ToString() ?? "(unknown version)"}{(devMode ? " with --windows-mode=dev" : "")}");
+        daemon.StartProcess(devMode);
         var httpPort = Socks5Client.ParseEndPoint(chain.Tailscale.HttpListen).Port;
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(chain.Tailscale.DaemonWaitSeconds);
         while (DateTime.UtcNow < deadline)
@@ -134,15 +170,18 @@ public static class ElevatedChainCommands
     private static string StopChainCore(AppConfig config, FileLog log)
     {
         var chain = config.Chain;
-        var cli = new SidecarCli(chain.Tailscale);
-        try
+        if (TryPinCli(config, log))
         {
-            var down = cli.DownAsync(CancellationToken.None).GetAwaiter().GetResult();
-            log.Info($"elevated: down -> {down.ExitCode}");
-        }
-        catch (Exception ex)
-        {
-            log.Warn($"elevated: down failed (continuing): {ex.Message}");
+            var cli = new SidecarCli(chain.Tailscale);
+            try
+            {
+                var down = cli.DownAsync(CancellationToken.None).GetAwaiter().GetResult();
+                log.Info($"elevated: down -> {down.ExitCode}");
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"elevated: down failed (continuing): {ex.Message}");
+            }
         }
 
         var killed = 0;
