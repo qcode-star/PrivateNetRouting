@@ -389,19 +389,32 @@ public class AppConfigTests : IDisposable
     {
         AppConfigStore.LoadOrCreate(_path);
         var before = File.ReadAllText(_path);
-        // a directory squats on the target name: the final move fails after the temp file was written
-        var blocked = Path.Combine(Path.GetTempPath(), $"pnr-blocked-{Guid.NewGuid():N}.json");
-        Directory.CreateDirectory(blocked);
-        try
+        var tempPattern = Path.GetFileName(_path) + ".*.tmp";
+
+        // the config itself is held open without write or delete sharing (an editor, a scanner):
+        // the temp file is written, then the replace over the real target fails
+        using (var holder = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            Assert.ThrowsAny<Exception>(() => AppConfigStore.Save(new AppConfig(), blocked));
-            Assert.Empty(Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(blocked) + ".*.tmp"));
+            var error = Record.Exception(() => AppConfigStore.Update(config => config.Ui.Language = "ru", _path));
+
+            Assert.True(error is IOException or UnauthorizedAccessException, $"unexpected: {error}");
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(_path)!, tempPattern));
             Assert.Equal(before, File.ReadAllText(_path));
         }
-        finally
+
+        Assert.Equal(before, File.ReadAllText(_path));
+        Assert.Equal(AppLanguage.Auto, AppConfigStore.LoadOrCreate(_path).Ui.Language);
+
+        // the same for a full save
+        using (new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            Directory.Delete(blocked);
+            var error = Record.Exception(() => AppConfigStore.Save(new AppConfig { Ui = { Language = "ru" } }, _path));
+
+            Assert.True(error is IOException or UnauthorizedAccessException, $"unexpected: {error}");
         }
+
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(_path)!, tempPattern));
+        Assert.Equal(before, File.ReadAllText(_path));
     }
 
     [Fact]
