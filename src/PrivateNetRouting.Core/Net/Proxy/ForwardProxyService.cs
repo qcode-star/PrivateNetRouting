@@ -353,6 +353,10 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         Interlocked.Increment(ref _totalConnections);
         Interlocked.Increment(ref _activeConnections);
         ConnectRequest? target = null;
+
+        // once the 200 is on its way the client speaks its own protocol (TLS) over the tunnel: no
+        // proxy answer may follow it any more
+        var established = false;
         try
         {
             var stream = client.GetStream();
@@ -435,6 +439,7 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             }
 
             using var upstreamClient = upstreamSocket;
+            established = true;
             await stream.WriteAsync(EstablishResponse, stopToken);
             if (!target.IsProbe)
             {
@@ -464,10 +469,17 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
         {
             // service stop: close silently
         }
+        catch (Exception ex) when (established)
+        {
+            // the tunnel was already handed to the client: a 502 now would inject bytes into its
+            // TLS stream — the connection is just closed, and it is not a failed CONNECT
+            _log.Debug($"forward-proxy: {DescribeRemote(client)} -> {target}: tunnel ended with an error: {ex.Message}");
+        }
         catch (Exception ex)
         {
-            // any failure of one connection (an unsupported address family, a bad certificate of a
-            // DoH endpoint, a reset client) ends in a 502 and a counter, never in an unobserved fault
+            // any failure of one connection before the tunnel is established (an unsupported
+            // address family, a bad certificate of a DoH endpoint, a reset client) ends in a 502
+            // and a counter, never in an unobserved fault
             Interlocked.Increment(ref _failedConnections);
             var detail = ex is OperationCanceledException
                 ? "timeout"

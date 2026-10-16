@@ -563,6 +563,41 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A failure after the 200 (here: the activity marker throws right behind it) must not write a
+    /// 502 into the tunnel — the client already speaks TLS there — nor count as a failed CONNECT.
+    /// </summary>
+    [Fact]
+    public async Task AFailureAfterTheEstablishedAnswerWritesNo502()
+    {
+        var origin = await StartEchoServerAsync();
+        var originPort = ((IPEndPoint)origin.LocalEndpoint).Port;
+        var socksUpstream = await StartRelaySocksAsync();
+        var (proxy, proxyEndpoint) = await StartProxyAsync(
+            socksUpstream,
+            host => new ResolveResult(FixtureIp, "fake", 300),
+            markerTime: new ThrowingTimestampProvider());
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(proxyEndpoint);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT target.example:{originPort} HTTP/1.1\r\n\r\n"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var received = new List<byte>();
+        var buffer = new byte[256];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, timeout.Token)) > 0)
+        {
+            received.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+
+        var text = Encoding.ASCII.GetString(received.ToArray());
+        Assert.StartsWith("HTTP/1.1 200", text);
+        Assert.DoesNotContain("502", text);
+        Assert.Equal(0, proxy.FailedConnections);
+    }
+
+    /// <summary>
     /// A client that connects and never sends its request (a port scan, an idle pre-connect) is
     /// closed without a 502 and is not a proxy failure.
     /// </summary>
@@ -651,7 +686,8 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         Func<string, Core.Net.Dns.ResolveResult> resolve,
         string? user = null,
         string? password = null,
-        int headerTimeoutSeconds = 5)
+        int headerTimeoutSeconds = 5,
+        TimeProvider? markerTime = null)
     {
         var log = new FileLog(Path.Combine(_tempDir, "proxy.log"));
         var config = new ForwardProxyConfig
@@ -665,7 +701,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
             config,
             new FakeResolver(resolve),
             new Socks5Client(socksUpstream, user, password),
-            new ActivityMarker(Path.Combine(_tempDir, "marker"), TimeSpan.FromSeconds(60)),
+            new ActivityMarker(Path.Combine(_tempDir, "marker"), TimeSpan.FromSeconds(60), markerTime),
             log);
         await proxy.StartAsync(CancellationToken.None);
         return (proxy, ParseIpEndPoint(proxy.ListenerEndpoints[0]));

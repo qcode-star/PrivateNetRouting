@@ -133,3 +133,9 @@ internal sealed class BlockingDohSource : IDohEndpointSource
 
     public void Release(IReadOnlyList<DohEndpoint> endpoints) => _release.TrySetResult(endpoints);
 }
+
+/// <summary>A clock whose monotonic timestamp throws: makes a component fail at the exact point it first reads it.</summary>
+internal sealed class ThrowingTimestampProvider : TimeProvider
+{
+    public override long GetTimestamp() => throw new InvalidOperationException("clock unavailable");
+}
