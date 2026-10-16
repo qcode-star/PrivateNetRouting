@@ -508,7 +508,10 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         Assert.Equal(0, proxy.FailedConnections); // a refusal is policy, not a failure
     }
 
-    /// <summary>A mixed resolution: the forbidden alternate is dropped, the allowed one is dialed — the name still works.</summary>
+    /// <summary>
+    /// A mixed resolution: the forbidden address is dropped, the allowed one is dialed — the name
+    /// still works. The forbidden one comes first, so a proxy that ignored the policy would dial it.
+    /// </summary>
     [Fact]
     public async Task DialsOnlyTheAllowedAddressesOfAMixedResolution()
     {
@@ -517,7 +520,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var socksUpstream = await StartRelaySocksAsync();
         var (proxy, proxyEndpoint) = await StartProxyAsync(
             socksUpstream,
-            host => new ResolveResult(FixtureIp, "fake", 300, [IPAddress.Loopback]));
+            host => new ResolveResult(IPAddress.Loopback, "fake", 300, [FixtureIp]));
 
         using var client = new TcpClient();
         await client.ConnectAsync(proxyEndpoint);
@@ -531,6 +534,7 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         var read = await stream.ReadAsync(echo, timeout.Token);
         Assert.Equal("pong"u8.ToArray(), echo[..read]);
         Assert.Equal(0, proxy.FailedConnections);
+        Assert.Equal([(1, FixtureIp)], _relayRequests.ToArray()); // one dial, by IPv4, of the allowed address only
     }
 
     private int _upstreamDials;
@@ -833,12 +837,15 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return listener;
     }
 
+    /// <summary>What the relay SOCKS5 fixture was asked to dial: the ATYP and, for an IPv4 request, the address.</summary>
+    private readonly ConcurrentQueue<(byte Atyp, IPAddress? Address)> _relayRequests = new();
+
     /// <summary>
-    /// SOCKS5 upstream that accepts the CONNECT and relays bytes; the requested address is
-    /// ignored (the fixtures dial a documentation-range address nothing here can route), only its
-    /// port is — the relay connects to that port on the loopback, standing in for "the upstream
-    /// reached the target". With credentials — the RFC 1929 subnegotiation first, and only the
-    /// exact pair opens the tunnel.
+    /// SOCKS5 upstream that accepts the CONNECT and relays bytes; the requested address is not
+    /// dialed (the fixtures dial a documentation-range address nothing here can route), only
+    /// recorded in <see cref="_relayRequests"/> — the relay connects to the requested port on the
+    /// loopback, standing in for "the upstream reached the target". With credentials — the
+    /// RFC 1929 subnegotiation first, and only the exact pair opens the tunnel.
     /// </summary>
     private async Task<string> StartRelaySocksAsync(string? user = null, string? password = null)
     {
@@ -914,7 +921,8 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
                         return;
                     }
 
-                    // the requested address is ignored (see the helper's doc comment), the port is what the tunnel aims at
+                    // the requested address is only recorded (see the helper's doc comment), the port is what the tunnel aims at
+                    _relayRequests.Enqueue((request[3], request[3] == 1 ? new IPAddress(request.AsSpan(4, 4)) : null));
                     var port = BinaryPrimitives.ReadUInt16BigEndian(request.AsSpan(8, 2));
                     await stream.WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
 
