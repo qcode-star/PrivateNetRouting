@@ -1243,7 +1243,10 @@ public partial class MainWindow : Window
 
         if (_chainBusy || _launchBusy)
         {
-            return; // the same interlock the tray path applies: a launch must not race a chain operation
+            // the same interlock the tray path applies: a launch must not race a chain operation;
+            // the shortcut click is not dropped silently — the result line says why
+            _viewModel.SetCheckResult("Main.Launch.BusyRetry");
+            return;
         }
 
         bool claudeRunning;
@@ -1393,7 +1396,17 @@ public partial class MainWindow : Window
     /// Shortcut mode (App --launch-browser instead of the "Claude (browser)" shortcut): a browser
     /// with our profile is already running — just the application window; not running — a normal launch.
     /// </summary>
-    public async void LaunchBrowserFromShortcut() => await RunBrowserLaunchAsync();
+    public async void LaunchBrowserFromShortcut()
+    {
+        if (_chainBusy || _launchBusy)
+        {
+            // a shortcut click during a chain operation is not dropped silently
+            _viewModel.SetCheckResult("Main.Launch.BusyRetry");
+            return;
+        }
+
+        await RunBrowserLaunchAsync();
+    }
 
     private async Task RunBrowserLaunchAsync()
     {

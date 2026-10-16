@@ -106,6 +106,7 @@
     <s:String x:Key="Main.Launch.DoneFmt">Claude запущен (цепочка готова за {0} с)</s:String>
     <s:String x:Key="Main.Launch.Cancelled">запуск отменён</s:String>
     <s:String x:Key="Main.Launch.AlreadyRunning">Claude уже запущен — приложение открыто без повторного запуска</s:String>
+    <s:String x:Key="Main.Launch.BusyRetry">идёт операция с цепочкой — запусти снова, когда она завершится</s:String>
     <s:String x:Key="Main.Launch.RestartOfferTitle">Приложение уже запущено</s:String>
     <s:String x:Key="Main.Launch.RestartOfferFmt">{0} уже запущен (процессов: {1}) без прокси приложения, а новый запуск лишь активирует его окно. Закрыть его и запустить заново через прокси?</s:String>
     <s:String x:Key="Main.Launch.RestartDeclined">запуск отменён: запущенная копия работает без прокси</s:String>
