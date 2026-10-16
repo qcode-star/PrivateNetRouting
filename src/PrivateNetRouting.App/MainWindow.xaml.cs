@@ -1406,18 +1406,26 @@ public partial class MainWindow : Window
 
         _launchBusy = true;
         _viewModel.SetLaunchBusy(true);
+        var success = false;
         try
         {
-            await RunBrowserLaunchCoreAsync();
+            success = await RunBrowserLaunchCoreAsync();
         }
         finally
         {
+            // the flag goes down first: the chain refresh below returns early while a launch is busy
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
+            EndOperation();
+            SettleChainCardAfterOperation(success);
+            await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
+            await RefreshChainAsync();
+            await RefreshIdleStopAsync();
         }
     }
 
-    private async Task RunBrowserLaunchCoreAsync()
+    /// <summary>The browser launch itself; true — the browser was started. The caller settles the card and refreshes it.</summary>
+    private async Task<bool> RunBrowserLaunchCoreAsync()
     {
         var success = false;
         var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
@@ -1431,12 +1439,12 @@ public partial class MainWindow : Window
                 if (!OfferBrowserProfileCreation())
                 {
                     _viewModel.SetCheckResult("Main.Browser.NotConfigured");
-                    return;
+                    return false;
                 }
 
                 if (!_runtime.Browser.IsConfigured)
                 {
-                    return; // the dialog was closed without creating anything
+                    return false; // the dialog was closed without creating anything
                 }
             }
 
@@ -1448,13 +1456,13 @@ public partial class MainWindow : Window
             catch (Exception ex)
             {
                 _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
-                return;
+                return false;
             }
 
             if (browserRunning)
             {
                 _viewModel.SetCheckResult("Main.Browser.AlreadyRunning");
-                return;
+                return false;
             }
 
             // The question about an egress that did not answer, asked by the launcher before the
@@ -1532,12 +1540,9 @@ public partial class MainWindow : Window
         {
             _operationCts = null;
             cts.Dispose();
-            EndOperation();
-            SettleChainCardAfterOperation(success);
-            await _runtime.WatchdogControl.LastAutoStart; // the raise re-arms the stopper — show it right away
-            await RefreshChainAsync();
-            await RefreshIdleStopAsync();
         }
+
+        return success;
     }
 
     /// <summary>
