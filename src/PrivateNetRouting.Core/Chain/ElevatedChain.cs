@@ -196,13 +196,12 @@ public static class ElevatedChainCommands
             {
                 try
                 {
-                    if (!finder.StillCarriesArgument(found, pattern))
+                    if (!finder.KillIfStillCarries(found, pattern))
                     {
                         log.Debug($"elevated: {name} pid={found.Id} is gone or no longer ours, not killed");
                         continue;
                     }
 
-                    Process.GetProcessById(found.Id).Kill();
                     log.Info($"elevated: killed {name} pid={found.Id}");
                     killed++;
                 }

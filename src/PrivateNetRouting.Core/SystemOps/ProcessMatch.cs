@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace PrivateNetRouting.Core.SystemOps;
 
 /// <summary>
@@ -59,4 +61,43 @@ public static class ProcessMatch
     /// </summary>
     public static bool StillCarriesArgument(this IProcessFinder finder, FoundProcess found, string value) =>
         finder.FindById(found.Id) is { } current && ContainsArgumentValue(current.CommandLine, value);
+
+    /// <summary>
+    /// Kills a process of a scan if it is still ours: the process is opened once and its handle
+    /// pinned first, the identity re-check runs while that handle holds the PID, and the kill goes
+    /// to the same object — no second open by PID in between. False — gone, or no longer ours.
+    /// Throws Win32Exception when the process cannot be opened or killed (access denied).
+    /// </summary>
+    public static bool KillIfStillCarries(this IProcessFinder finder, FoundProcess found, string value)
+    {
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(found.Id);
+        }
+        catch (ArgumentException)
+        {
+            return false; // gone already
+        }
+
+        using (process)
+        {
+            try
+            {
+                ProcessOps.PinHandle(process);
+            }
+            catch (InvalidOperationException)
+            {
+                return false; // exited between the lookup and the open
+            }
+
+            if (!finder.StillCarriesArgument(found, value))
+            {
+                return false;
+            }
+
+            process.Kill();
+            return true;
+        }
+    }
 }

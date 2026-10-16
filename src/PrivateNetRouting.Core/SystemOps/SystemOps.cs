@@ -91,6 +91,15 @@ public static class WindowsPrivilege
 /// <summary>Utilities for launching console processes without a window.</summary>
 public static class ProcessOps
 {
+    /// <summary>
+    /// Opens and keeps the OS handle of <paramref name="process"/>. Process.GetProcessById opens
+    /// nothing — a PID alone pins nothing and is handed to another process soon after the original
+    /// exits. With the handle held the PID cannot be reused, and every later call on this object
+    /// (HasExited, Kill) acts on the original process. Throws Win32Exception when the handle
+    /// cannot be opened (access denied) and InvalidOperationException when the process is gone.
+    /// </summary>
+    public static void PinHandle(Process process) => _ = process.SafeHandle;
+
     private const int StdInputHandle = -10;
     private const int StdOutputHandle = -11;
     private const int StdErrorHandle = -12;

@@ -209,13 +209,12 @@ public sealed class SidecarDaemon(
         {
             try
             {
-                if (!processes.StillCarriesArgument(found, config.StateDir))
+                if (!processes.KillIfStillCarries(found, config.StateDir))
                 {
                     log.Debug($"daemon: pid={found.Id} is gone or no longer ours, not killed");
                     continue;
                 }
 
-                Process.GetProcessById(found.Id).Kill();
                 log.Info($"daemon: killed pid={found.Id}");
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)

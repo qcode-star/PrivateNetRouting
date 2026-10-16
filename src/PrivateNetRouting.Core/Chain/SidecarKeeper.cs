@@ -61,13 +61,12 @@ public sealed class SidecarKeeper(
         {
             try
             {
-                if (!processes.StillCarriesArgument(found, config.Socket))
+                if (!processes.KillIfStillCarries(found, config.Socket))
                 {
                     log.Debug($"keeper: pid={found.Id} is gone or no longer ours, not killed");
                     continue;
                 }
 
-                Process.GetProcessById(found.Id).Kill();
                 log.Info($"keeper: killed pid={found.Id}");
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)

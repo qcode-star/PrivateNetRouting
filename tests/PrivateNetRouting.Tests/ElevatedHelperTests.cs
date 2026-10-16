@@ -79,6 +79,44 @@ public class ElevatedHelperTests : IDisposable
         Assert.False(finder.StillCarriesArgument(scanned, @"C:\x\sidecar"));
     }
 
+    /// <summary>The kill opens the process once, re-checks it under the held handle and kills that same process.</summary>
+    [Fact]
+    public void KillIfStillCarriesKillsOnlyAProcessThatIsStillOurs()
+    {
+        using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            Path.Combine(Environment.SystemDirectory, "ping.exe"), "-n 60 127.0.0.1")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+        })!;
+        try
+        {
+            var finder = new FakeFinderByName();
+            var scanned = new FoundProcess(child.Id, @"tailscaled.exe ""--statedir=C:\x\sidecar""");
+
+            // the pid now reports a foreign command line: left alone
+            finder.ByName["ping.exe"] = [new FoundProcess(child.Id, "ping.exe -n 60 127.0.0.1")];
+            Assert.False(finder.KillIfStillCarries(scanned, @"C:\x\sidecar"));
+            Assert.False(child.HasExited);
+
+            // still ours: killed
+            finder.ByName["ping.exe"] = [scanned];
+            Assert.True(finder.KillIfStillCarries(scanned, @"C:\x\sidecar"));
+            Assert.True(child.WaitForExit(5000));
+
+            // gone: nothing to kill, no error
+            Assert.False(finder.KillIfStillCarries(scanned, @"C:\x\sidecar"));
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill();
+            }
+        }
+    }
+
     // ----- P2-24: the helper gets the config of the asking user -----
 
     [Fact]
@@ -169,6 +207,44 @@ public class ElevatedHelperTests : IDisposable
         Assert.Throws<FileNotFoundException>(() =>
             ElevatedChainCommands.PinChainLocations(config, log, Path.Combine(_dir, "absent.exe"), Path.Combine(_dir, "also-absent.exe")));
     }
+
+    [Fact]
+    public void TheStopPinsTheCliWhenTheStandardInstallHasIt()
+    {
+        var cli = Path.Combine(_dir, "tailscale.exe");
+        File.WriteAllText(cli, "stub");
+        var config = new AppConfig();
+        config.Chain.Tailscale.CliPath = @"C:\untrusted\tailscale.exe";
+        using var log = new FileLog(Path.Combine(_dir, "pin-cli.log"));
+
+        Assert.True(ElevatedChainCommands.TryPinCli(config, log, cli));
+        Assert.Equal(cli, config.Chain.Tailscale.CliPath);
+    }
+
+    /// <summary>
+    /// Without the standard install the stop is not refused: it skips its `tailscale down` step
+    /// (the only binary it would execute) and still kills by image name and statedir/socket.
+    /// </summary>
+    [Fact]
+    public void TheStopWithoutTheStandardInstallSkipsTheDownInsteadOfRefusing()
+    {
+        var config = new AppConfig();
+        config.Chain.Tailscale.CliPath = @"C:\elsewhere\tailscale.exe";
+        using var log = new FileLog(Path.Combine(_dir, "pin-cli-missing.log"));
+
+        Assert.False(ElevatedChainCommands.TryPinCli(config, log, Path.Combine(_dir, "absent.exe")));
+        Assert.Equal(@"C:\elsewhere\tailscale.exe", config.Chain.Tailscale.CliPath); // nothing is executed from it
+    }
+
+    /// <summary>The elevated start follows the pinned binary's own version: a 1.104.1+ daemon needs the dev flag even elevated.</summary>
+    [Theory]
+    [InlineData("1.104.1", true)]
+    [InlineData("1.106.0", true)]
+    [InlineData("1.104.0", false)]
+    [InlineData("1.90.9", false)]
+    [InlineData(null, false)]
+    public void TheElevatedStartTakesTheDevFlagFromThePinnedBinarysVersion(string? version, bool devMode) =>
+        Assert.Equal(devMode, ElevatedChainCommands.ElevatedDevMode(version is null ? null : new Version(version)));
 
     // ----- P2-22: the in-process path -----
 
