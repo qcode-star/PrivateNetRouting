@@ -116,6 +116,91 @@ public class LogStoreTests : IDisposable
     }
 
     [Fact]
+    public void RotateFoldsTheStagingFilesOfACrashedRotationIntoTheAgeChain()
+    {
+        var path = Path.Combine(_tempDir, "app.log");
+        File.WriteAllText(path + ".1", "one|");
+        File.WriteAllText(path + ".rotating", "legacy|");
+        File.SetLastWriteTimeUtc(path + ".rotating", DateTime.UtcNow.AddMinutes(-2));
+        File.WriteAllText(path + $".rotating-{int.MaxValue}-dead", "dead|"); // no such process
+        File.SetLastWriteTimeUtc(path + $".rotating-{int.MaxValue}-dead", DateTime.UtcNow.AddMinutes(-1));
+        File.WriteAllText(path, "current|");
+
+        var result = new LogStore(_tempDir).Rotate("app.log", keep: 3);
+
+        Assert.True(result.Ok);
+        Assert.Equal("current|", File.ReadAllText(path + ".1"));
+        Assert.Equal("one|legacy|dead|", File.ReadAllText(path + ".2")); // oldest first, just behind .1
+        Assert.Empty(Directory.GetFiles(_tempDir, "app.log.rotating*"));
+    }
+
+    [Fact]
+    public void RotateLeavesTheStagingFileOfALiveRotationAlone()
+    {
+        var path = Path.Combine(_tempDir, "app.log");
+        var live = path + ".rotating-4-inflight"; // pid 4: the System process, always alive
+        File.WriteAllText(live, "in flight");
+        File.WriteAllText(path, "current");
+
+        Assert.True(new LogStore(_tempDir).Rotate("app.log", keep: 2).Ok);
+
+        Assert.Equal("in flight", File.ReadAllText(live));
+        Assert.Equal("current", File.ReadAllText(path + ".1"));
+    }
+
+    [Fact]
+    public void AFailedShiftPutsTheCurrentLogBackWithoutLoss()
+    {
+        var path = Path.Combine(_tempDir, "app.log");
+        File.WriteAllText(path, "current");
+        File.WriteAllText(path + ".1", "one");
+        File.WriteAllText(path + ".2", "two");
+
+        LogRotationResult result;
+        using (new FileStream(path + ".1", FileMode.Open, FileAccess.Read, FileShare.Read)) // .1 cannot move
+        {
+            result = new LogStore(_tempDir).Rotate("app.log", keep: 3);
+        }
+
+        Assert.False(result.Ok);
+        Assert.Equal("current", File.ReadAllText(path));
+        Assert.Equal("one", File.ReadAllText(path + ".1"));
+        Assert.Empty(Directory.GetFiles(_tempDir, "app.log.rotating*"));
+    }
+
+    [Fact]
+    public void AStagingFileKeptByAFailedRotationIsFoldedInByTheNextOne()
+    {
+        // a failed rotation whose current log was re-created meanwhile keeps its staging file
+        // under a name of this process; the next rotation folds it in
+        var path = Path.Combine(_tempDir, "app.log");
+        File.WriteAllText(path + ".1", "one|");
+        File.WriteAllText(path + $".rotating-{Environment.ProcessId}-kept", "kept|");
+        File.WriteAllText(path, "current|");
+
+        Assert.True(new LogStore(_tempDir).Rotate("app.log", keep: 2).Ok);
+
+        Assert.Equal("current|", File.ReadAllText(path + ".1"));
+        Assert.Equal("one|kept|", File.ReadAllText(path + ".2"));
+    }
+
+    [Fact]
+    public void FileLogStartupFoldsOrphansWithoutRotatingASmallLog()
+    {
+        var path = Path.Combine(_tempDir, "app.log");
+        File.WriteAllText(path, "small|");
+        File.WriteAllText(path + ".rotating", "orphan|");
+
+        using (new FileLog(path, maxBytes: 1_000_000))
+        {
+        }
+
+        Assert.Equal("small|", File.ReadAllText(path));
+        Assert.Equal("orphan|", File.ReadAllText(path + ".1"));
+        Assert.False(File.Exists(path + ".rotating"));
+    }
+
+    [Fact]
     public void ResolveRejectsPathsOutsideTheLogDirectory()
     {
         var result = new LogStore(_tempDir).Rotate("..\\other.log", keep: 2);

@@ -9,21 +9,39 @@ namespace PrivateNetRouting.Core.Logging;
 /// </summary>
 internal static class LogRotation
 {
+    /// <summary>
+    /// The staging name of the current file during a shift: &lt;log&gt;.rotating-&lt;pid&gt;-&lt;random&gt;.
+    /// Unique per rotation, so concurrent rotations of other processes never share (and overwrite)
+    /// one staging file; the PID tells a live rotation from the leftover of a crashed one.
+    /// </summary>
+    private const string StagingSuffix = ".rotating";
+
+    /// <summary>Serializes the shifts of this process (all FileLog instances and LogStore).</summary>
+    private static readonly object Gate = new();
+
     public static void Shift(string path, int keep)
     {
         var full = Path.GetFullPath(path);
+        lock (Gate)
+        {
+            ShiftLocked(full, keep);
+        }
+    }
 
+    private static void ShiftLocked(string full, int keep)
+    {
         // The current file goes first: a file held by another process fails here, before any
         // age file is touched, so a failed rotation never destroys the existing chain.
         string? staged = null;
         if (File.Exists(full))
         {
-            staged = $"{full}.rotating";
-            File.Move(full, staged, overwrite: true);
+            staged = NewStagingName(full);
+            File.Move(full, staged);
         }
 
         try
         {
+            FoldOrphans(full, staged);
             for (var i = keep - 1; i > 0; i--)
             {
                 var older = $"{full}.{i}";
@@ -40,27 +58,148 @@ internal static class LogRotation
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Put the staged records back without loss: as the current log when nobody re-created
+            // it meanwhile, otherwise the staging file stays where it is and the next rotation
+            // folds it into the age chain (FoldOrphans).
             if (staged is not null && File.Exists(staged) && !File.Exists(full))
             {
-                File.Move(staged, full);
+                try
+                {
+                    File.Move(staged, full);
+                }
+                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
+                {
+                    // a writer re-created the log in between: the staging file is kept for the next rotation
+                }
             }
 
             throw;
         }
     }
 
-    /// <summary>Rotation at start: shift only a file that outgrew the threshold; errors are not critical.</summary>
+    /// <summary>
+    /// Staging files left behind by a crashed rotation (or by a failed one of this process) hold
+    /// the records of a former current log: older than the current one, newer than every age
+    /// file. They are appended to the end of .1 (or become .1), oldest first, before the chain
+    /// shifts — so they land just behind the file being rotated now. A staging file of another
+    /// live process is its rotation in flight and is left alone. Each orphan is claimed by
+    /// renaming it to a staging name of this process first, so two rotations never fold the same
+    /// one; an orphan that cannot be folded right now keeps its claimed name for the next try.
+    /// </summary>
+    private static void FoldOrphans(string full, string? inFlight)
+    {
+        foreach (var orphan in FindOrphans(full))
+        {
+            if (string.Equals(orphan, inFlight, StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // the current log this very shift has just staged
+            }
+
+            var claimed = NewStagingName(full);
+            try
+            {
+                File.Move(orphan, claimed);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue; // claimed by another rotation meanwhile, or held
+            }
+
+            var first = $"{full}.1";
+            if (!File.Exists(first))
+            {
+                File.Move(claimed, first);
+                continue;
+            }
+
+            using (var target = new FileStream(first, FileMode.Append, FileAccess.Write, FileShare.Read))
+            using (var source = new FileStream(claimed, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                source.CopyTo(target);
+            }
+
+            File.Delete(claimed);
+        }
+    }
+
+    /// <summary>The orphaned staging files of a log, oldest first.</summary>
+    internal static IReadOnlyList<string> FindOrphans(string full)
+    {
+        var directory = Path.GetDirectoryName(full);
+        if (directory is null || !Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var prefix = Path.GetFileName(full) + StagingSuffix;
+        return Directory.GetFiles(directory, prefix + "*")
+            .Where(file => IsOrphan(Path.GetFileName(file)[prefix.Length..]))
+            .OrderBy(File.GetLastWriteTimeUtc)
+            .ThenBy(file => file, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// The tail after "&lt;log&gt;.rotating": empty (the fixed staging name of older builds) or
+    /// "-&lt;pid&gt;-&lt;random&gt;". A staging file of this process is an orphan too — the shifts of
+    /// this process are serialized, so none of its own is in flight.
+    /// </summary>
+    private static bool IsOrphan(string tail)
+    {
+        if (tail.Length == 0)
+        {
+            return true;
+        }
+
+        var parts = tail.Split('-');
+        if (parts.Length != 3 || parts[0].Length != 0 || !int.TryParse(parts[1], out var pid))
+        {
+            return false; // not a staging name of ours
+        }
+
+        return pid == Environment.ProcessId || !IsProcessAlive(pid);
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false; // no such process
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return true; // cannot tell: leave its file alone
+        }
+    }
+
+    private static string NewStagingName(string full) =>
+        $"{full}{StagingSuffix}-{Environment.ProcessId}-{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Rotation at start: shift a file that outgrew the threshold, or fold in the staging files
+    /// of a crashed rotation; errors are not critical.
+    /// </summary>
     public static void RotateAtStartup(string path, int maxBytes, int keep)
     {
         try
         {
             var full = Path.GetFullPath(path);
-            if (!File.Exists(full) || new FileInfo(full).Length < maxBytes)
+            if (File.Exists(full) && new FileInfo(full).Length >= maxBytes)
             {
-                return;
+                Shift(full, keep);
             }
-
-            Shift(full, keep);
+            else if (FindOrphans(full).Count > 0)
+            {
+                lock (Gate)
+                {
+                    FoldOrphans(full, inFlight: null);
+                }
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

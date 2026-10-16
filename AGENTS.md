@@ -168,7 +168,10 @@ Architecture notes:
   before every line; rotation is by size — at start and before the next record into an overgrown
   file (a chain held by another process postpones the rotation until the owner's RotateNow or the
   next start), manually — from diagnostics (the live log of the process — in place, a free file —
-  by shifting, a held one — honestly "locked").
+  by shifting, a held one — honestly "locked"); a shift stages the current file under a name
+  unique per rotation (`<log>.rotating-<pid>-<random>`), and a staging file left by a crashed or
+  failed rotation is never overwritten: the next rotation (or the next start) appends it to the
+  end of `.1`, so no record is lost.
 - Updater: the version check phase runs before the chain bring-up (no extra UAC is needed);
   installation is not interrupted; during long phases keep the activity marker fresh so that
   auto-stop does not shut the chain down under the download.
