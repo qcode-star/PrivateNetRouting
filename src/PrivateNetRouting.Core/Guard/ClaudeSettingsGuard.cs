@@ -69,9 +69,10 @@ public static class ClaudeEnvValues
 }
 
 /// <summary>
-/// env in settings.json of Claude Code, Windows: the Claude Code
-/// engine (CLI and the one built into Desktop) applies env both to sessions and to commands inside
-/// them. Existing keys (env and root) are preserved; the file is rewritten only when the env
+/// settings.json of Claude Code, Windows: the maintained shape (the proxy env — the Claude Code
+/// engine, CLI and the one built into Desktop, applies env both to sessions and to commands
+/// inside them — plus the privacy switches and the attribution keys, see ClaudeSettingsShape).
+/// Existing keys (env and root) are preserved; the file is rewritten only when the content
 /// actually differs, and before a rewrite the previous version is preserved unless an identical
 /// copy is already among the `.pnr-bak-*` backups — the matching copy is touched instead, so
 /// mtime order mirrors the states most recently preserved (every copy gets its mtime at
@@ -92,13 +93,15 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
 
         try
         {
-            var env = ReadEnv();
-            var proxy = env?["HTTPS_PROXY"]?.GetValue<string>();
-            var noProxy = env?["NO_PROXY"]?.GetValue<string>();
-            var proxyOk = proxy == expectedProxy && env?["HTTP_PROXY"]?.GetValue<string>() == expectedProxy;
+            var root = ReadRootOrEmpty(config.Claude.SettingsPath);
+            var env = ReadEnvOf(root);
+            var proxy = ClaudeSettingsShape.Text(env?["HTTPS_PROXY"]);
+            var noProxy = ClaudeSettingsShape.Text(env?["NO_PROXY"]);
+            var proxyOk = proxy == expectedProxy && ClaudeSettingsShape.Text(env?["HTTP_PROXY"]) == expectedProxy;
             var noProxyOk = noProxy == expectedNoProxy;
-            var state = proxyOk && noProxyOk ? GuardState.On : GuardState.Partial;
-            return new ClaudeSettingsStatus(state, proxy, noProxy, expectedProxy, expectedNoProxy, FileMissing: false);
+            var drift = ClaudeSettingsShape.DriftOf(root);
+            var state = proxyOk && noProxyOk && drift.Count == 0 ? GuardState.On : GuardState.Partial;
+            return new ClaudeSettingsStatus(state, proxy, noProxy, expectedProxy, expectedNoProxy, FileMissing: false, Drift: drift);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -112,7 +115,7 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
     /// <summary>Outcome of a settings sync: whether the file was rewritten and which backup was made.</summary>
     public sealed record ClaudeSettingsSyncResult(bool Written, string? BackupPath);
 
-    /// <summary>Writes env (HTTPS_PROXY/HTTP_PROXY/NO_PROXY); the file is touched only on an actual change.</summary>
+    /// <summary>Writes the maintained shape (proxy env + privacy switches + attribution); the file is touched only on an actual change.</summary>
     public ClaudeSettingsSyncResult Sync()
     {
         var path = config.Claude.SettingsPath;
@@ -124,20 +127,11 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
             throw new InvalidDataException($"settings.json \"env\" is not a JSON object: {path} — fix it by hand, the file is left untouched");
         }
 
-        var env = root["env"] as JsonObject ?? [];
-        var proxy = ClaudeEnvValues.WindowsProxyUrl(config);
-        var noProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
+        var written = ClaudeSettingsShape.Apply(root, ClaudeEnvValues.WindowsProxyUrl(config), ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
         string? backup = null;
-        var written = !(env["HTTPS_PROXY"]?.GetValue<string>() == proxy
-            && env["HTTP_PROXY"]?.GetValue<string>() == proxy
-            && env["NO_PROXY"]?.GetValue<string>() == noProxy);
         if (written)
         {
             backup = Backup(path);
-            env["HTTPS_PROXY"] = proxy;
-            env["HTTP_PROXY"] = proxy;
-            env["NO_PROXY"] = noProxy;
-            root["env"] = env;
             Write(path, root);
         }
 
@@ -164,10 +158,6 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
     }
 
     internal static JsonObject? ReadEnvOf(JsonObject root) => root["env"] as JsonObject;
-
-    private JsonObject? ReadEnv() => File.Exists(config.Claude.SettingsPath)
-        ? ReadEnvOf(ReadRootOrEmpty(config.Claude.SettingsPath))
-        : null;
 
     /// <summary>
     /// Preserves the file before a rewrite: the copy goes to a `<name>.pnr-bak-<n>` name

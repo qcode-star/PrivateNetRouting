@@ -654,10 +654,19 @@ public partial class MainWindow : Window
         {
             GuardState.On => Loc.F("Main.Guard.Settings.OkFmt", snapshot.Settings.ExpectedProxy),
             GuardState.Off => Loc.S("Main.Guard.Settings.NoFile"),
-            GuardState.Partial => Loc.F(
-                "Main.Guard.Settings.MismatchFmt",
-                snapshot.Settings.CurrentProxy ?? "—",
-                snapshot.Settings.CurrentNoProxy ?? "—"),
+            GuardState.Partial => string.Join(" ", new[]
+            {
+                snapshot.Settings.CurrentProxy == snapshot.Settings.ExpectedProxy
+                    && snapshot.Settings.CurrentNoProxy == snapshot.Settings.ExpectedNoProxy
+                    ? null
+                    : Loc.F(
+                        "Main.Guard.Settings.MismatchFmt",
+                        snapshot.Settings.CurrentProxy ?? "—",
+                        snapshot.Settings.CurrentNoProxy ?? "—"),
+                snapshot.Settings.Drift is { Count: > 0 } drift
+                    ? Loc.F("Main.Guard.Settings.KeysNotSetFmt", string.Join(", ", drift))
+                    : null,
+            }.Where(part => part is not null)),
             _ => snapshot.Settings.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
         var codex = snapshot.CodexSettings.State switch

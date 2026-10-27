@@ -1051,8 +1051,8 @@ internal static class Program
 
                 var settings = await runtime.Guard.SyncSettingsAsync(CancellationToken.None);
                 Console.WriteLine(settings.Written
-                    ? $"settings.json: env proxy {settings.ProxyUrl}, NO_PROXY written (backup: {settings.BackupPath ?? "none"})"
-                    : $"settings.json: env already up to date (proxy {settings.ProxyUrl})");
+                    ? $"settings.json: written — proxy {settings.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {settings.BackupPath ?? "none"})"
+                    : $"settings.json: already up to date (proxy {settings.ProxyUrl})");
                 Console.WriteLine(settings.CodexWritten
                     ? $"config.toml: respect_system_proxy = true written (backup: {settings.CodexBackupPath ?? "none"})"
                     : "config.toml: respect_system_proxy = true already in place");

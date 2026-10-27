@@ -57,14 +57,27 @@ inside them, and the engine built into the desktop app reads the same file:
   "env": {
     "HTTP_PROXY": "http://127.0.0.1:18081",
     "HTTPS_PROXY": "http://127.0.0.1:18081",
-    "NO_PROXY": "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com"
+    "NO_PROXY": "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_BUG_COMMAND": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
   }
 }
 ```
 
 `NO_PROXY` is curl-style: each zone is two entries — `zone` and `.zone` (subdomains) — unlike
-Chromium's `*.zone` spelling. Edit surgically: preserve every other key of the file, and keep a
-timestamped backup before a rewrite — the file belongs to Claude, not to the proxy setup.
+Chromium's `*.zone` spelling. The same file also carries the nonessential-traffic switches
+(telemetry, error reporting, the feedback paths and the session surveys off) and the attribution
+keys (no `Co-Authored-By` trailer on commits, no attribution line on pull requests). Edit
+surgically: preserve every other key of the file, and keep a timestamped backup before a rewrite —
+the file belongs to Claude, not to the proxy setup.
 
 ## Claude Code inside WSL
 
@@ -141,9 +154,9 @@ PYEOF
 chown "$USER_NAME:$USER_NAME" "$SETTINGS" 2>/dev/null
 ```
 
-The script is idempotent and preserves the foreign keys of settings.json; `NO_PROXY` is not
-touched by it — the bypass zones do not depend on the gateway address, so they are synced from the
-Windows side once and left alone.
+The script is idempotent and preserves the foreign keys of settings.json; `NO_PROXY`, the privacy
+switches and the attribution keys are not touched by it — none of them depend on the gateway
+address, so they are synced from the Windows side once and left alone.
 
 The Windows Claude Desktop app starts its WSL host in the distro itself; the sessions it runs
 there pick this env up, and that is what carries their traffic through the Windows proxy.
@@ -185,6 +198,7 @@ connect.
 ## What the application automates
 
 `pnr launch` does the desktop part (chain check → flags → restart offer for a running copy);
-`pnr guard settings sync` writes the Windows settings.json env; `pnr guard wsl sync` installs the
+`pnr guard settings sync` writes the Windows settings.json (proxy env, `NO_PROXY`, the privacy
+switches and the attribution keys); `pnr guard wsl sync` installs the
 startup script and the distro settings.json (backups first, files touched only on an actual
 change); `pnr check` is the CONNECT roundtrip.

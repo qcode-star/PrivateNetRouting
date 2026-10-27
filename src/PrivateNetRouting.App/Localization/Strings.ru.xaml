@@ -205,9 +205,10 @@
     <s:String x:Key="Main.Guard.Policy.OnDone">Политика задана: Claude всегда идёт через прокси.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Политика снята.</s:String>
     <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>
-    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env актуален, прокси {0}</s:String>
+    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env, приватность и атрибуция актуальны, прокси {0}</s:String>
     <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json не найден</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — отличается от конфига</s:String>
+    <s:String x:Key="Main.Guard.Settings.KeysNotSetFmt">Claude Code: ключи settings.json не заданы: {0}</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true, .env прокси в порядке</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Unset">не задан</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (ожидалось true)</s:String>

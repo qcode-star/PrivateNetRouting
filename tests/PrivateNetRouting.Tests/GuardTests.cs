@@ -491,6 +491,106 @@ public class GuardTests : IDisposable
         Assert.Equal("http://other:2", mismatch.CurrentProxy);
     }
 
+    [Fact]
+    public void SettingsSyncMaintainsPrivacySwitchesAndNoCoAuthorKeys()
+    {
+        var config = SettingsConfig();
+        File.WriteAllText(config.Claude.SettingsPath, """
+            { "env": { "FOO": "bar" }, "model": "opus" }
+            """);
+
+        var guard = new ClaudeSettingsGuard(config);
+        Assert.True(guard.Sync().Written);
+
+        var json = JsonNode.Parse(File.ReadAllText(config.Claude.SettingsPath))!;
+        var env = json["env"]!;
+        Assert.Equal("bar", (string?)env["FOO"]); // foreign keys survive
+        Assert.Equal("opus", (string?)json["model"]);
+        Assert.Equal("1", (string?)env["DISABLE_TELEMETRY"]);
+        Assert.Equal("1", (string?)env["DISABLE_ERROR_REPORTING"]);
+        Assert.Equal("1", (string?)env["DISABLE_BUG_COMMAND"]);
+        Assert.Equal("1", (string?)env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"]);
+        Assert.Equal("1", (string?)env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
+        Assert.False((bool)json["includeCoAuthoredBy"]!);
+        Assert.Equal("", (string?)json["attribution"]!["commit"]);
+        Assert.Equal("", (string?)json["attribution"]!["pr"]);
+        Assert.Equal(GuardState.On, guard.Read().State);
+
+        // the second sync finds the file already in the maintained shape: no rewrite
+        Assert.False(guard.Sync().Written);
+    }
+
+    [Fact]
+    public void SettingsSyncFillsAttributionAndLeavesAnUnmaintainedShapeAsWritten()
+    {
+        var config = SettingsConfig();
+        var path = config.Claude.SettingsPath;
+        var guard = new ClaudeSettingsGuard(config);
+        guard.Sync(); // the full maintained shape
+
+        // attribution: false hides everything — nothing to add
+        var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["attribution"] = false;
+        File.WriteAllText(path, root.ToJsonString());
+        Assert.False(guard.Sync().Written);
+        Assert.False((bool)JsonNode.Parse(File.ReadAllText(path))!["attribution"]!);
+
+        // a foreign sub-key survives; the hidden commit and PR parts are filled
+        root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["attribution"] = new JsonObject { ["sessionUrl"] = true };
+        File.WriteAllText(path, root.ToJsonString());
+        Assert.True(guard.Sync().Written);
+        var attribution = JsonNode.Parse(File.ReadAllText(path))!["attribution"]!;
+        Assert.Equal("", (string?)attribution["commit"]);
+        Assert.Equal("", (string?)attribution["pr"]);
+        Assert.True((bool)attribution["sessionUrl"]!);
+
+        // an attribution shape we do not maintain is left as written and reported as drift
+        root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["attribution"] = 42;
+        File.WriteAllText(path, root.ToJsonString());
+        Assert.False(guard.Sync().Written);
+        Assert.Equal(42, (int)JsonNode.Parse(File.ReadAllText(path))!["attribution"]!);
+        Assert.Contains("attribution", guard.Read().Drift!);
+
+        // includeCoAuthoredBy is maintained off even when the file says on
+        root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        root["includeCoAuthoredBy"] = true;
+        File.WriteAllText(path, root.ToJsonString());
+        Assert.True(guard.Sync().Written);
+        Assert.False((bool)JsonNode.Parse(File.ReadAllText(path))!["includeCoAuthoredBy"]!);
+    }
+
+    [Fact]
+    public void SettingsStatusReportsUnsetKeysByName()
+    {
+        var config = SettingsConfig();
+        var guard = new ClaudeSettingsGuard(config);
+        guard.Sync();
+
+        // the proxy env is correct, but the maintained keys are missing or wrong
+        File.WriteAllText(config.Claude.SettingsPath, """
+            {
+              "env": {
+                "HTTPS_PROXY": "http://127.0.0.1:18082",
+                "HTTP_PROXY": "http://127.0.0.1:18082",
+                "NO_PROXY": "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com",
+                "DISABLE_TELEMETRY": true
+              },
+              "includeCoAuthoredBy": true
+            }
+            """);
+
+        var status = guard.Read();
+
+        Assert.Equal(GuardState.Partial, status.State);
+        Assert.Equal("http://127.0.0.1:18082", status.CurrentProxy); // the env part is fine
+        Assert.Contains("DISABLE_TELEMETRY", status.Drift!); // a wrong value counts as not set
+        Assert.Contains("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", status.Drift!);
+        Assert.Contains("includeCoAuthoredBy", status.Drift!);
+        Assert.Contains("attribution", status.Drift!);
+    }
+
     // ----- config.toml of Codex -----
 
     private AppConfig CodexConfig()
@@ -832,11 +932,19 @@ public class GuardTests : IDisposable
         return config;
     }
 
+    /// <summary>The settings.json body of a distro in sync: the proxy env plus the maintained privacy/attribution keys.</summary>
+    private static string FullSettingsJson(string proxy)
+    {
+        var root = new JsonObject();
+        ClaudeSettingsShape.Apply(root, proxy, "localhost,127.0.0.1,.local");
+        return root.ToJsonString();
+    }
+
     /// <summary>Canned probe answer of a distro whose layers match the config (port 18082).</summary>
     private static string WslProbeInSync(string user, string proxy = "http://192.0.2.1:18082") =>
         $"SCRIPT=present\nPORT=18082\nUSER_NAME='{user}'\n"
         + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n"
-        + $"SETTINGS=present\n{{\"env\":{{\"HTTPS_PROXY\":\"{proxy}\"}}}}\nSETTINGS=END\n";
+        + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
 
     [Fact]
     public async Task WslLayerModes()
@@ -969,7 +1077,7 @@ public class GuardTests : IDisposable
         // the status reads the bare address back and finds the distro in sync
         runner.ProbeOutput = _ => "SCRIPT=present\nPORT=1080\nPNR_PROXY_HOST='2001:db8::1'\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=1080\nPNR_CODEX_PROXY_HOST='2001:db8::1'\n"
-            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://[2001:db8::1]:1080\"}}\nSETTINGS=END\n";
+            + $"SETTINGS=present\n{FullSettingsJson("http://[2001:db8::1]:1080")}\nSETTINGS=END\n";
         var status = await guard.ReadAsync(CancellationToken.None);
         Assert.Equal(GuardState.On, status.Distros[0].State);
     }
@@ -1007,11 +1115,11 @@ public class GuardTests : IDisposable
         var config = WslSkippedShapeConfig("192.0.2.50:3128");
         var inSync = "SCRIPT=present\nPORT=3128\nPNR_PROXY_HOST='192.0.2.50'\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\nPNR_CODEX_PROXY_HOST='192.0.2.50'\n"
-            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.50:3128\"}}\nSETTINGS=END\n";
+            + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.50:3128")}\nSETTINGS=END\n";
         // what the gateway-form scripts of an earlier sync look like: right port, no baked host
         var gatewayForm = "SCRIPT=present\nPORT=3128\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\n"
-            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:3128\"}}\nSETTINGS=END\n";
+            + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.1:3128")}\nSETTINGS=END\n";
         var probe = inSync;
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => probe };
         var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
@@ -1037,7 +1145,7 @@ public class GuardTests : IDisposable
             ProbeOutput = distro => distro == "d1"
                 ? WslProbeInSync("u1")
                 : "SCRIPT=present\nPORT=18082\nUSER_NAME='u2'\nPROXYENV=missing\n"
-                  + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
+                  + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.1:18082")}\nSETTINGS=END\n",
         };
         var guard = new WslConfigGuard(
             WslConfig("on", ("d1", "u1"), ("d2", "u2")),
@@ -1061,7 +1169,7 @@ public class GuardTests : IDisposable
             Installed = ["d1"],
             Running = ["d1"],
             ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\n"
-                + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"}}\nSETTINGS=END\n",
+                + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.1:18082")}\nSETTINGS=END\n",
         };
         var config = WslConfig("on", syncClaude: true, syncCodex: false, ("d1", "u1"));
         var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
@@ -1069,6 +1177,48 @@ public class GuardTests : IDisposable
         var status = await guard.ReadAsync(CancellationToken.None);
 
         Assert.Equal(GuardState.On, status.Distros[0].State);
+    }
+
+    [Fact]
+    public async Task WslSettingsSyncCarriesThePrivacyAndAttributionKeys()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1")),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        await guard.SyncAsync(CancellationToken.None);
+
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var json = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
+        var root = JsonNode.Parse(json)!;
+        Assert.Equal("1", (string?)root["env"]!["DISABLE_TELEMETRY"]);
+        Assert.Equal("1", (string?)root["env"]!["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
+        Assert.False((bool)root["includeCoAuthoredBy"]!);
+        Assert.Equal("", (string?)root["attribution"]!["commit"]);
+        Assert.Equal("", (string?)root["attribution"]!["pr"]);
+    }
+
+    [Fact]
+    public async Task WslStatusReportsSettingsKeysNotSet()
+    {
+        // the proxy env is right but the maintained privacy/attribution keys are missing
+        var probe = "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n"
+            + "SETTINGS=present\n{\"env\":{\"HTTPS_PROXY\":\"http://192.0.2.1:18082\"},\"includeCoAuthoredBy\":true}\nSETTINGS=END\n";
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => probe };
+        var guard = new WslConfigGuard(
+            WslConfig("on", ("d1", "u1")),
+            runner,
+            gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Partial, status.Distros[0].State);
+        Assert.Contains("keys not set", status.Distros[0].Reason);
+        Assert.Contains("DISABLE_TELEMETRY", status.Distros[0].Reason);
+        Assert.Contains("attribution", status.Distros[0].Reason);
     }
 
     [Fact]

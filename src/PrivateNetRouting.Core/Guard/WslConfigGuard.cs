@@ -84,8 +84,9 @@ public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnly
 /// (auto — on only if WSL is present and at least one configured distro is installed); with
 /// both wsl.syncClaude and wsl.syncCodex off there is nothing to maintain — the layer reports off.
 /// The Claude layer (wsl.syncClaude, every configured distro): the startup script
-/// (proxy address = IP of the Windows side of WSL NAT + application port) and the full env in
-/// ~/.claude/settings.json (proxy + NO_PROXY). A file is rewritten only when its content actually
+/// (proxy address = IP of the Windows side of WSL NAT + application port) and the maintained
+/// shape of ~/.claude/settings.json (proxy env + NO_PROXY, the privacy switches and the
+/// attribution keys — ClaudeSettingsShape). A file is rewritten only when its content actually
 /// changes; before a rewrite the previous version is preserved unless an identical copy is already
 /// among the `.pnr-bak-*` backups (the matching copy is touched instead, so mtime order mirrors the
 /// states most recently preserved); the copies live in three numbered slots, the one preserved
@@ -282,7 +283,11 @@ public sealed class WslConfigGuard(
             var proxyOk = !config.Wsl.SyncClaude || expectedProxy is null || read.SettingsProxy == expectedProxy;
             var envOk = !config.Wsl.SyncCodex
                 || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expectedHost);
-            var ok = portOk && proxyOk && envOk;
+            // the privacy/attribution keys of settings.json: the sync maintains them like the proxy env
+            var keysOk = !config.Wsl.SyncClaude
+                || read.SettingsRoot is not { } settingsRoot
+                || ClaudeSettingsShape.DriftOf(settingsRoot).Count == 0;
+            var ok = portOk && proxyOk && envOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,
                 config.Wsl.SyncClaude,
@@ -391,7 +396,7 @@ public sealed class WslConfigGuard(
         }
 
         // The Claude layer (wsl.syncClaude): the boot layer (the [boot] command of /etc/wsl.conf →
-        // the marked runner that executes the startup directory), the full env in
+        // the marked runner that executes the startup directory), the maintained shape of
         // ~/.claude/settings.json and the startup script refreshing the proxy address on every
         // distro start. Off — none of the passes run, nothing of the Claude side is touched.
         var scriptPath = config.Wsl.StartupScriptPath;
@@ -430,14 +435,11 @@ public sealed class WslConfigGuard(
             RequireCompleted(ownerOutput, $"~/.claude ownership check in '{distro.Name}'");
             claudeDirChowned = ownerOutput.Contains("CLAUDEDIR=chowned", StringComparison.Ordinal);
 
-            // distro settings.json: full env (gateway proxy + NO_PROXY), foreign keys are preserved;
-            // the backup is made only when the content actually changes
+            // distro settings.json: the maintained shape (gateway proxy env + NO_PROXY, the
+            // privacy switches and the attribution keys), foreign keys are preserved; the backup
+            // is made only when the content actually changes
             var root = read.SettingsRoot ?? [];
-            var env = root["env"] as JsonObject ?? [];
-            env["HTTPS_PROXY"] = proxy;
-            env["HTTP_PROXY"] = proxy;
-            env["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
-            root["env"] = env;
+            ClaudeSettingsShape.Apply(root, proxy, ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
             var settingsScript = NormalizeLf($$"""
@@ -1312,6 +1314,11 @@ public sealed class WslConfigGuard(
         if (read.SettingsProxy is null && expectedProxy is null)
         {
             parts.Add("settings.json has no HTTPS_PROXY");
+        }
+
+        if (read.SettingsRoot is { } settingsRoot && ClaudeSettingsShape.DriftOf(settingsRoot) is { Count: > 0 } drift)
+        {
+            parts.Add("settings.json keys not set: " + string.Join(", ", drift));
         }
 
         if (proxyEnvExpected && !read.ProxyEnvPresent)

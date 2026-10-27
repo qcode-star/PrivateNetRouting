@@ -205,9 +205,10 @@
     <s:String x:Key="Main.Guard.Policy.OnDone">Egress policy is set: Claude always goes through the proxy.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Egress policy is removed.</s:String>
     <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>
-    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env is up to date, proxy {0}</s:String>
+    <s:String x:Key="Main.Guard.Settings.OkFmt">Claude Code: env, privacy and attribution are up to date, proxy {0}</s:String>
     <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json was not found</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
+    <s:String x:Key="Main.Guard.Settings.KeysNotSetFmt">Claude Code: settings.json keys not set: {0}</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = true, .env proxy is up to date</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Unset">unset</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (expected true)</s:String>

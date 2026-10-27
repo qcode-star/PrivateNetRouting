@@ -160,8 +160,16 @@ public sealed class GuardService(
             new(GuardKind.ClaudeSettings, settings.State, settings.FileMissing
                 ? "settings.json not found"
                 : settings.Detail ?? (settings.State == GuardState.On
-                    ? $"env proxy {settings.ExpectedProxy}, NO_PROXY up to date"
-                    : $"HTTPS_PROXY={settings.CurrentProxy ?? "<none>"}, NO_PROXY={settings.CurrentNoProxy ?? "<none>"} (expected {settings.ExpectedProxy})")),
+                    ? $"env proxy {settings.ExpectedProxy}, NO_PROXY, privacy and attribution keys up to date"
+                    : string.Join("; ", new[]
+                    {
+                        settings.CurrentProxy == settings.ExpectedProxy && settings.CurrentNoProxy == settings.ExpectedNoProxy
+                            ? null
+                            : $"HTTPS_PROXY={settings.CurrentProxy ?? "<none>"}, NO_PROXY={settings.CurrentNoProxy ?? "<none>"} (expected {settings.ExpectedProxy})",
+                        settings.Drift is { Count: > 0 } drift
+                            ? "settings.json keys not set: " + string.Join(", ", drift)
+                            : null,
+                    }.Where(part => part is not null)))),
             new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.State switch
             {
                 GuardState.On => "respect_system_proxy = true, .env proxy env up to date",
@@ -267,8 +275,8 @@ public sealed class GuardService(
                 codexSync.EnvBackupPath,
                 config.Codex.EnvPath);
             log.Info(outcome.Written
-                ? $"guard settings sync: Claude env proxy {outcome.ProxyUrl}, NO_PROXY written (backup: {outcome.BackupPath ?? "none"})"
-                : $"guard settings sync: Claude env already up to date (proxy {outcome.ProxyUrl})");
+                ? $"guard settings sync: Claude settings.json written — proxy {outcome.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {outcome.BackupPath ?? "none"})"
+                : $"guard settings sync: Claude settings.json already up to date (proxy {outcome.ProxyUrl})");
             log.Info(outcome.CodexWritten
                 ? $"guard codex settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
                 : "guard codex settings sync: respect_system_proxy=true already in place");

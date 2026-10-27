@@ -56,6 +56,10 @@ public sealed record EgressPolicyStatus(
     int? DisableWslSessions,
     string? Detail = null);
 
+/// <summary>
+/// Windows settings.json of Claude Code: the proxy env plus the maintained privacy/attribution
+/// keys (ClaudeSettingsShape). Drift names the maintained values that are missing or different.
+/// </summary>
 public sealed record ClaudeSettingsStatus(
     GuardState State,
     string? CurrentProxy,
@@ -63,7 +67,8 @@ public sealed record ClaudeSettingsStatus(
     string ExpectedProxy,
     string ExpectedNoProxy,
     bool FileMissing,
-    string? Detail = null);
+    string? Detail = null,
+    IReadOnlyList<string>? Drift = null);
 
 public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override);
 
