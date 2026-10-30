@@ -14,6 +14,9 @@ internal static class Theme
 {
     public static Brush Of(string key) => (Brush)Application.Current.FindResource(key);
 
+    /// <summary>Machine-data typeface (monospaced, tabular figures).</summary>
+    public static FontFamily Mono => (FontFamily)Application.Current.FindResource("Font.Mono");
+
     public static Brush Ok => Of("Brush.Ok");
 
     public static Brush Warn => Of("Brush.Warn");

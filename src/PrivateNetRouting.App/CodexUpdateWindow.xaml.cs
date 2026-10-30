@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
@@ -237,10 +238,10 @@ public partial class CodexUpdateWindow : Window
                 SetProgress(100.0 * p.DoneBytes / p.TotalBytes);
                 SetDetailKey(
                     "Update.Download.RunningFmt",
-                    ByteSize.Format(p.DoneBytes),
-                    ByteSize.Format(p.TotalBytes),
-                    "—",
-                    "—");
+                    FormattedRuns.Pad(ByteSize.Format(p.DoneBytes)),
+                    FormattedRuns.Pad(ByteSize.Format(p.TotalBytes)),
+                    FormattedRuns.Pad("—"),
+                    FormattedRuns.Pad("—"));
             }
         }
         else if (p.Phase == UpdatePhase.Install)
@@ -360,7 +361,8 @@ public partial class CodexUpdateWindow : Window
         CountdownText.Visibility = _autoClose.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         if (_autoClose.IsEnabled)
         {
-            CountdownText.Text = Loc.F("Update.AutoCloseFmt", _autoCloseLeft);
+            CountdownText.Inlines.Clear();
+            CountdownText.Inlines.AddRange(FormattedRuns.Build("Update.AutoCloseFmt", FormattedRuns.Pad(_autoCloseLeft, 2)));
         }
     }
 
@@ -489,7 +491,18 @@ public partial class CodexUpdateWindow : Window
         RefreshDetail();
     }
 
-    private void RefreshDetail() => DetailText.Text = _detailKey is not null ? Loc.F(_detailKey, _detailArgs) : _detailDirect;
+    private void RefreshDetail()
+    {
+        DetailText.Inlines.Clear();
+        if (_detailKey is not null)
+        {
+            DetailText.Inlines.AddRange(FormattedRuns.Build(_detailKey, _detailArgs));
+        }
+        else
+        {
+            DetailText.Inlines.Add(new Run(_detailDirect));
+        }
+    }
 
     private void SetHintKey(string key, params object?[] args)
     {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
@@ -423,10 +424,10 @@ public partial class UpdateWindow : Window
             : TimeSpan.Zero;
         SetDetailKey(
             "Update.Download.RunningFmt",
-            ByteSize.Format(_doneBytes),
-            ByteSize.Format(_totalBytes),
-            ByteSize.Format((long)Math.Max(rate, 0)),
-            FormatEta(eta));
+            FormattedRuns.Pad(ByteSize.Format(_doneBytes)),
+            FormattedRuns.Pad(ByteSize.Format(_totalBytes)),
+            FormattedRuns.Pad(ByteSize.Format((long)Math.Max(rate, 0))),
+            FormattedRuns.Pad(FormatEta(eta)));
     }
 
     private void OnClockTick()
@@ -574,7 +575,8 @@ public partial class UpdateWindow : Window
         CountdownText.Visibility = _autoClose.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         if (_autoClose.IsEnabled)
         {
-            CountdownText.Text = Loc.F("Update.AutoCloseFmt", _autoCloseLeft);
+            CountdownText.Inlines.Clear();
+            CountdownText.Inlines.AddRange(FormattedRuns.Build("Update.AutoCloseFmt", FormattedRuns.Pad(_autoCloseLeft, 2)));
         }
     }
 
@@ -704,7 +706,18 @@ public partial class UpdateWindow : Window
         RefreshDetail();
     }
 
-    private void RefreshDetail() => DetailText.Text = _detailKey is not null ? Loc.F(_detailKey, _detailArgs) : _detailDirect;
+    private void RefreshDetail()
+    {
+        DetailText.Inlines.Clear();
+        if (_detailKey is not null)
+        {
+            DetailText.Inlines.AddRange(FormattedRuns.Build(_detailKey, _detailArgs));
+        }
+        else
+        {
+            DetailText.Inlines.Add(new Run(_detailDirect));
+        }
+    }
 
     private void SetHintKey(string key, params object?[] args)
     {

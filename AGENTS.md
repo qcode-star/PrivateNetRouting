@@ -273,6 +273,10 @@ src/
                              # fade, a pop when it completes, a breath while it is being brought up)
     StepRail.cs              # one row of a vertical rail (the update window's phases), sharing the
                              # marker vocabulary of the chain rail: hollow / check / cross
+    FormattedRuns.cs         # a localized message as inline runs: the words in the interface face,
+                             # the substituted values in the mono one; a value padded to a fixed
+                             # field keeps a live-updating line from shifting (the update windows'
+                             # detail and countdown lines)
     Theme.cs                 # App.xaml tokens for the code paths: state → brush, state → word
     WindowTheme.cs           # dark DWM title bar; unsupported builds keep the system one
   PrivateNetRouting.Core/    # logic without UI
