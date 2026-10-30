@@ -217,7 +217,33 @@ public static class ElevatedChainCommands
             }
         }
 
+        // the kill count alone proves nothing (a wrong statedir, a WMI blind spot): the stop is
+        // only done when nothing of ours answers anymore — the pipe is the daemon's liveness
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline && IsStillThere(chain))
+        {
+            Thread.Sleep(200);
+        }
+
+        if (IsStillThere(chain))
+        {
+            var detail = $"the daemon is still there after the stop (the pipe {chain.Tailscale.Socket} answers or a tailscaled.exe with the statedir is running)";
+            log.Error($"elevated stop: {detail}");
+            throw new IOException(detail);
+        }
+
         return $"processes stopped: {killed}";
+    }
+
+    /// <summary>Whether the daemon survived the stop: a responsive pipe, or a tailscaled with our statedir.</summary>
+    private static bool IsStillThere(ChainConfig chain)
+    {
+        if (SidecarDaemon.ProbePipe(chain.Tailscale.Socket, TimeSpan.FromMilliseconds(300)))
+        {
+            return true;
+        }
+
+        return new WmiProcessFinder().FindByArgument("tailscaled.exe", chain.Tailscale.StateDir).Count > 0;
     }
 
     private static string ReadTail(string path, int lines)

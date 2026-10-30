@@ -1,3 +1,4 @@
+using System.IO.Pipes;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
@@ -499,5 +500,60 @@ public class ElevatedHelperTests : IDisposable
 
         Assert.Equal("ok second", File.ReadAllText(path));
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
+    // ----- A-07: the elevated stop verifies that the daemon is really gone -----
+
+    /// <summary>A stop of an already dead chain matches nothing and reports ok.</summary>
+    [Fact]
+    public async Task AHelperStopOfADeadChainReportsOk()
+    {
+        var socket = $@"\.\pipe\pnr-test-{Guid.NewGuid():N}";
+        var resultFile = Path.Combine(PinnedDir, "elevated-stop-chain=0a1b2c3d.result");
+        var code = await Task.Run(() => ElevatedChainCommands.Execute(
+            ElevatedChainCommands.StopChain, resultFile, WriteTailscaleConfig(socket)));
+
+        Assert.Equal(0, code);
+        Assert.StartsWith("ok", File.ReadAllText(resultFile));
+    }
+
+    /// <summary>A daemon whose pipe still answers is a failed stop, never an "ok".</summary>
+    [Fact]
+    public async Task AHelperStopWithAStillRespondingDaemonReportsFail()
+    {
+        var name = $"pnr-test-{Guid.NewGuid():N}";
+        var socket = $@"\.\pipe\{name}";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    using var server = new NamedPipeServerStream(name, PipeDirection.In);
+                    await server.WaitForConnectionAsync();
+                }
+            }
+            catch (Exception)
+            {
+                // the test ended: the pump stops with it
+            }
+        });
+        var resultFile = Path.Combine(PinnedDir, "elevated-stop-chain=0a1b2c3d.result");
+        var code = await Task.Run(() => ElevatedChainCommands.Execute(
+            ElevatedChainCommands.StopChain, resultFile, WriteTailscaleConfig(socket)));
+
+        Assert.Equal(1, code);
+        var result = File.ReadAllText(resultFile);
+        Assert.StartsWith("fail", result);
+        Assert.Contains("still there", result);
+    }
+
+    private string WriteTailscaleConfig(string socket)
+    {
+        var configPath = Path.Combine(_dir, $"chain-{Guid.NewGuid():N}.json");
+        File.WriteAllText(configPath, $$"""
+            { "chain": { "tailscale": { "socket": "{{socket.Replace("\\", "\\\\")}}", "stateDir": "{{_dir.Replace("\\", "\\\\")}}\state" } } }
+            """);
+        return configPath;
     }
 }
