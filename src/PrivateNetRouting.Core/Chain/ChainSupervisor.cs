@@ -515,13 +515,25 @@ public sealed class ChainSupervisor(
                 Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
                 try
                 {
-                    await cli.DownAsync(CancellationToken.None);
-                    Report(progress, "Node", ChainStepStatus.Done, "down");
+                    var down = await cli.DownAsync(CancellationToken.None);
+                    if (down.Ok)
+                    {
+                        Report(progress, "Node", ChainStepStatus.Done, "down");
+                    }
+                    else
+                    {
+                        // a failed down is a stop failure like a failed kill: the node is not down
+                        // while the caller is told it went down; the daemon kill still runs
+                        Report(progress, "Node", ChainStepStatus.Failed, $"exit {down.ExitCode}");
+                        log.Warn($"chain: down failed (exit {down.ExitCode}): {down.Output}");
+                        failures.Add(("node", new IOException($"tailscale down failed (exit {down.ExitCode}): {down.Output}")));
+                    }
                 }
                 catch (Exception ex)
                 {
                     Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
                     log.Warn($"chain: down failed: {ex.Message}");
+                    failures.Add(("node", ex));
                 }
             }
 

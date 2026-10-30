@@ -684,6 +684,27 @@ public class ChainSupervisorTests : IDisposable
         Assert.False(hookRan);
     }
 
+    /// <summary>A failed `tailscale down` is reported: the stop runs to the end and then fails naming the node.</summary>
+    [Fact]
+    public async Task AFailedDownFailsTheStopAfterRunningToTheEnd()
+    {
+        var cli = new FakeCli(_calls) { DownExitCode = 1 };
+        var hookRan = false;
+        var supervisor = Create(cli: cli, chainStopped: _ =>
+        {
+            hookRan = true;
+            return Task.CompletedTask;
+        });
+
+        var error = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.StopAsync(null, CancellationToken.None));
+
+        Assert.Contains("node", error.Message);
+        Assert.Contains("exit 1", error.Message);
+        Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+        Assert.False(hookRan);
+    }
+
     /// <summary>
     /// A foreign listener holding the daemon port is not a surviving daemon: the pipe decides —
     /// the stop succeeds and the chain-stopped hook (the idle stopper's end) still fires.
@@ -1241,13 +1262,20 @@ public class ChainSupervisorTests : IDisposable
             return Task.FromResult(new CliResult(0, "up"));
         }
 
+        /// <summary>Exit code the down step reports; 0 — the node went down.</summary>
+        public int DownExitCode { get; init; }
+
         public Task<CliResult> DownAsync(CancellationToken ct)
         {
             DownTokens.Add(ct);
             ct.ThrowIfCancellationRequested();
             calls.Add("cli.down");
-            BackendState = "Stopped";
-            return Task.FromResult(new CliResult(0, "down"));
+            if (DownExitCode == 0)
+            {
+                BackendState = "Stopped";
+            }
+
+            return Task.FromResult(new CliResult(DownExitCode, DownExitCode == 0 ? "down" : "down: stalled pipe"));
         }
 
         public Task<CliResult> LoginAsync(string? loginServer, Action<string>? onAuthUrl, CancellationToken ct)
