@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using PrivateNetRouting.Core.Net.Socks;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Configuration;
 
@@ -25,6 +26,7 @@ public static class AppConfigValidator
         }
 
         CheckEndpoints(config, errors);
+        CheckTailscaleCommandLine(config, errors);
         CheckTimings(config, errors);
         return errors;
     }
@@ -88,6 +90,51 @@ public static class AppConfigValidator
         }
 
         Port("forwardProxy.healthCheckPort", config.ForwardProxy.HealthCheckPort, errors);
+    }
+
+    /// <summary>
+    /// The daemon and keeper are started through a cmd.exe line built from the config; cmd parses
+    /// quotes and metacharacters itself, so these values must be inert before they can reach it.
+    /// The section is read only in the tailscale mode — the external modes may leave it blank (A-09).
+    /// </summary>
+    private static void CheckTailscaleCommandLine(AppConfig config, List<string> errors)
+    {
+        if (config.Chain.EffectiveMode != ChainMode.Tailscale)
+        {
+            return;
+        }
+
+        var tailscale = config.Chain.Tailscale;
+        if (!CommandLineSafety.IsValidPipePath(tailscale.Socket))
+        {
+            errors.Add($"chain.tailscale.socket: '{tailscale.Socket}' is not a local named-pipe path (expected \\\\.\\pipe\\<name>)");
+        }
+
+        AbsolutePath("chain.tailscale.stateDir", tailscale.StateDir, errors);
+        AbsolutePath("chain.tailscale.tailscaledPath", tailscale.TailscaledPath, errors);
+        AbsolutePath("chain.tailscale.cliPath", tailscale.CliPath, errors);
+    }
+
+    private static void AbsolutePath(string key, string value, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add($"{key}: is empty");
+            return;
+        }
+
+        // %VAR% is a legitimate spelling of a user path; what matters is the value cmd sees later
+        var expanded = Environment.ExpandEnvironmentVariables(value);
+        if (!CommandLineSafety.IsInert(expanded))
+        {
+            errors.Add($"{key}: '{value}' contains a cmd.exe metacharacter (one of \" & | < > ^ %) or a line break");
+            return;
+        }
+
+        if (!Path.IsPathFullyQualified(expanded))
+        {
+            errors.Add($"{key}: '{value}' is not an absolute path");
+        }
     }
 
     private static void CheckTimings(AppConfig config, List<string> errors)

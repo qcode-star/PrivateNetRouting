@@ -137,7 +137,28 @@ public sealed class SidecarDaemon(
     /// </summary>
     public void StartProcess(bool devMode)
     {
+        var commandLine = BuildStartCommandLine(config, devMode);
         Directory.CreateDirectory(config.StateDir);
+        var started = ProcessOps.StartViaCmd(
+            commandLine,
+            stdoutPath: Path.Combine(config.StateDir, "daemon.out.log"),
+            stderrPath: Path.Combine(config.StateDir, "daemon.err.log"));
+        log.Info($"daemon: started via cmd, pid={started?.Id}");
+    }
+
+    /// <summary>
+    /// The cmd.exe line of the direct daemon start. Every config value entering it is re-checked:
+    /// cmd interprets the line itself and the user config is writable — AppConfigValidator reports
+    /// these shapes up front, this guard holds even for a section built in memory.
+    /// </summary>
+    internal static string BuildStartCommandLine(ChainTailscaleConfig config, bool devMode)
+    {
+        var tailscaled = CommandLineSafety.RequireInert("chain.tailscale.tailscaledPath", config.TailscaledPath);
+        CommandLineSafety.RequireInert("chain.tailscale.stateDir", config.StateDir);
+        CommandLineSafety.RequireInert("chain.tailscale.socksListen", config.SocksListen);
+        CommandLineSafety.RequireInert("chain.tailscale.httpListen", config.HttpListen);
+        var socket = CommandLineSafety.RequirePipePath("chain.tailscale.socket", config.Socket);
+
         var arguments = new List<string> { "--tun=userspace-networking" };
         if (devMode)
         {
@@ -145,16 +166,11 @@ public sealed class SidecarDaemon(
         }
 
         arguments.Add(ProcessOps.Quote($"--statedir={config.StateDir}"));
-        arguments.Add(ProcessOps.Quote($"--socket={config.Socket}"));
+        arguments.Add(ProcessOps.Quote($"--socket={socket}"));
         arguments.Add("--port=0");
         arguments.Add($"--socks5-server={config.SocksListen}");
         arguments.Add($"--outbound-http-proxy-listen={config.HttpListen}");
-        var commandLine = $"{ProcessOps.Quote(config.TailscaledPath)} {string.Join(' ', arguments)}";
-        var started = ProcessOps.StartViaCmd(
-            commandLine,
-            stdoutPath: Path.Combine(config.StateDir, "daemon.out.log"),
-            stderrPath: Path.Combine(config.StateDir, "daemon.err.log"));
-        log.Info($"daemon: started via cmd, pid={started?.Id}");
+        return $"{ProcessOps.Quote(tailscaled)} {string.Join(' ', arguments)}";
     }
 
     public async Task KillAsync(CancellationToken ct)

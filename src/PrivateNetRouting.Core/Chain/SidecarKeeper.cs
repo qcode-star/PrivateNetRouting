@@ -34,11 +34,8 @@ public sealed class SidecarKeeper(
             return;
         }
 
+        var commandLine = BuildStartCommandLine(config);
         Directory.CreateDirectory(config.StateDir);
-        var commandLine = string.Join(' ',
-            ProcessOps.Quote(config.CliPath),
-            ProcessOps.Quote($"--socket={config.Socket}"),
-            "debug", "watch-ipn");
         var started = ProcessOps.StartViaCmd(
             commandLine,
             stdoutPath: null, // NUL: nobody needs the netmap-JSON
@@ -51,6 +48,22 @@ public sealed class SidecarKeeper(
             throw new IOException(
                 $"watch-ipn keeper exited immediately; log: {Path.Combine(config.StateDir, "watch.err.log")}");
         }
+    }
+
+    /// <summary>
+    /// The cmd.exe line of the keeper start; the same guard as the daemon start — every config
+    /// value is re-checked right before it is pasted into the line (AppConfigValidator reports the
+    /// shapes up front, the config itself is writable).
+    /// </summary>
+    internal static string BuildStartCommandLine(ChainTailscaleConfig config)
+    {
+        var cli = CommandLineSafety.RequireInert("chain.tailscale.cliPath", config.CliPath);
+        CommandLineSafety.RequireInert("chain.tailscale.stateDir", config.StateDir);
+        var socket = CommandLineSafety.RequirePipePath("chain.tailscale.socket", config.Socket);
+        return string.Join(' ',
+            ProcessOps.Quote(cli),
+            ProcessOps.Quote($"--socket={socket}"),
+            "debug", "watch-ipn");
     }
 
     public Task KillAsync(CancellationToken ct)

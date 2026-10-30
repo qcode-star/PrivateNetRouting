@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
 
@@ -81,4 +82,76 @@ public class DaemonElevationDecisionTests
     [InlineData(null, DaemonElevationMode.Auto)]
     public void ElevationSettingIsNormalized(string? text, DaemonElevationMode expected) =>
         Assert.Equal(expected, DaemonElevationParser.Parse(text));
+}
+
+/// <summary>
+/// The daemon and keeper start through cmd.exe with values from the user-writable config: a value
+/// that could close the argument and append a command must be refused before the line is built.
+/// </summary>
+public class TailscaleCommandLineTests
+{
+    private static ChainTailscaleConfig ValidConfig() => new()
+    {
+        TailscaledPath = @"C:\Program Files\Tailscale\tailscaled.exe",
+        CliPath = @"C:\Program Files\Tailscale\tailscale.exe",
+        StateDir = @"C:\ProgramData\pnr-test\sidecar",
+        Socket = @"\\.\pipe\pnr-sidecar",
+        SocksListen = "127.0.0.1:18083",
+        HttpListen = "127.0.0.1:18082",
+    };
+
+    [Theory]
+    [InlineData(@"\\.\pipe\pnr-sidecar", true)]
+    [InlineData(@"\\.\pipe\pnr-sidecar.v2_a-b", true)]
+    [InlineData(@"\\.\pipe\", false)]
+    [InlineData(@"\\.\pipe\has space", false)]
+    [InlineData(@"\\.\pipe\x"" & echo pwned", false)]
+    [InlineData(@"C:\somewhere\socket", false)]
+    [InlineData(@"\\server\share\socket", false)]
+    public void SocketMustBeALocalNamedPipe(string socket, bool valid) =>
+        Assert.Equal(valid, CommandLineSafety.IsValidPipePath(socket));
+
+    [Fact]
+    public void DaemonLineRefusesAValueThatWouldBreakOutOfItsArgument()
+    {
+        var config = ValidConfig();
+        config.Socket = @"\\.\pipe\x"" & echo pwned";
+
+        var error = Assert.Throws<InvalidDataException>(() => SidecarDaemon.BuildStartCommandLine(config, devMode: true));
+
+        Assert.Contains("chain.tailscale.socket", error.Message);
+    }
+
+    [Fact]
+    public void KeeperLineRefusesAValueThatWouldBreakOutOfItsArgument()
+    {
+        var config = ValidConfig();
+        config.CliPath = @"C:\tools\"" & echo pwned\tailscale.exe";
+
+        var error = Assert.Throws<InvalidDataException>(() => SidecarKeeper.BuildStartCommandLine(config));
+
+        Assert.Contains("chain.tailscale.cliPath", error.Message);
+    }
+
+    [Fact]
+    public void DaemonLineStillQuotesPathsWithSpaces()
+    {
+        var config = ValidConfig();
+        config.StateDir = @"C:\Program Data\pnr sidecar";
+
+        var line = SidecarDaemon.BuildStartCommandLine(config, devMode: true);
+
+        Assert.Contains(@"--statedir=""C:\Program Data\pnr sidecar""", line);
+        Assert.Contains(@"--socket=""\\.\pipe\pnr-sidecar""", line);
+        Assert.DoesNotContain("\"\"", line);
+    }
+
+    [Fact]
+    public void KeeperLineCarriesTheSocketAsOneQuotedArgument()
+    {
+        var line = SidecarKeeper.BuildStartCommandLine(ValidConfig());
+
+        Assert.Contains(@"--socket=""\\.\pipe\pnr-sidecar""", line);
+        Assert.EndsWith("debug watch-ipn", line);
+    }
 }

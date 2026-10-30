@@ -221,6 +221,56 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ValidationRejectsAChainSocketThatWouldChangeTheCommandLine()
+    {
+        var config = new AppConfig();
+        config.Chain.Tailscale.Socket = @"\\.\pipe\x"" & echo pwned";
+
+        var errors = AppConfigValidator.Validate(config);
+
+        Assert.Contains(errors, error => error.StartsWith("chain.tailscale.socket", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidationRejectsChainPathsThatAreRelativeOrCarryCmdMetacharacters()
+    {
+        var config = new AppConfig();
+        config.Chain.Tailscale.StateDir = @"relative\sidecar";
+        config.Chain.Tailscale.TailscaledPath = @"C:\tools\tailscaled.exe & calc";
+        config.Chain.Tailscale.CliPath = @"""C:\tools\tailscale.exe""";
+
+        var errors = AppConfigValidator.Validate(config);
+
+        Assert.Contains(
+            errors,
+            error => error.StartsWith("chain.tailscale.stateDir", StringComparison.Ordinal) && error.Contains("absolute"));
+        Assert.Contains(
+            errors,
+            error => error.StartsWith("chain.tailscale.tailscaledPath", StringComparison.Ordinal) && error.Contains("metacharacter"));
+        Assert.Contains(errors, error => error.StartsWith("chain.tailscale.cliPath", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidationSkipsTheUnusedTailscalePathsInAnExternalMode()
+    {
+        var config = new AppConfig { Chain = { Mode = "socks5" } };
+        config.Chain.Tailscale.Socket = "";
+        config.Chain.Tailscale.StateDir = "";
+        config.Chain.Socks5.Upstream = "192.0.2.10:1080";
+
+        Assert.Empty(AppConfigValidator.Validate(config));
+    }
+
+    [Fact]
+    public void AMaliciousSocketIsAConfigErrorNamingTheKey()
+    {
+        var message = LoadError("""{ "chain": { "tailscale": { "socket": "\\\\.\\pipe\\x\" & echo pwned" } } }""");
+
+        Assert.Contains("chain.tailscale.socket", message);
+        Assert.Contains("named-pipe", message);
+    }
+
+    [Fact]
     public void ReloadKeepsTheRunningProxyAndChainButCopiesTheWatchdogInPlace()
     {
         var running = AppConfigStore.LoadOrCreate(_path);
