@@ -38,10 +38,14 @@ public static class ElevatedChainCommands
             }
 
             var config = AppConfigStore.LoadOrCreate(configPath, ElevatedHelperArguments.ToProfileEnvironment(profileEnvironment));
-            log = new FileLog(
-                Path.Combine(config.Logging.Directory, "chain-elevated.log"),
-                config.Logging.EffectiveLevel);
+            log = ElevatedHelperTrust.OpenPinnedLog(config, "chain-elevated.log");
             var stateDir = config.Chain.Tailscale.StateDir;
+            if (!ElevatedHelperTrust.IsValidStateDir(stateDir))
+            {
+                throw new InvalidOperationException(
+                    $"chain.tailscale.stateDir '{stateDir}' is not an absolute local path free of cmd.exe metacharacters — refusing to create it as administrator");
+            }
+
             Directory.CreateDirectory(stateDir);
 
             var detail = command switch
@@ -390,10 +394,11 @@ public sealed class ElevatedRunner(
     private string MakeResultPath(string command, out string nonce)
     {
         nonce = Guid.NewGuid().ToString("N")[..8];
-        var path = Path.Combine(config.StateDir, $"{command.TrimStart('-')}={nonce}.result");
-        // the result file must have where to appear even if the daemon (the usual creator of the
-        // statedir) has never run — otherwise the helper cannot report even a failure
-        Directory.CreateDirectory(config.StateDir);
+        // the result travels in the pinned elevated directory: the helper (an administrator)
+        // refuses to write anywhere else, so the asking side places it there in the first place;
+        // the directory must exist even if the helper never runs — otherwise nothing can report
+        var path = Path.Combine(ElevatedHelperTrust.PinnedDirectory, $"{command.TrimStart('-')}={nonce}.result");
+        Directory.CreateDirectory(ElevatedHelperTrust.PinnedDirectory);
         SweepStaleResults();
         return path;
     }
@@ -403,7 +408,7 @@ public sealed class ElevatedRunner(
     {
         try
         {
-            foreach (var file in Directory.EnumerateFiles(config.StateDir, "*.result"))
+            foreach (var file in Directory.EnumerateFiles(ElevatedHelperTrust.PinnedDirectory, "*.result"))
             {
                 if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > StaleResultAge)
                 {

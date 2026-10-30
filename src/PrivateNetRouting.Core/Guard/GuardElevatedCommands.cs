@@ -42,9 +42,7 @@ public static class GuardElevatedCommands
 
             // the paths are expanded with the asking user's profile variables, not the administrator's
             var config = AppConfigStore.LoadOrCreate(configPath, ElevatedHelperArguments.ToProfileEnvironment(profileEnvironment));
-            log = new FileLog(
-                Path.Combine(config.Logging.Directory, "guard-elevated.log"),
-                config.Logging.EffectiveLevel);
+            log = ElevatedHelperTrust.OpenPinnedLog(config, "guard-elevated.log");
 
             // the config is writable by any process of the user; what runs and is overwritten as
             // administrator is pinned to the system locations instead of read from it

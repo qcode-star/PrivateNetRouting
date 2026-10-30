@@ -6,10 +6,18 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>
+/// The tests that redirect the elevated helper's pinned directory to a temporary root: the
+/// override is process-wide, so they must not run next to each other.
+/// </summary>
+[CollectionDefinition(nameof(ElevatedHelperPinnedRoot), DisableParallelization = true)]
+public sealed class ElevatedHelperPinnedRoot;
+
+/// <summary>
 /// How "our" sidecar processes are recognized (a whole argument value, not a substring), the
 /// command line of the elevated helper (the config of the asking user travels with it) and the
 /// result-file round trip of the in-process path.
 /// </summary>
+[Collection(nameof(ElevatedHelperPinnedRoot))]
 public class ElevatedHelperTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"pnr-helper-{Guid.NewGuid():N}");
@@ -17,10 +25,12 @@ public class ElevatedHelperTests : IDisposable
     public ElevatedHelperTests()
     {
         Directory.CreateDirectory(_dir);
+        ElevatedHelperTrust.PinnedRootOverride = _dir;
     }
 
     public void Dispose()
     {
+        ElevatedHelperTrust.PinnedRootOverride = null;
         try
         {
             Directory.Delete(_dir, recursive: true);
@@ -29,6 +39,9 @@ public class ElevatedHelperTests : IDisposable
         {
         }
     }
+
+    /// <summary>The pinned elevated directory, redirected into the test's temporary root.</summary>
+    private string PinnedDir => Path.Combine(_dir, "PrivateNetRouting", "elevated");
 
     // ----- P2-21: identification by a whole argument value -----
 
@@ -232,8 +245,10 @@ public class ElevatedHelperTests : IDisposable
     [InlineData(@"C:\Users\someone\AppData\Roaming\PrivateNetRouting\appsettings.json", true)]
     [InlineData(@"relative\appsettings.json", false)]
     [InlineData(@"C:\Windows\System32\drivers\etc\hosts", false)]
+    [InlineData(@"\\server\share\config.json", false)]
+    [InlineData(@"\\.\C:\config.json", false)]
     [InlineData("", false)]
-    public void OnlyAnAbsoluteJsonFileIsAcceptedAsTheHelperConfig(string path, bool expected) =>
+    public void OnlyAnAbsoluteLocalJsonFileIsAcceptedAsTheHelperConfig(string path, bool expected) =>
         Assert.Equal(expected, ElevatedHelperTrust.IsValidConfigPath(path));
 
     [Theory]
@@ -248,13 +263,68 @@ public class ElevatedHelperTests : IDisposable
     [Fact]
     public async Task AHelperThatCannotLoadTheConfigReportsAFailureInsteadOfWritingNothing()
     {
-        var resultFile = Path.Combine(_dir, "elevated-start-daemon=0a1b2c3d.result");
+        var resultFile = Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result");
 
         var code = await Task.Run(() => ElevatedChainCommands.Execute(
             ElevatedChainCommands.StartDaemon, resultFile, configPath: @"relative\not-absolute.json"));
 
         Assert.Equal(1, code);
         Assert.StartsWith("fail", File.ReadAllText(resultFile));
+    }
+
+    // ----- A-02: the helper writes only inside the pinned elevated directory -----
+
+    [Fact]
+    public void AWellNamedResultFileOutsideThePinnedDirectoryIsRefused()
+    {
+        Assert.True(ElevatedHelperTrust.IsValidResultFile(Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result")));
+        Assert.False(ElevatedHelperTrust.IsValidResultFile(Path.Combine(_dir, "elevated-start-daemon=0a1b2c3d.result")));
+        Assert.False(ElevatedHelperTrust.IsValidResultFile(@"\\server\share\elevated-start-daemon=0a1b2c3d.result"));
+    }
+
+    [Theory]
+    [InlineData(@"C:\PrivateNetRouting\sidecar", true)]
+    [InlineData(@"C:\PrivateNetRouting\sidecar\nested", true)]
+    [InlineData(@"sidecar", false)]
+    [InlineData(@"\\server\share\sidecar", false)]
+    [InlineData(@"\\.\pipe\sidecar", false)]
+    [InlineData(@"C:\sidecar"" & echo pwned", false)]
+    [InlineData(@"C:\sidecar%TEMP%", false)]
+    [InlineData("", false)]
+    public void AStateDirTheHelperCreatesMustBeAnInertAbsoluteLocalPath(string path, bool expected) =>
+        Assert.Equal(expected, ElevatedHelperTrust.IsValidStateDir(path));
+
+    [Fact]
+    public async Task TheHelperRefusesAStateDirThatIsNotAnAbsoluteLocalPath()
+    {
+        var configPath = Path.Combine(_dir, "state.json");
+        File.WriteAllText(configPath, """{ "chain": { "tailscale": { "stateDir": "relative\\sidecar" } } }""");
+        var resultFile = Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result");
+
+        var code = await Task.Run(() => ElevatedChainCommands.Execute(
+            ElevatedChainCommands.StartDaemon, resultFile, configPath));
+
+        Assert.Equal(1, code);
+        var result = File.ReadAllText(resultFile);
+        Assert.StartsWith("fail", result);
+        Assert.Contains("stateDir", result);
+    }
+
+    [Fact]
+    public async Task TheHelperLogIsPinnedToTheElevatedDirectory()
+    {
+        var configPath = Path.Combine(_dir, "foreign-logs.json");
+        File.WriteAllText(configPath, """{ "logging": { "directory": "C:\\foreign\\logs" } }""");
+        var resultFile = Path.Combine(PinnedDir, "elevated-unknown=0a1b2c3d.result");
+
+        var code = await Task.Run(() => ElevatedChainCommands.Execute("--elevated-unknown", resultFile, configPath));
+
+        Assert.Equal(0, code); // the unknown command itself is not the subject here
+        Assert.StartsWith("ok", File.ReadAllText(resultFile));
+        var pinnedLog = File.ReadAllText(Path.Combine(PinnedDir, "chain-elevated.log"));
+        Assert.Contains("logging.directory", pinnedLog);
+        Assert.Contains("ignored", pinnedLog);
+        Assert.False(Directory.Exists(@"C:\foreign\logs"));
     }
 
     // ----- the elevated chain helper executes only the standard Tailscale install -----
@@ -334,10 +404,9 @@ public class ElevatedHelperTests : IDisposable
     [Fact]
     public async Task InProcessPathReportsTheHelpersDetailAndCleansUpTheResult()
     {
-        var stateDir = Path.Combine(_dir, "state");
         using var log = new FileLog(Path.Combine(_dir, "runner.log"));
         string? written = null;
-        var runner = new ElevatedRunner(new ChainTailscaleConfig { StateDir = stateDir }, log, elevatedBypass: true, executor: (_, resultFile) =>
+        var runner = new ElevatedRunner(new ChainTailscaleConfig(), log, elevatedBypass: true, executor: (_, resultFile) =>
         {
             written = resultFile;
             ElevatedHelperTrust.WriteResultFile(resultFile, "fail the daemon refused to start");
@@ -357,10 +426,9 @@ public class ElevatedHelperTests : IDisposable
     [Fact]
     public async Task InProcessPathDoesNotBlockTheCaller()
     {
-        var stateDir = Path.Combine(_dir, "state");
         using var log = new FileLog(Path.Combine(_dir, "runner.log"));
         using var release = new ManualResetEventSlim();
-        var runner = new ElevatedRunner(new ChainTailscaleConfig { StateDir = stateDir }, log, elevatedBypass: true, executor: (_, resultFile) =>
+        var runner = new ElevatedRunner(new ChainTailscaleConfig(), log, elevatedBypass: true, executor: (_, resultFile) =>
         {
             // the command blocks (it polls with sleeps): run on the caller's thread it would freeze a UI
             release.Wait(TimeSpan.FromSeconds(5));
@@ -378,15 +446,14 @@ public class ElevatedHelperTests : IDisposable
     [Fact]
     public async Task StaleResultFilesAreSweptNewOnesAreKept()
     {
-        var stateDir = Path.Combine(_dir, "state");
-        Directory.CreateDirectory(stateDir);
-        var stale = Path.Combine(stateDir, "elevated-old=00000000.result");
-        var fresh = Path.Combine(stateDir, "elevated-new=11111111.result");
+        Directory.CreateDirectory(PinnedDir);
+        var stale = Path.Combine(PinnedDir, "elevated-old=00000000.result");
+        var fresh = Path.Combine(PinnedDir, "elevated-new=11111111.result");
         File.WriteAllText(stale, "ok");
         File.WriteAllText(fresh, "ok");
         File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-3));
         using var log = new FileLog(Path.Combine(_dir, "runner.log"));
-        var runner = new ElevatedRunner(new ChainTailscaleConfig { StateDir = stateDir }, log, elevatedBypass: true, executor: (_, resultFile) =>
+        var runner = new ElevatedRunner(new ChainTailscaleConfig(), log, elevatedBypass: true, executor: (_, resultFile) =>
         {
             ElevatedHelperTrust.WriteResultFile(resultFile, "ok done");
             return 0;

@@ -157,6 +157,7 @@ internal sealed class FakeWslRunner : IWslProcessRunner
     }
 }
 
+[Collection(nameof(ElevatedHelperPinnedRoot))]
 public class GuardTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-guard-").FullName;
@@ -1541,17 +1542,34 @@ public class GuardTests : IDisposable
         Assert.Equal("/etc/wsl.d/startup/00-user-boot-command.sh", WslConfigGuard.UserCommandPath("/etc/wsl.d/startup/10-claude-proxy.sh"));
     }
 
-    [Theory]
-    [InlineData(@"C:\Users\u\AppData\Local\PrivateNetRouting\sidecar\elevated-guard-ban-on=0a1b2c3d.result", true)]
-    [InlineData(@"C:\x\elevated-start-daemon=ffffffff.result", true)]
-    [InlineData(@"C:\Windows\System32\drivers\etc\hosts", false)]
-    [InlineData(@"C:\x\elevated-guard-ban-on=0a1b2c3d.txt", false)]
-    [InlineData(@"C:\x\result", false)]
-    [InlineData(@"C:\x\=0a1b2c3d.result", false)]
-    [InlineData(@"..\elevated-guard-ban-on=0a1b2c3d.result", false)]
-    [InlineData("", false)]
-    public void ElevatedHelperWritesOnlyTheResultFileShapeItCreates(string path, bool expected)
-        => Assert.Equal(expected, ElevatedHelperTrust.IsValidResultFile(path));
+    /// <summary>
+    /// The helper (an administrator) writes a result file only of its own shape and only inside
+    /// the pinned elevated directory — the same file name anywhere else is refused, including the
+    /// user-chosen paths a crafted config could name.
+    /// </summary>
+    [Fact]
+    public void ElevatedHelperWritesTheResultFileOnlyInThePinnedDirectory()
+    {
+        ElevatedHelperTrust.PinnedRootOverride = Path.Combine(Path.GetTempPath(), $"pnr-guard-{Guid.NewGuid():N}");
+        try
+        {
+            var pinned = Path.Combine(ElevatedHelperTrust.PinnedRootOverride, "PrivateNetRouting", "elevated");
+            Assert.True(ElevatedHelperTrust.IsValidResultFile(Path.Combine(pinned, "elevated-guard-ban-on=0a1b2c3d.result")));
+            // a side-by-side directory (the old statedir spelling) is outside, ".." or not
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(Path.Combine(pinned, "..", "sidecar", "elevated-guard-ban-on=0a1b2c3d.result")));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"\\server\share\elevated-guard-ban-on=0a1b2c3d.result"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"C:\Windows\System32\drivers\etc\hosts"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"C:\x\elevated-guard-ban-on=0a1b2c3d.txt"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"C:\x\result"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"C:\x\=0a1b2c3d.result"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(@"..\elevated-guard-ban-on=0a1b2c3d.result"));
+            Assert.False(ElevatedHelperTrust.IsValidResultFile(""));
+        }
+        finally
+        {
+            ElevatedHelperTrust.PinnedRootOverride = null;
+        }
+    }
 
     [Fact]
     public void ElevatedGuardHelperRefusesAForeignResultFileWithoutTouchingIt()

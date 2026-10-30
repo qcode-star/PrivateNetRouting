@@ -7,6 +7,7 @@ using PrivateNetRouting.Core.SystemOps;
 namespace PrivateNetRouting.Tests;
 
 /// <summary>Chain orchestration on fakes: order, idempotence, link failures.</summary>
+[Collection(nameof(ElevatedHelperPinnedRoot))]
 public class ChainSupervisorTests : IDisposable
 {
     private readonly string _logPath = Path.Combine(Path.GetTempPath(), $"pnr-chain-{Guid.NewGuid():N}.log");
@@ -1214,35 +1215,44 @@ public class ChainSupervisorTests : IDisposable
     }
 
     /// <summary>
-    /// The result file of an elevated command lives in the statedir, but the statedir is normally
-    /// created by the daemon — an elevated guard command on a machine where the daemon never ran
-    /// must still be able to report, so the runner creates the directory itself.
+    /// The result file of an elevated command lives in the pinned elevated directory, and the
+    /// helper (an administrator) writes nowhere else — the asking side must have the directory
+    /// in place even when the daemon never ran, so the runner creates it itself.
     /// </summary>
     [Fact]
-    public async Task ElevatedRunnerCreatesStateDirForTheResultFile()
+    public async Task ElevatedRunnerCreatesThePinnedDirectoryForTheResultFile()
     {
-        var stateDir = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}", "nested");
-        var config = new ChainTailscaleConfig { StateDir = stateDir };
-        var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
-        var log = new FileLog(logPath);
-        string? writtenTo = null;
-        var runner = new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, resultFile) =>
+        var root = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}");
+        ElevatedHelperTrust.PinnedRootOverride = root;
+        try
         {
-            writtenTo = resultFile;
-            File.WriteAllText(resultFile, "ok test");
-            return 0;
-        });
+            var pinned = Path.Combine(root, "PrivateNetRouting", "elevated");
+            var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
+            var log = new FileLog(logPath);
+            string? writtenTo = null;
+            var runner = new ElevatedRunner(new ChainTailscaleConfig(), log, elevatedBypass: true, executor: (_, resultFile) =>
+            {
+                writtenTo = resultFile;
+                File.WriteAllText(resultFile, "ok test");
+                return 0;
+            });
 
-        var result = await runner.RunAsync("--elevated-test-command", CancellationToken.None);
+            var result = await runner.RunAsync("--elevated-test-command", CancellationToken.None);
 
-        Assert.True(result.Ok);
-        Assert.Equal("test", result.Detail); // the helper's own detail, not a canned one
-        Assert.NotNull(writtenTo);
-        Assert.True(Directory.Exists(stateDir));
-        Assert.False(File.Exists(writtenTo)); // the collected result is removed
-        Directory.Delete(stateDir, recursive: true);
-        log.Dispose();
-        File.Delete(logPath);
+            Assert.True(result.Ok);
+            Assert.Equal("test", result.Detail); // the helper's own detail, not a canned one
+            Assert.NotNull(writtenTo);
+            Assert.True(Directory.Exists(pinned));
+            Assert.True(File.Exists(Path.Combine(pinned, Path.GetFileName(writtenTo!))));
+            Assert.False(File.Exists(writtenTo)); // the collected result is removed
+            log.Dispose();
+            File.Delete(logPath);
+        }
+        finally
+        {
+            ElevatedHelperTrust.PinnedRootOverride = null;
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     /// <summary>Two bring-ups at once (the card and an update window) must not interleave: the second waits and then finds the chain up.</summary>
@@ -1327,17 +1337,18 @@ public class ChainSupervisorTests : IDisposable
             return; // an elevated process takes the in-process path, which has no wait to cancel
         }
 
-        var stateDir = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}");
+        var root = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}");
         var logPath = Path.Combine(Path.GetTempPath(), $"pnr-elevated-{Guid.NewGuid():N}.log");
         using var log = new FileLog(logPath);
-        var runner = new ElevatedRunner(new ChainTailscaleConfig { StateDir = stateDir }, log);
+        var runner = new ElevatedRunner(new ChainTailscaleConfig(), log);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => runner.RunAsync("--elevated-test-command", cts.Token));
 
-        Assert.False(Directory.Exists(stateDir)); // nothing was prepared for a helper
+        // nothing was prepared for a helper: not even the pinned directory was created
+        Assert.False(Directory.Exists(Path.Combine(root, "PrivateNetRouting", "elevated")));
     }
 
     public void Dispose()
