@@ -8,7 +8,7 @@ namespace PrivateNetRouting.Tests;
 
 /// <summary>
 /// Fragment download: assembly from Range requests, resume from completed parts,
-/// fragment retries, server refusal, cancellation with parts kept.
+/// fragment retries, server refusal, cancellation with parts kept, in-flight progress.
 /// </summary>
 public class FragmentDownloaderTests : IDisposable
 {
@@ -214,6 +214,35 @@ public class FragmentDownloaderTests : IDisposable
         Assert.Equal(RecordingHandler.ContentLength, reports[^1].Done);
     }
 
+    [Fact]
+    public async Task ProgressCountsBytesInFlight()
+    {
+        // a body trickling in two bytes at a time: the progress must move between the fragment
+        // boundaries (multiples of the fragment size), not jump over them
+        _handler.PieceSize = 2;
+        var downloader = new FragmentDownloader(_http, new ClaudeUpdateConfig
+        {
+            ChunkBytes = 10,
+            ParallelChunks = 1,
+            ChunkRetries = 2,
+            RetryDelaySeconds = 0,
+            ChunkTimeoutSeconds = 5,
+        }, _log);
+        var reports = new List<(long Done, long Total)>();
+        var progress = new SyncProgress<(long Done, long Total)>(reports.Add);
+        var target = Path.Combine(_root, "app.msix");
+
+        await downloader.DownloadAsync(
+            "https://pkg.example.com/app.msix",
+            target,
+            RecordingHandler.ContentLength,
+            progress,
+            CancellationToken.None);
+
+        Assert.Equal(RecordingHandler.Payload, await File.ReadAllBytesAsync(target));
+        Assert.Contains(reports, r => r.Done % 10 != 0);
+    }
+
     private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
@@ -251,6 +280,9 @@ public class FragmentDownloaderTests : IDisposable
         /// <summary>The range starting at this offset hangs until cancellation.</summary>
         public long? StallFrom { get; set; }
 
+        /// <summary>When set, the body trickles out in pieces of this many bytes per read.</summary>
+        public int? PieceSize { get; set; }
+
         private readonly Dictionary<(long From, long To), int> _attempts = [];
         private readonly object _gate = new();
 
@@ -283,7 +315,7 @@ public class FragmentDownloaderTests : IDisposable
                 }
                 else
                 {
-                    response = Response(HttpStatusCode.PartialContent, Payload[(int)from..(int)(to + 1)]);
+                    response = Response(HttpStatusCode.PartialContent, Payload[(int)from..(int)(to + 1)], piece: PieceSize);
                 }
             }
 
@@ -295,9 +327,11 @@ public class FragmentDownloaderTests : IDisposable
             return response;
         }
 
-        private static HttpResponseMessage Response(HttpStatusCode status, byte[] body, long? length = null)
+        private static HttpResponseMessage Response(HttpStatusCode status, byte[] body, long? length = null, int? piece = null)
         {
-            var content = new ByteArrayContent(body);
+            HttpContent content = piece is null
+                ? new ByteArrayContent(body)
+                : new StreamContent(new PiecewiseStream(body, piece.Value));
             if (length is not null)
             {
                 content.Headers.ContentLength = length;
@@ -305,5 +339,46 @@ public class FragmentDownloaderTests : IDisposable
 
             return new HttpResponseMessage(status) { Content = content };
         }
+    }
+
+    /// <summary>A body that returns at most a few bytes per read — the progress must count them as they arrive.</summary>
+    private sealed class PiecewiseStream(byte[] data, int piece) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Fill(buffer.AsSpan(offset, count));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Fill(buffer.Span));
+        }
+
+        private int Fill(Span<byte> buffer)
+        {
+            var n = Math.Min(Math.Min(piece, buffer.Length), data.Length - _position);
+            data.AsSpan(_position, n).CopyTo(buffer);
+            _position += n;
+            return n;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

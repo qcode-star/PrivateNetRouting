@@ -16,7 +16,9 @@ public interface IMsixDownloader
     /// <summary>
     /// Chunked download: parts of updater.chunkBytes across updater.parallelChunks threads,
     /// a finished part is a file of the expected size (the download resumes from where it stopped after any
-    /// failure). On cancellation throws OperationCanceledException; incomplete parts remain on disk.
+    /// failure). The progress counts the bytes received so far, including the parts still in flight —
+    /// it moves as the data arrives, not in jumps of a whole part. On cancellation throws
+    /// OperationCanceledException; incomplete parts remain on disk.
     /// </summary>
     Task DownloadAsync(string url, string targetFile, long expectedLength, IProgress<(long DoneBytes, long TotalBytes)>? progress, CancellationToken ct);
 }
@@ -26,11 +28,28 @@ public interface IMsixDownloader
 /// chain hits the DoH+sidecar latency, several threads yield a few MB/s. A fragment with
 /// retries, then a size check and concatenation.
 /// </summary>
-public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig config, FileLog log) : IMsixDownloader
+public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig config, FileLog log, TimeSpan? progressInterval = null) : IMsixDownloader
 {
-    private sealed record Chunk(long Start, long End, string File)
+    /// <summary>How often an in-flight part reports its bytes; without a limit the reports would flood the UI.</summary>
+    private readonly TimeSpan _progressInterval = progressInterval ?? TimeSpan.FromMilliseconds(250);
+
+    private const int CopyBufferSize = 81920;
+
+    private sealed class Chunk(long start, long end, string file)
     {
+        public long Start { get; } = start;
+        public long End { get; } = end;
+        public string File { get; } = file;
         public long Size => End - Start + 1;
+
+        private long _written;
+
+        /// <summary>Bytes of the current attempt received so far; zeroed when the attempt restarts the part.</summary>
+        public long Written => Interlocked.Read(ref _written);
+
+        public void AddWritten(long delta) => Interlocked.Add(ref _written, delta);
+
+        public void ResetWritten() => Interlocked.Exchange(ref _written, 0);
     }
 
     public async Task<long> GetLengthAsync(string url, CancellationToken ct)
@@ -82,7 +101,12 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         var pending = chunks.Where(chunk => !IsComplete(chunk)).ToList();
         var doneBytes = expectedLength - pending.Sum(chunk => chunk.Size);
         log.Info($"updater: {chunks.Count} fragments of {ByteSize.Format(config.ChunkBytes)}, to download: {pending.Count}, parallel: {config.ParallelChunks}");
-        progress?.Report((doneBytes, expectedLength));
+
+        // the done bytes include the parts still in flight: the bar moves as the data arrives,
+        // not in jumps of a whole fragment
+        long Done() => doneBytes + pending.Sum(chunk => chunk.Written);
+        void Report() => progress?.Report((Done(), expectedLength));
+        Report();
 
         if (pending.Count > 0)
         {
@@ -110,10 +134,9 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
 
                     try
                     {
-                        await DownloadChunkAsync(chunk, url, ct);
-                        var done = Interlocked.Add(ref doneBytes, chunk.Size);
-                        log.Debug($"updater: fragment {Path.GetFileName(chunk.File)} done ({ByteSize.Format(chunk.Size)}, total {ByteSize.Format(done)})");
-                        progress?.Report((done, expectedLength));
+                        await DownloadChunkAsync(chunk, url, Report, ct);
+                        log.Debug($"updater: fragment {Path.GetFileName(chunk.File)} done ({ByteSize.Format(chunk.Size)}, total {ByteSize.Format(Done())})");
+                        Report();
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
@@ -149,10 +172,11 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         log.Info($"updater: package assembled: {targetFile} ({ByteSize.Format(expectedLength)})");
     }
 
-    private async Task DownloadChunkAsync(Chunk chunk, string url, CancellationToken ct)
+    private async Task DownloadChunkAsync(Chunk chunk, string url, Action report, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
         {
+            chunk.ResetWritten();
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -166,9 +190,29 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
                 }
 
                 using var output = File.Create(chunk.File);
-                await response.Content.CopyToAsync(output, timeout.Token);
+                await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
+                var buffer = new byte[CopyBufferSize];
+                long written = 0;
+                var nextReport = Environment.TickCount64;
+                while (true)
+                {
+                    var read = await body.ReadAsync(buffer, timeout.Token);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
+                    written += read;
+                    chunk.AddWritten(read);
+                    if (Environment.TickCount64 >= nextReport)
+                    {
+                        nextReport = Environment.TickCount64 + (long)_progressInterval.TotalMilliseconds;
+                        report();
+                    }
+                }
+
                 await output.FlushAsync(timeout.Token); // the length is checked on disk — the FileStream buffer must be flushed
-                var written = output.Length;
                 if (written != chunk.Size)
                 {
                     throw new IOException($"fragment size mismatch: expected {chunk.Size}, got {written}");
@@ -182,6 +226,7 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
             }
             catch (Exception ex)
             {
+                chunk.ResetWritten(); // the part restarts from scratch — its partial bytes leave the total
                 if (attempt >= config.ChunkRetries)
                 {
                     throw;
