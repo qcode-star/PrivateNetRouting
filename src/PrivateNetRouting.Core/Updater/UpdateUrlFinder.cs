@@ -140,7 +140,7 @@ public sealed class UpdateFeedUrlFinder(HttpClient http, ClaudeUpdateConfig conf
                 || url.ValueKind != JsonValueKind.String
                 || url.GetString() is not { } candidate
                 || !PackageUrl.IsValidPackageUrl(candidate)
-                || !candidate.Contains(packageHost, StringComparison.OrdinalIgnoreCase))
+                || !PackageUrl.IsTrustedPackageUrl(candidate, packageHost))
             {
                 continue;
             }
@@ -199,4 +199,16 @@ public static partial class PackageUrl
     /// <summary>A manual URL is valid: https and points to .msix.</summary>
     public static bool IsValidPackageUrl(string url) =>
         url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && ParseFileName(url).Length > 0;
+
+    /// <summary>
+    /// Whether the URL names the package host itself: parsed as an absolute URI, https, no
+    /// userinfo and a host equal to the package host. A substring check would accept a userinfo
+    /// or subdomain-name trick like https://package.host@evil.example/x.msix. The .msix
+    /// file-name shape stays with IsValidPackageUrl.
+    /// </summary>
+    public static bool IsTrustedPackageUrl(string url, string packageHost) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && string.IsNullOrEmpty(uri.UserInfo)
+        && uri.Host.Equals(packageHost, StringComparison.OrdinalIgnoreCase);
 }

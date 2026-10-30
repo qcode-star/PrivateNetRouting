@@ -170,6 +170,14 @@ public sealed class ClaudeUpdater(
             throw new IOException($"the URL does not point to an .msix package: {url}");
         }
 
+        // the last gate before the download: the feed, the journal and the manual entry all pass
+        // through here, and none of them may point the download off the package host (a userinfo
+        // trick like https://package.host@evil.example/x.msix would pass a substring check)
+        if (!PackageUrl.IsTrustedPackageUrl(url, config.Claude.Update.PackageHost))
+        {
+            throw new IOException($"the package URL does not point at the package host '{config.Claude.Update.PackageHost}': {url}");
+        }
+
         Directory.CreateDirectory(config.Claude.Update.CacheDir);
         var file = Path.Combine(config.Claude.Update.CacheDir, fileName);
         var total = await downloader.GetLengthAsync(url, ct);

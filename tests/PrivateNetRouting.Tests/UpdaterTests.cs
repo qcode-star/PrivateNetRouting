@@ -1,4 +1,7 @@
 using System.IO.Compression;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
@@ -560,6 +563,91 @@ public class UpdaterTests : IDisposable
         using var doc = JsonDocument.Parse(json);
 
         Assert.Null(UpdateFeedUrlFinder.ExtractLatestUrl(doc.RootElement, "downloads.claude.ai"));
+    }
+
+    // --- A-03: a package URL must name the package host itself ---
+
+    [Fact]
+    public void FeedManifestRejectsAPackageUrlThatOnlyContainsTheHost()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {"releases":[
+              {"version":"2.2","updateTo":{"url":"https://downloads.claude.ai@evil.example/x.msix"}},
+              {"version":"2.3","updateTo":{"url":"https://evil.downloads.claude.ai/x.msix"}}]}
+            """);
+
+        Assert.Null(UpdateFeedUrlFinder.ExtractLatestUrl(doc.RootElement, "downloads.claude.ai"));
+    }
+
+    [Theory]
+    [InlineData("https://downloads.claude.ai/releases/win32/x64/2.2/Claude.msix", true)]
+    [InlineData("HTTPS://DOWNLOADS.CLAUDE.AI/Claude.msix", true)] // scheme and host are case-insensitive
+    [InlineData("https://downloads.claude.ai@evil.example/x.msix", false)] // userinfo trick
+    [InlineData("https://evil.downloads.claude.ai/x.msix", false)] // a different host, not a suffix match
+    [InlineData("https://evil.example/x.msix", false)]
+    [InlineData("http://downloads.claude.ai/x.msix", false)]
+    [InlineData("ftp://downloads.claude.ai/x.msix", false)]
+    [InlineData("not a url", false)]
+    public void APackageUrlMustBeHttpsToThePackageHostWithoutUserinfo(string url, bool expected) =>
+        Assert.Equal(expected, PackageUrl.IsTrustedPackageUrl(url, "downloads.claude.ai"));
+
+    [Fact]
+    public async Task DownloadRejectsAPackageUrlOffThePackageHost()
+    {
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.DownloadAsync("https://downloads.claude.ai@evil.example/x.msix", null, CancellationToken.None));
+
+        Assert.Contains("package host", error.Message);
+        Assert.Empty(_downloader.Downloads);
+    }
+
+    /// <summary>
+    /// Redirects are not followed (AllowAutoRedirect=false on the updater client): a 302 to
+    /// another host is a failed request, never a download of whatever the Location named.
+    /// </summary>
+    [Fact]
+    public async Task DownloaderDoesNotFollowARedirectOffThePackageHost()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        using var client = await listener.AcceptTcpClientAsync();
+                        var stream = client.GetStream();
+                        await stream.WriteAsync(Encoding.ASCII.GetBytes(
+                            "HTTP/1.1 302 Found\r\nLocation: https://evil.example/x.msix\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+                    }
+                }
+                catch (Exception)
+                {
+                    // the listener was stopped: the accept loop ends
+                }
+            });
+            using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false });
+            var downloader = new FragmentDownloader(
+                http,
+                new ClaudeUpdateConfig { HeadTimeoutSeconds = 2, ChunkTimeoutSeconds = 2 },
+                _log);
+
+            var error = await Assert.ThrowsAsync<IOException>(() =>
+                downloader.GetLengthAsync($"http://127.0.0.1:{port}/pkg.msix", CancellationToken.None));
+
+            Assert.Contains("302", error.Message);
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     [Fact]

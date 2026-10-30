@@ -315,6 +315,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
         {
             Proxy = new WebProxy(AppProxyEndpoint.Url(config)),
             UseProxy = true,
+            // a redirect could silently steer the download off the package host; the size query
+            // and the range requests fail on a non-2xx/206 answer instead of following it
+            AllowAutoRedirect = false,
         })
         {
             Timeout = Timeout.InfiniteTimeSpan,
