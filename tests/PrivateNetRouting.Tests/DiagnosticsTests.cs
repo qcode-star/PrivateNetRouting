@@ -60,6 +60,28 @@ public class DiagnosticsTests : IDisposable
         Assert.Empty(summary.Sections);
     }
 
+    /// <summary>
+    /// The tailscale listen endpoints may legally be blank in the external modes (the validator
+    /// requires them in the tailscale mode only): the summary parses them for the tailscale
+    /// mode alone and shows the egress line instead of dying on a FormatException.
+    /// </summary>
+    [Fact]
+    public async Task ASocks5ConfigWithBlankTailscaleEndpointsStillSummarizes()
+    {
+        var service = MakeService(out var config, out var proxy, out _, out _, out _, out _, mode: "socks5", upstreamReachable: true);
+        proxy.IsRunning = true;
+        config.Chain.Tailscale.HttpListen = "";
+        config.Chain.Tailscale.SocksListen = "";
+        config.Chain.Socks5.Upstream = "192.0.2.10:1080";
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        Assert.False(summary.ChainStopped);
+        var line = Section(summary, "chain").Single();
+        Assert.Contains("192.0.2.10:1080", line.Name);
+        Assert.Equal("reachable", line.Value);
+    }
+
     [Fact]
     public async Task ForeignProxyHolderIsNotAStoppedChain()
     {

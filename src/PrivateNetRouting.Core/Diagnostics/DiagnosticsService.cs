@@ -78,11 +78,13 @@ public sealed class DiagnosticsService(
     private async Task<DiagnosticsSummary> GetSummaryCoreAsync(CancellationToken ct)
     {
         var chainConfig = config.Chain;
-        // the external-upstream modes (socks5, http): the daemon ports mean nothing there
+        // the external-upstream modes (socks5, http): the daemon ports mean nothing there — and
+        // the config may legally leave the whole tailscale section blank, so the endpoints are
+        // parsed only in the tailscale mode (a blank value would throw here otherwise)
         var external = chainConfig.EffectiveMode is ChainMode.Socks5 or ChainMode.Http;
         var skipProxy = AppProxyEndpoint.IsSkipped(config);
-        var daemonHttpPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.HttpListen).Port;
-        var daemonSocksPort = Socks5Client.ParseEndPoint(chainConfig.Tailscale.SocksListen).Port;
+        var daemonHttpPort = external ? 0 : Socks5Client.ParseEndPoint(chainConfig.Tailscale.HttpListen).Port;
+        var daemonSocksPort = external ? 0 : Socks5Client.ParseEndPoint(chainConfig.Tailscale.SocksListen).Port;
         var proxyPort = AppProxyEndpoint.Port(config);
 
         var state = await chain.GetStateAsync(ct);
