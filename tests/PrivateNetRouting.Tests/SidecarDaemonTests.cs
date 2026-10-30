@@ -186,7 +186,7 @@ public class DaemonStopTests : IDisposable
         TailscaledPath = @"C:\Program Files\Tailscale\tailscaled.exe",
         CliPath = @"C:\Program Files\Tailscale\tailscale.exe",
         StateDir = @"C:\ProgramData\pnr-test\sidecar",
-        Socket = @"\.\pipe\pnr-test-sidecar",
+        Socket = @"\\.\pipe\pnr-test-sidecar",
         SocksListen = "127.0.0.1:18083",
         HttpListen = "127.0.0.1:18082",
         Elevation = "never",
@@ -216,7 +216,7 @@ public class DaemonStopTests : IDisposable
     {
         var name = $"pnr-test-{Guid.NewGuid():N}";
         var config = Config();
-        config.Socket = $@"\.\pipe\{name}";
+        config.Socket = $@"\\.\pipe\{name}";
         using var server = new NamedPipeServerStream(name, PipeDirection.In);
         _ = Task.Run(server.WaitForConnection);
         var ports = new FakePortProbe();
@@ -265,11 +265,11 @@ public class KeeperStopTests : IDisposable
         var finder = new FakeFinderByName();
         finder.ByName["tailscale.exe"] =
         [
-            new FoundProcess(999_999, @"tailscale.exe ""--socket=\.\pipe\pnr-test-sidecar"" debug watch-ipn"),
+            new FoundProcess(999_999, @"tailscale.exe ""--socket=\\.\pipe\pnr-test-sidecar"" debug watch-ipn"),
         ];
         using var log = new FileLog(Path.Combine(_dir, "keeper.log"));
         var keeper = new SidecarKeeper(
-            new ChainTailscaleConfig { Socket = @"\.\pipe\pnr-test-sidecar" },
+            new ChainTailscaleConfig { Socket = @"\\.\pipe\pnr-test-sidecar" },
             finder,
             log,
             TimeSpan.FromMilliseconds(400));
@@ -284,7 +284,7 @@ public class KeeperStopTests : IDisposable
     {
         using var log = new FileLog(Path.Combine(_dir, "keeper.log"));
         var keeper = new SidecarKeeper(
-            new ChainTailscaleConfig { Socket = @"\.\pipe\pnr-test-sidecar" },
+            new ChainTailscaleConfig { Socket = @"\\.\pipe\pnr-test-sidecar" },
             new FakeFinderByName(),
             log,
             TimeSpan.FromMilliseconds(400));
