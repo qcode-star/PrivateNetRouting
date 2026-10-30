@@ -180,7 +180,79 @@ public static class HostsFileBlock
         return lines;
     }
 
-    /// <summary>ASCII encoding and CRLF (hosts dislikes anything else).</summary>
-    private static void WriteAll(string path, List<string> lines) =>
-        File.WriteAllText(path, string.Join("\r\n", lines) + "\r\n", Encoding.ASCII);
+    /// <summary>
+    /// Atomic, encoding-preserving rewrite: the file's encoding is detected from its bytes (a
+    /// UTF-8 BOM, valid UTF-8, or Latin-1 which maps every byte 1:1), so a foreign line with
+    /// non-ASCII text survives byte for byte (the managed block itself is ASCII-only); the new
+    /// content goes to a temp file next to hosts and is File.Replace'd over the original, which
+    /// keeps the destination's ACL; a sharing violation (Docker, VS and friends hold hosts) is
+    /// retried briefly. CRLF line endings — hosts dislikes anything else.
+    /// </summary>
+    private static void WriteAll(string path, List<string> lines)
+    {
+        var (encoding, bom) = DetectEncoding(File.ReadAllBytes(path));
+        var content = string.Join("\r\n", lines) + "\r\n";
+        var payload = (bom ? encoding.GetPreamble() : []).Concat(encoding.GetBytes(content)).ToArray();
+        var temp = Path.Combine(Path.GetDirectoryName(path)!, $".pnr-hosts-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllBytes(temp, payload);
+            ReplaceWithRetry(temp, path);
+        }
+        catch (Exception)
+        {
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (IOException)
+            {
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>The file's encoding: UTF-8 (BOM honored) when the bytes are valid UTF-8, Latin-1 otherwise.</summary>
+    private static (Encoding Encoding, bool Bom) DetectEncoding(byte[] bytes)
+    {
+        var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        try
+        {
+            new UTF8Encoding(false, true).GetString(bytes);
+            return (new UTF8Encoding(false), bom);
+        }
+        catch (DecoderFallbackException)
+        {
+            return (Encoding.Latin1, false);
+        }
+    }
+
+    private static void ReplaceWithRetry(string temp, string path)
+    {
+        const int attempts = 5;
+        const int delayMs = 200;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Replace(temp, path, destinationBackupFileName: null);
+                return;
+            }
+            catch (FileNotFoundException)
+            {
+                // no hosts (yet) to replace: a plain move puts the file in place
+                File.Move(temp, path);
+                return;
+            }
+            catch (IOException ex) when (attempt < attempts - 1 && IsSharingViolation(ex))
+            {
+                Thread.Sleep(delayMs);
+            }
+        }
+    }
+
+    /// <summary>ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION — another process holds the file.</summary>
+    private static bool IsSharingViolation(IOException ex) =>
+        ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021);
 }

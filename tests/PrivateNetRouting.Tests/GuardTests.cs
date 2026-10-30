@@ -259,6 +259,47 @@ public class GuardTests : IDisposable
         Assert.False(HostsFileBlock.Read(path, "# >>> b", "# <<< b", "# c", []).Present);
     }
 
+    /// <summary>
+    /// A hosts file with non-ASCII foreign lines is rewritten in its own encoding: the managed
+    /// block is added, the foreign bytes survive the round trip (apply and remove), the file
+    /// never ends up truncated (the rewrite is temp + File.Replace).
+    /// </summary>
+    [Fact]
+    public void HostsApplyPreservesNonAsciiForeignLines()
+    {
+        var path = Path.Combine(_tempDir, "hosts-ansi");
+        // 0xE9 is not valid UTF-8: the file is Latin-1 and must come back Latin-1
+        File.WriteAllBytes(path, [0x23, 0x20, 0x63, 0x61, 0x66, 0xE9, 0x0D, 0x0A]); // "# caf<E9>"
+
+        HostsFileBlock.Apply(path, "# >>> b", "# <<< b", "# c", ["claude.ai"]);
+        var afterApply = File.ReadAllBytes(path);
+        Assert.Contains((byte)0xE9, afterApply);
+        Assert.Equal(
+            "# caf\u00e9\r\n\r\n# >>> b\r\n# c\r\n0.0.0.0 claude.ai\r\n# <<< b\r\n",
+            Encoding.Latin1.GetString(afterApply));
+
+        HostsFileBlock.Remove(path, "# >>> b", "# <<< b");
+        Assert.Equal("# caf\u00e9\r\n", Encoding.Latin1.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
+    public void HostsApplyPreservesUtf8BomAndText()
+    {
+        var path = Path.Combine(_tempDir, "hosts-utf8");
+        File.WriteAllText(path, "# caf\u00e9\r\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        HostsFileBlock.Apply(path, "# >>> b", "# <<< b", "# c", ["claude.ai"]);
+
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal([0xEF, 0xBB, 0xBF], bytes[..3]); // the BOM is kept
+        var text = File.ReadAllText(path, new UTF8Encoding(false));
+        Assert.Contains("# caf\u00e9", text);
+        Assert.Contains("0.0.0.0 claude.ai", text);
+
+        HostsFileBlock.Remove(path, "# >>> b", "# <<< b");
+        Assert.StartsWith("# caf\u00e9", File.ReadAllText(path, new UTF8Encoding(false)));
+    }
+
     // ----- env values -----
 
     [Fact]
