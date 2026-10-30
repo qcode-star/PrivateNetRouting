@@ -20,7 +20,7 @@ public interface ISidecarKeeper
 /// stdout (a continuous netmap-JSON stream) goes to NUL, stderr — to watch.err.log.
 /// </summary>
 public sealed class SidecarKeeper(
-    ChainTailscaleConfig config, IProcessFinder processes, FileLog log) : ISidecarKeeper
+    ChainTailscaleConfig config, IProcessFinder processes, FileLog log, TimeSpan? killWait = null) : ISidecarKeeper
 {
     public bool IsRunning =>
         processes.FindByArgument("tailscale.exe", config.Socket)
@@ -66,8 +66,13 @@ public sealed class SidecarKeeper(
             "debug", "watch-ipn");
     }
 
-    public Task KillAsync(CancellationToken ct)
+    /// <summary>
+    /// The stop is only done when the keeper is really gone: kill failures are collected, the
+    /// wait is bounded, and a surviving keeper fails the stop instead of a reported success.
+    /// </summary>
+    public async Task KillAsync(CancellationToken ct)
     {
+        Exception? firstFailure = null;
         foreach (var found in processes.FindByArgument("tailscale.exe", config.Socket)
                      .Where(p => p.CommandLine.Contains("watch-ipn", StringComparison.OrdinalIgnoreCase)))
         {
@@ -84,9 +89,24 @@ public sealed class SidecarKeeper(
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 log.Warn($"keeper: failed to kill pid={found.Id}: {ex.Message}");
+                firstFailure ??= ex;
             }
         }
 
-        return Task.CompletedTask;
+        var deadline = DateTime.UtcNow + (killWait ?? TimeSpan.FromSeconds(3));
+        while (IsRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(200, ct);
+        }
+
+        if (IsRunning)
+        {
+            throw new IOException("keeper: watch-ipn is still running after the kill", firstFailure);
+        }
+
+        if (firstFailure is not null)
+        {
+            throw new IOException($"keeper: the kill failed: {firstFailure.Message}", firstFailure);
+        }
     }
 }

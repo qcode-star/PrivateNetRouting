@@ -237,3 +237,58 @@ public class DaemonStopTests : IDisposable
         public Version? GetVersion() => new(1, 104, 1);
     }
 }
+
+/// <summary>The keeper's stop is confirmed: a survivor is a failure, a quiet kill is a success.</summary>
+public class KeeperStopTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"pnr-keeper-{Guid.NewGuid():N}");
+
+    public KeeperStopTests()
+    {
+        Directory.CreateDirectory(_dir);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task AKeeperStillListedAfterTheKillFailsTheStop()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["tailscale.exe"] =
+        [
+            new FoundProcess(999_999, @"tailscale.exe ""--socket=\.\pipe\pnr-test-sidecar"" debug watch-ipn"),
+        ];
+        using var log = new FileLog(Path.Combine(_dir, "keeper.log"));
+        var keeper = new SidecarKeeper(
+            new ChainTailscaleConfig { Socket = @"\.\pipe\pnr-test-sidecar" },
+            finder,
+            log,
+            TimeSpan.FromMilliseconds(400));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => keeper.KillAsync(CancellationToken.None));
+
+        Assert.Contains("still running", error.Message);
+    }
+
+    [Fact]
+    public async Task ADeadKeeperFinishesTheKill()
+    {
+        using var log = new FileLog(Path.Combine(_dir, "keeper.log"));
+        var keeper = new SidecarKeeper(
+            new ChainTailscaleConfig { Socket = @"\.\pipe\pnr-test-sidecar" },
+            new FakeFinderByName(),
+            log,
+            TimeSpan.FromMilliseconds(400));
+
+        await keeper.KillAsync(CancellationToken.None); // nothing listed: no throw
+    }
+}

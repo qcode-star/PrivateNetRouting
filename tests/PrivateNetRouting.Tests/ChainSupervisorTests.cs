@@ -665,6 +665,25 @@ public class ChainSupervisorTests : IDisposable
         Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
     }
 
+    /// <summary>A surviving keeper is a stop failure (Q-04): the stop reports it and the hook waits.</summary>
+    [Fact]
+    public async Task ASurvivingKeeperFailsTheStopAndHoldsTheHook()
+    {
+        var keeper = new FakeKeeper(_calls) { RefusesToDie = true };
+        var hookRan = false;
+        var supervisor = Create(keeper: keeper, chainStopped: _ =>
+        {
+            hookRan = true;
+            return Task.CompletedTask;
+        });
+
+        var error = await Assert.ThrowsAsync<ChainException>(() =>
+            supervisor.StopAsync(null, CancellationToken.None));
+
+        Assert.Contains("keeper", error.Message);
+        Assert.False(hookRan);
+    }
+
     /// <summary>
     /// A foreign listener holding the daemon port is not a surviving daemon: the pipe decides —
     /// the stop succeeds and the chain-stopped hook (the idle stopper's end) still fires.
@@ -1151,6 +1170,9 @@ public class ChainSupervisorTests : IDisposable
 
         public IOException? EnsureThrows { get; init; }
 
+        /// <summary>The kill cannot take the keeper down (production KillAsync reports that as a failure).</summary>
+        public bool RefusesToDie { get; init; }
+
         public List<CancellationToken> KillTokens { get; } = [];
 
         public Task EnsureStartedAsync(CancellationToken ct)
@@ -1169,8 +1191,13 @@ public class ChainSupervisorTests : IDisposable
         {
             KillTokens.Add(ct);
             ct.ThrowIfCancellationRequested();
-            IsRunning = false;
             calls.Add("keeper.kill");
+            if (RefusesToDie)
+            {
+                throw new IOException("keeper: watch-ipn is still running after the kill");
+            }
+
+            IsRunning = false;
             return Task.CompletedTask;
         }
     }
