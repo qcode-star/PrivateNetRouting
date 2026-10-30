@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Tests;
@@ -153,5 +154,86 @@ public class TailscaleCommandLineTests
 
         Assert.Contains(@"--socket=""\\.\pipe\pnr-sidecar""", line);
         Assert.EndsWith("debug watch-ipn", line);
+    }
+}
+
+/// <summary>
+/// A stop decides the daemon's death by its pipe, never by the port: a foreign process holding
+/// the daemon port is a warning, not a stop failure.
+/// </summary>
+public class DaemonStopTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"pnr-daemon-{Guid.NewGuid():N}");
+
+    public DaemonStopTests()
+    {
+        Directory.CreateDirectory(_dir);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static ChainTailscaleConfig Config() => new()
+    {
+        TailscaledPath = @"C:\Program Files\Tailscale\tailscaled.exe",
+        CliPath = @"C:\Program Files\Tailscale\tailscale.exe",
+        StateDir = @"C:\ProgramData\pnr-test\sidecar",
+        Socket = @"\.\pipe\pnr-test-sidecar",
+        SocksListen = "127.0.0.1:18083",
+        HttpListen = "127.0.0.1:18082",
+        Elevation = "never",
+    };
+
+    [Fact]
+    public async Task AForeignListenerOnTheDaemonPortIsAWarnNotAStopFailure()
+    {
+        var config = Config();
+        var ports = new FakePortProbe { Listening = true }; // a foreign process on the daemon port
+        using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
+        var daemon = new SidecarDaemon(
+            config,
+            ports,
+            new FakeFinderByName(), // nothing of ours found, nothing killed
+            log,
+            new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) => 0),
+            new FakeVersionProbe());
+
+        await daemon.KillAsync(CancellationToken.None); // must not throw
+
+        Assert.Contains("foreign process", File.ReadAllText(Path.Combine(_dir, "daemon.log")));
+    }
+
+    [Fact]
+    public async Task ARespondingPipeAfterTheKillFailsTheStop()
+    {
+        var name = $"pnr-test-{Guid.NewGuid():N}";
+        var config = Config();
+        config.Socket = $@"\.\pipe\{name}";
+        using var server = new NamedPipeServerStream(name, PipeDirection.In);
+        _ = Task.Run(server.WaitForConnection);
+        var ports = new FakePortProbe();
+        using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
+        var daemon = new SidecarDaemon(
+            config,
+            ports,
+            new FakeFinderByName(),
+            log,
+            new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) => 0),
+            new FakeVersionProbe());
+
+        await Assert.ThrowsAsync<IOException>(() => daemon.KillAsync(CancellationToken.None));
+    }
+
+    private sealed class FakeVersionProbe : ITailscaleVersionProbe
+    {
+        public Version? GetVersion() => new(1, 104, 1);
     }
 }

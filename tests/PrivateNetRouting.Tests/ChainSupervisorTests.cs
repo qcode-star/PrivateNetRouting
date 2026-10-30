@@ -665,6 +665,28 @@ public class ChainSupervisorTests : IDisposable
         Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
     }
 
+    /// <summary>
+    /// A foreign listener holding the daemon port is not a surviving daemon: the pipe decides —
+    /// the stop succeeds and the chain-stopped hook (the idle stopper's end) still fires.
+    /// </summary>
+    [Fact]
+    public async Task AForeignListenerOnTheDaemonPortDoesNotFailTheStop()
+    {
+        var daemon = new FakeDaemon(_calls) { PortStaysForeignAfterKill = true };
+        var keeper = new FakeKeeper(_calls);
+        var hookRan = false;
+        var supervisor = Create(daemon: daemon, keeper: keeper, chainStopped: _ =>
+        {
+            hookRan = true;
+            return Task.CompletedTask;
+        });
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
+        Assert.True(hookRan);
+    }
+
     /// <summary>socks5 egress: instead of the three tailscale links, one check of the provided upstream.</summary>
     [Fact]
     public async Task Socks5ColdStartChecksEgressThenStartsProxy()
@@ -1068,6 +1090,9 @@ public class ChainSupervisorTests : IDisposable
 
         public Exception? KillThrows { get; init; }
 
+        /// <summary>A foreign process keeps holding the daemon port after the kill (the pipe is closed).</summary>
+        public bool PortStaysForeignAfterKill { get; init; }
+
         /// <summary>The tokens the stop link received: production must hand it CancellationToken.None.</summary>
         public List<CancellationToken> KillTokens { get; } = [];
 
@@ -1110,8 +1135,12 @@ public class ChainSupervisorTests : IDisposable
                 throw KillThrows;
             }
 
-            IsHttpListening = false;
             IsProcessAlive = false;
+            if (!PortStaysForeignAfterKill)
+            {
+                IsHttpListening = false;
+            }
+
             return Task.CompletedTask;
         }
     }

@@ -579,10 +579,13 @@ public sealed class ChainSupervisor(
         }
     }
 
-    /// <summary>The local links of this shape are all down (the external upstream is not ours).</summary>
+    /// <summary>
+    /// The local links of this shape are all down (the external upstream is not ours). The
+    /// daemon's liveness is its pipe: a foreign process on the daemon port is not ours either.
+    /// </summary>
     private bool NothingOfOursRunning() =>
         (_skipProxy || !proxy.IsRunning)
-        && (_external || (!keeper.IsRunning && !daemon.IsProcessAlive && !daemon.IsHttpListening));
+        && (_external || (!keeper.IsRunning && !daemon.IsProcessAlive));
 
     /// <summary>
     /// The interactive login of a node that has none: `tailscale login` waits while the user

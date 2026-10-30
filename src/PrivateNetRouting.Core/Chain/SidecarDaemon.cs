@@ -187,16 +187,23 @@ public sealed class SidecarDaemon(
         }
 
         KillProcesses();
+        // liveness by the daemon's own pipe only: a foreign process holding our port is a bare
+        // probe result, not a sign of a surviving daemon, and must not fail the stop
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-        while (DateTime.UtcNow < deadline && (IsProcessAlive || IsHttpListening))
+        while (DateTime.UtcNow < deadline && IsProcessAlive)
         {
             await Task.Delay(200, ct);
         }
 
-        if (IsProcessAlive || IsHttpListening)
+        if (IsProcessAlive)
         {
             throw new IOException(
                 "daemon is still alive after a direct kill — it is probably elevated (left from a previous elevated run); stop it once from an elevated context (e.g. \"pnr chain down\" in an admin console)");
+        }
+
+        if (IsHttpListening)
+        {
+            log.Warn($"daemon: port {HttpPort} is still held by a foreign process; not ours — see chain.tailscale.httpListen");
         }
     }
 
