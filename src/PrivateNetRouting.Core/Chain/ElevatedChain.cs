@@ -50,7 +50,7 @@ public static class ElevatedChainCommands
 
             var detail = command switch
             {
-                StartDaemon => StartDaemonCore(config, log),
+                StartDaemon => StartDaemonCore(config, log, resultFile),
                 StopChain => StopChainCore(config, log),
                 _ => $"unknown command: {command}",
             };
@@ -134,8 +134,17 @@ public static class ElevatedChainCommands
     /// </summary>
     internal static bool ElevatedDevMode(Version? pinnedVersion) => !SidecarDaemon.VersionNeedsElevation(pinnedVersion);
 
-    private static string StartDaemonCore(AppConfig config, FileLog log)
+    private static string StartDaemonCore(AppConfig config, FileLog log, string resultFile)
     {
+        // the asking side may have cancelled the bring-up while this helper was on its way (the
+        // UAC prompt was confirmed before the cancel): starting the daemon now would undo the
+        // stop that already ran during the cancellation — abort instead
+        if (File.Exists(resultFile + ElevatedRunner.CancelSuffix))
+        {
+            log.Info("elevated: the bring-up was cancelled by the asking side — the daemon is not started");
+            return "cancelled before the start";
+        }
+
         PinChainLocations(config, log);
         var chain = config.Chain;
         var daemon = new SidecarDaemon(
@@ -162,6 +171,15 @@ public static class ElevatedChainCommands
             {
                 log.Info("elevated: daemon listener is up");
                 return "daemon started, listener is up";
+            }
+
+            // a cancel that landed mid-start must not leave a daemon behind: what this helper
+            // started, this helper takes down (it is already elevated)
+            if (File.Exists(resultFile + ElevatedRunner.CancelSuffix))
+            {
+                log.Warn("elevated: the bring-up was cancelled mid-start — stopping the daemon it started");
+                daemon.KillAsync(CancellationToken.None).GetAwaiter().GetResult();
+                throw new IOException("the bring-up was cancelled mid-start; the daemon it started was stopped");
             }
 
             Thread.Sleep(500);
@@ -349,31 +367,76 @@ public sealed class ElevatedRunner(
             return new ElevatedResult(false, $"UAC declined: {ex.Message}");
         }
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.UacWaitSeconds);
-        while (DateTime.UtcNow < deadline)
+        var result = await WaitForResultAsync(
+            resultPath,
+            TimeSpan.FromSeconds(config.UacWaitSeconds),
+            ct,
+            () => MarkCancelled(resultPath)).ConfigureAwait(false);
+        if (result is not null)
         {
-            if (ReadResult(resultPath) is { } result)
+            DeleteQuietly(resultPath);
+            DeleteQuietly(resultPath + CancelSuffix);
+            if (result.Ok)
             {
-                DeleteQuietly(resultPath);
-                if (result.Ok)
-                {
-                    log.Info($"elevated {command}: {result.Detail}");
-                }
-                else
-                {
-                    log.Error($"elevated {command}: {result.Detail}");
-                }
-
-                return result;
+                log.Info($"elevated {command}: {result.Detail}");
+            }
+            else
+            {
+                log.Error($"elevated {command}: {result.Detail}");
             }
 
-            // a cancellation surfaces as OperationCanceledException (the chain contract), not as a
-            // failure of the helper
-            await Task.Delay(500, ct);
+            return result;
         }
 
         log.Error($"elevated {command}: UAC/start not confirmed within {config.UacWaitSeconds}s");
         return new ElevatedResult(false, $"UAC/start not confirmed within {config.UacWaitSeconds}s");
+    }
+
+    /// <summary>Suffix of a launch's cancellation marker: the helper aborts before starting the daemon once it appears.</summary>
+    internal const string CancelSuffix = ".cancel";
+
+    /// <summary>
+    /// Waits for the helper's result file. A cancellation surfaces as OperationCanceledException
+    /// (the chain contract), not as a failure of the helper — and marks the launch cancelled on
+    /// the way out: the helper may still be on its way (the UAC prompt was confirmed before the
+    /// cancel), and a daemon it starts after a stop already ran for would be left unwatched.
+    /// </summary>
+    internal static async Task<ElevatedResult?> WaitForResultAsync(
+        string resultPath, TimeSpan wait, CancellationToken ct, Action? onCancelled = null)
+    {
+        var deadline = DateTime.UtcNow + wait;
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                if (ReadResult(resultPath) is { } result)
+                {
+                    return result;
+                }
+
+                await Task.Delay(500, ct);
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            onCancelled?.Invoke();
+            throw;
+        }
+    }
+
+    /// <summary>Marks a launch cancelled; the helper aborts its start when it sees the marker.</summary>
+    internal static void MarkCancelled(string resultPath)
+    {
+        try
+        {
+            File.WriteAllText(resultPath + CancelSuffix, string.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // nothing to mark: the helper starts unimpeded and its outcome lands in the result file
+        }
     }
 
     /// <summary>
@@ -429,12 +492,14 @@ public sealed class ElevatedRunner(
         return path;
     }
 
-    /// <summary>Result files of earlier runs that nobody collected (a timed-out wait, a failed delete).</summary>
+    /// <summary>Result files and cancellation markers of earlier runs that nobody collected (a timed-out wait, a failed delete).</summary>
     private void SweepStaleResults()
     {
         try
         {
-            foreach (var file in Directory.EnumerateFiles(ElevatedHelperTrust.PinnedDirectory, "*.result"))
+            var leftovers = Directory.EnumerateFiles(ElevatedHelperTrust.PinnedDirectory, "*.result")
+                .Concat(Directory.EnumerateFiles(ElevatedHelperTrust.PinnedDirectory, "*" + CancelSuffix));
+            foreach (var file in leftovers)
             {
                 if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > StaleResultAge)
                 {

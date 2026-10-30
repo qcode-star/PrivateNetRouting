@@ -508,7 +508,7 @@ public class ElevatedHelperTests : IDisposable
     [Fact]
     public async Task AHelperStopOfADeadChainReportsOk()
     {
-        var socket = $@"\.\pipe\pnr-test-{Guid.NewGuid():N}";
+        var socket = $@"\\.\pipe\pnr-test-{Guid.NewGuid():N}";
         var resultFile = Path.Combine(PinnedDir, "elevated-stop-chain=0a1b2c3d.result");
         var code = await Task.Run(() => ElevatedChainCommands.Execute(
             ElevatedChainCommands.StopChain, resultFile, WriteTailscaleConfig(socket)));
@@ -546,6 +546,35 @@ public class ElevatedHelperTests : IDisposable
         var result = File.ReadAllText(resultFile);
         Assert.StartsWith("fail", result);
         Assert.Contains("still there", result);
+    }
+
+    // ----- A-16: a cancelled UAC wait must not leave a daemon that appears afterwards -----
+
+    [Fact]
+    public async Task ACancelledWaitMarksTheLaunchCancelled()
+    {
+        var resultPath = Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result");
+        using var cts = new CancellationTokenSource(100);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ElevatedRunner.WaitForResultAsync(
+                resultPath, TimeSpan.FromSeconds(10), cts.Token, () => ElevatedRunner.MarkCancelled(resultPath)));
+
+        Assert.True(File.Exists(resultPath + ElevatedRunner.CancelSuffix));
+    }
+
+    /// <summary>The helper checks the marker before doing anything else: a cancelled bring-up starts nothing.</summary>
+    [Fact]
+    public async Task AHelperWithACancelMarkerDoesNotStartTheDaemon()
+    {
+        var resultFile = Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result");
+        File.WriteAllText(resultFile + ElevatedRunner.CancelSuffix, string.Empty);
+
+        var code = await Task.Run(() => ElevatedChainCommands.Execute(
+            ElevatedChainCommands.StartDaemon, resultFile, WriteTailscaleConfig($@"\\.\pipe\pnr-test-{Guid.NewGuid():N}")));
+
+        Assert.Equal(0, code);
+        Assert.StartsWith("ok cancelled before the start", File.ReadAllText(resultFile));
     }
 
     private string WriteTailscaleConfig(string socket)
