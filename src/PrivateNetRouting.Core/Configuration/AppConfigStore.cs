@@ -2,6 +2,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Configuration;
 
@@ -242,51 +243,8 @@ public static class AppConfigStore
         }
     }
 
-    /// <summary>The file a write lands in: the final target of a symlink, the path itself otherwise.</summary>
-    internal static string ResolveWriteTarget(string path)
-    {
-        var full = Path.GetFullPath(path);
-        try
-        {
-            return new FileInfo(full).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? full;
-        }
-        catch (IOException)
-        {
-            return full; // a link loop or an unreadable reparse point: write the path itself
-        }
-    }
-
-    private static void WriteAtomicLocked(string path, string content)
-    {
-        var target = ResolveWriteTarget(path);
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        var temp = $"{target}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            File.WriteAllText(temp, content, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            if (File.Exists(target))
-            {
-                File.Replace(temp, target, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(temp, target);
-            }
-        }
-        catch
-        {
-            try
-            {
-                File.Delete(temp);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // the temp file is leftover garbage, not the config
-            }
-
-            throw;
-        }
-    }
+    private static void WriteAtomicLocked(string path, string content) =>
+        AtomicFile.Write(path, content);
 
     /// <summary>
     /// Reads the file for deserialization. A writer or a scanner may hold it for a moment (the

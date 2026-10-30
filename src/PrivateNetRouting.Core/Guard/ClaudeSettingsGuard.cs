@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Guard;
 
@@ -233,11 +234,8 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
         }
     }
 
-    private static void Write(string path, JsonObject root)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, root.ToJsonString(JsonOptions));
-    }
+    private static void Write(string path, JsonObject root) =>
+        AtomicFile.Write(path, root.ToJsonString(JsonOptions));
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 

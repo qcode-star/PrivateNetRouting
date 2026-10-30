@@ -1,4 +1,5 @@
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Guard;
 
@@ -138,8 +139,7 @@ public static class CodexEnvFile
         }
 
         var backup = ClaudeSettingsGuard.Backup(path);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, updated);
+        AtomicFile.Write(path, updated);
         ClaudeSettingsGuard.PruneBackups(path);
         return (true, backup);
     }

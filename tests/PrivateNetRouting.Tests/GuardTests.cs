@@ -2443,3 +2443,69 @@ public class GuardTests : IDisposable
         Directory.Delete(_tempDir, recursive: true);
     }
 }
+
+/// <summary>
+/// The settings writers swap their files in one step: a fresh file is created, an existing one
+/// is replaced whole (no truncated intermediate state), no temp file is left behind, and a BOM
+/// the file had is not silently dropped.
+/// </summary>
+public class AtomicFileTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"pnr-atomic-{Guid.NewGuid():N}");
+
+    public AtomicFileTests()
+    {
+        Directory.CreateDirectory(_dir);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    [Fact]
+    public void AFreshFileIsCreatedAndAnExistingOneIsReplacedWhole()
+    {
+        var path = Path.Combine(_dir, "settings.json");
+
+        AtomicFile.Write(path, "{\"a\":1}");
+        Assert.Equal("{\"a\":1}", File.ReadAllText(path));
+
+        AtomicFile.Write(path, "{\"a\":2}");
+        Assert.Equal("{\"a\":2}", File.ReadAllText(path));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public void AnExistingBomIsKept()
+    {
+        var path = Path.Combine(_dir, "with-bom.json");
+        File.WriteAllText(path, "{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        AtomicFile.Write(path, "{\"a\":1}");
+
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal([0xEF, 0xBB, 0xBF], bytes[..3]);
+        Assert.Equal("{\"a\":1}", File.ReadAllText(path, new UTF8Encoding(false)));
+
+        // a file without a BOM stays without one
+        AtomicFile.Write(path, "{\"a\":2}");
+        Assert.NotEqual(0xEF, File.ReadAllBytes(path)[0]);
+    }
+
+    [Fact]
+    public void AFileInAMissingDirectoryIsCreated()
+    {
+        var path = Path.Combine(_dir, "nested", "deeper", "config.toml");
+
+        AtomicFile.Write(path, "flag = true");
+
+        Assert.Equal("flag = true", File.ReadAllText(path));
+    }
+}

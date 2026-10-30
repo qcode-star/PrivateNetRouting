@@ -1,4 +1,5 @@
 using PrivateNetRouting.Core.Configuration;
+using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Guard;
 
@@ -92,8 +93,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
         if (written)
         {
             backup = ClaudeSettingsGuard.Backup(path);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, updated);
+            AtomicFile.Write(path, updated);
         }
 
         // after the new copy exists, so "at most three" counts it
