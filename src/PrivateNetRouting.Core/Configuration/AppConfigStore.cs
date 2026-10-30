@@ -277,7 +277,9 @@ public static class AppConfigStore
     /// the sections are replaced wholesale, so everything that holds the root AppConfig (the
     /// launchers, the guard, the updater) sees the fresh values; the watchdog section is copied
     /// into the existing object, because the idle stopper supervisor and the service hold that
-    /// very instance. The forwardProxy and chain sections are NOT replaced: the running proxy,
+    /// very instance, and the Claude/Codex sections are copied in place too — including the
+    /// nested Update instances the updater helpers captured at composition time. The
+    /// forwardProxy and chain sections are NOT replaced: the running proxy,
     /// the chain and every endpoint the launchers and guards derive (AppProxyEndpoint, the chain
     /// mode) stay one consistent snapshot until the application restarts. Returns true when the
     /// file holds different values for those two sections, i.e. a restart is needed to apply them.
@@ -296,8 +298,14 @@ public static class AppConfigStore
         target.PowerShellPath = fresh.PowerShellPath;
         target.Ui = fresh.Ui;
         target.Logging = fresh.Logging;
-        target.Claude = fresh.Claude;
-        target.Codex = fresh.Codex;
+        // the application sections are copied in place (like the watchdog one): the updater
+        // helpers captured the nested Update instances at composition time, and the chain card
+        // promises that only forwardProxy/chain need a restart — a replaced section object would
+        // leave those helpers reading the old values (A-08)
+        CopyProperties(fresh.Claude, target.Claude, nameof(ClaudeConfig.Update));
+        CopyProperties(fresh.Claude.Update, target.Claude.Update);
+        CopyProperties(fresh.Codex, target.Codex, nameof(CodexConfig.Update));
+        CopyProperties(fresh.Codex.Update, target.Codex.Update);
         target.Wsl = fresh.Wsl;
         target.Browser = fresh.Browser;
         target.Guard = fresh.Guard;
@@ -307,12 +315,16 @@ public static class AppConfigStore
     private static bool SectionDiffers<T>(T current, T fresh) =>
         JsonSerializer.Serialize(current, JsonOptions) != JsonSerializer.Serialize(fresh, JsonOptions);
 
-    /// <summary>Copies every public settable property of a flat section into an existing instance.</summary>
-    private static void CopyProperties<T>(T from, T to) where T : class
+    /// <summary>
+    /// Copies every public settable property of a section into an existing instance; the named
+    /// nested sections are skipped by the caller, which copies their values into the instances
+    /// its components already hold.
+    /// </summary>
+    private static void CopyProperties<T>(T from, T to, params string[] except) where T : class
     {
         foreach (var property in typeof(T).GetProperties())
         {
-            if (property.CanRead && property.CanWrite)
+            if (property.CanRead && property.CanWrite && !except.Contains(property.Name))
             {
                 property.SetValue(to, property.GetValue(from));
             }

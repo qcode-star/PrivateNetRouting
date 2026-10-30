@@ -297,6 +297,27 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ReloadAppliesTheUpdaterSectionsInPlaceForCapturedReferences()
+    {
+        var running = AppConfigStore.LoadOrCreate(_path);
+        var capturedClaudeUpdate = running.Claude.Update;
+        var capturedCodexUpdate = running.Codex.Update;
+        File.WriteAllText(_path, """
+            { "claude": { "update": { "chunkBytes": 1048576, "parallelChunks": 7 } },
+              "codex": { "update": { "updateTimeoutSeconds": 555 } } }
+            """);
+
+        var restartRequired = AppConfigStore.ReloadInto(running, _path);
+
+        Assert.False(restartRequired);
+        Assert.Same(capturedClaudeUpdate, running.Claude.Update); // the helpers hold this very instance
+        Assert.Same(capturedCodexUpdate, running.Codex.Update);
+        Assert.Equal(1048576, capturedClaudeUpdate.ChunkBytes);
+        Assert.Equal(7, capturedClaudeUpdate.ParallelChunks);
+        Assert.Equal(555, capturedCodexUpdate.UpdateTimeoutSeconds);
+    }
+
+    [Fact]
     public void ReloadOfAnUnchangedProxyAndChainNeedsNoRestart()
     {
         var running = AppConfigStore.LoadOrCreate(_path);
