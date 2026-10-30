@@ -53,6 +53,7 @@ public partial class UpdateWindow : Window
     private long _doneBytes;
     private long _totalBytes;
     private DateTimeOffset _lastProgressAt = DateTimeOffset.Now;
+    private DateTimeOffset _detailRefreshAt;
     private bool _stallWarned;
     private string? _detailKey;
     private object?[] _detailArgs = [];
@@ -404,6 +405,15 @@ public partial class UpdateWindow : Window
 
     private void UpdateDownloadDetail()
     {
+        // the line repaints about once a second: the bar moves as the data arrives, but the
+        // numbers (speed, ETA) stay readable instead of flickering at the report rate
+        var now = DateTimeOffset.Now;
+        if (now - _detailRefreshAt < TimeSpan.FromSeconds(1))
+        {
+            return;
+        }
+
+        _detailRefreshAt = now;
         double rate = 0;
         lock (_sampleGate)
         {

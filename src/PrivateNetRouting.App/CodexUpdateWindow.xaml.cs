@@ -44,6 +44,7 @@ public partial class CodexUpdateWindow : Window
     private string? _beforeVersion;
     private bool _terminal;
     private bool _installRegistered;
+    private DateTimeOffset _detailRefreshAt;
     private string? _detailKey;
     private object?[] _detailArgs = [];
     private string _detailDirect = "";
@@ -236,12 +237,20 @@ public partial class CodexUpdateWindow : Window
             if (p.TotalBytes > 0)
             {
                 SetProgress(100.0 * p.DoneBytes / p.TotalBytes);
-                SetDetailKey(
-                    "Update.Download.RunningFmt",
-                    FormattedRuns.Pad(ByteSize.Format(p.DoneBytes)),
-                    FormattedRuns.Pad(ByteSize.Format(p.TotalBytes)),
-                    FormattedRuns.Pad("—"),
-                    FormattedRuns.Pad("—"));
+
+                // the line repaints about once a second: the bar moves as the data arrives,
+                // but the numbers stay readable instead of flickering at the report rate
+                var now = DateTimeOffset.Now;
+                if (now - _detailRefreshAt >= TimeSpan.FromSeconds(1))
+                {
+                    _detailRefreshAt = now;
+                    SetDetailKey(
+                        "Update.Download.RunningFmt",
+                        FormattedRuns.Pad(ByteSize.Format(p.DoneBytes)),
+                        FormattedRuns.Pad(ByteSize.Format(p.TotalBytes)),
+                        FormattedRuns.Pad("—"),
+                        FormattedRuns.Pad("—"));
+                }
             }
         }
         else if (p.Phase == UpdatePhase.Install)
