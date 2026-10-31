@@ -140,6 +140,7 @@
     <s:String x:Key="BrowserProfile.Browse">Browse…</s:String>
     <s:String x:Key="BrowserProfile.FolderRequired">Specify the profile folder</s:String>
     <s:String x:Key="BrowserProfile.FolderIsFileFmt">This path is a file, not a folder: {0}</s:String>
+    <s:String x:Key="BrowserProfile.FolderIsBrowserDataFmt">This is the browser's own data folder (the everyday profile) — the profile files are never written into it. Choose another folder: {0}</s:String>
     <s:String x:Key="BrowserProfile.FolderNotEmptyFmt">The folder is not empty: {0}. The profile files will be written next to the existing ones. Continue?</s:String>
     <s:String x:Key="BrowserProfile.Executable">Browser executable</s:String>
     <s:String x:Key="BrowserProfile.ExeNone">(not found)</s:String>

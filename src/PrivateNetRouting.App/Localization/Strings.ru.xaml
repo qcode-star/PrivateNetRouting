@@ -140,6 +140,7 @@
     <s:String x:Key="BrowserProfile.Browse">Обзор…</s:String>
     <s:String x:Key="BrowserProfile.FolderRequired">Укажите папку профиля</s:String>
     <s:String x:Key="BrowserProfile.FolderIsFileFmt">По этому пути файл, а не папка: {0}</s:String>
+    <s:String x:Key="BrowserProfile.FolderIsBrowserDataFmt">Это папка данных самого браузера (повседневный профиль) — файлы профиля в неё не пишутся. Выберите другую папку: {0}</s:String>
     <s:String x:Key="BrowserProfile.FolderNotEmptyFmt">Папка не пуста: {0}. Файлы профиля лягут рядом с существующими. Продолжить?</s:String>
     <s:String x:Key="BrowserProfile.Executable">Исполняемый файл браузера</s:String>
     <s:String x:Key="BrowserProfile.ExeNone">(не найден)</s:String>

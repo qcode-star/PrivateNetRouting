@@ -193,7 +193,7 @@ public partial class BrowserProfileWindow : Window
             SetText(ExeWarning, exe is null ? Loc.S("BrowserProfile.ExeMissing") : null);
 
             ShortcutPathRow.Visibility = shortcutOn ? Visibility.Visible : Visibility.Collapsed;
-            var (folderBlocking, advisory) = InspectFolder(kind);
+            var (folderBlocking, advisory) = InspectFolder();
             var shortcutBlocking = shortcutOn ? InspectShortcut() : null;
             var blocking = folderBlocking ?? shortcutBlocking;
             SetText(StatusText, blocking ?? advisory);
@@ -236,9 +236,10 @@ public partial class BrowserProfileWindow : Window
 
     /// <summary>
     /// Blocking issue of the folder (the profile must not be created there) and an advisory one
-    /// (worth a confirmation: the profile files would land next to someone else's).
+    /// (worth a confirmation: the profile files would land next to someone else's). A browser's own
+    /// data directory is blocking — the everyday profile is never written into.
     /// </summary>
-    private (string? Blocking, string? Advisory) InspectFolder(BrowserKind kind)
+    private (string? Blocking, string? Advisory) InspectFolder()
     {
         var text = FolderBox.Text.Trim();
         if (text.Length == 0)
@@ -261,17 +262,14 @@ public partial class BrowserProfileWindow : Window
             return (Loc.F("BrowserProfile.FolderIsFileFmt", full), null);
         }
 
-        if (LooksLikeOurProfile(full, kind))
-        {
-            return (null, null);
-        }
-
         try
         {
-            if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any())
+            return BrowserProfileFiles.ClassifyFolder(full, _config.Browser.ProfileDir) switch
             {
-                return (null, Loc.F("BrowserProfile.FolderNotEmptyFmt", full));
-            }
+                BrowserProfileFolderKind.Ours or BrowserProfileFolderKind.Fresh => (null, null),
+                BrowserProfileFolderKind.BrowserUserData => (Loc.F("BrowserProfile.FolderIsBrowserDataFmt", full), null),
+                _ => (null, Loc.F("BrowserProfile.FolderNotEmptyFmt", full)),
+            };
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -279,20 +277,6 @@ public partial class BrowserProfileWindow : Window
             // reason to refuse it, not an exception out of a TextChanged handler
             return (ex.Message, null);
         }
-
-        return (null, null);
-    }
-
-    /// <summary>A profile we write ourselves (or the configured one): re-creating it asks nothing.</summary>
-    private bool LooksLikeOurProfile(string full, BrowserKind kind)
-    {
-        if (full.Equals(_config.Browser.ProfileDir, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return File.Exists(Path.Combine(full, BrowserProfileFiles.FirefoxUserJsName))
-            || Directory.Exists(Path.Combine(full, "Default"));
     }
 
     private void OnBrowseFolder(object sender, RoutedEventArgs e)
@@ -398,7 +382,7 @@ public partial class BrowserProfileWindow : Window
     {
         var kind = SelectedKind;
         var exe = ExecutableFor(kind);
-        var (blocking, advisory) = InspectFolder(kind);
+        var (blocking, advisory) = InspectFolder();
         if (exe is null || blocking is not null)
         {
             return; // the button is disabled in these states; a race is simply ignored

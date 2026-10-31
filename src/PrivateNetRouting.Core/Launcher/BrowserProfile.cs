@@ -65,6 +65,15 @@ public static class BrowserProfileFiles
 {
     public const string FirefoxUserJsName = "user.js";
 
+    /// <summary>
+    /// Sentinel of a folder this application created. Only a folder carrying it (or the configured
+    /// one) counts as the owner's profile — never one that merely looks like a browser's data.
+    /// </summary>
+    public const string MarkerFileName = ".pnr-profile";
+
+    /// <summary>The first line of the user.js this application writes (a profile of a build before the marker).</summary>
+    internal const string OwnUserJsHeader = "// Managed by PrivateNetRouting:";
+
     /// <summary>Firefox user preferences written by the browser itself (the Terms-of-Use seed goes here, not into user.js).</summary>
     public const string FirefoxPrefsJsName = "prefs.js";
 
@@ -91,6 +100,9 @@ public static class BrowserProfileFiles
     public static void Create(BrowserKind kind, string profileDir, string scheme, string proxyHost, int proxyPort, string noProxies)
     {
         Directory.CreateDirectory(profileDir);
+        // the sentinel first: a profile this application wrote is recognisable even when a later
+        // step fails (and a re-creation over it asks nothing)
+        File.WriteAllText(Path.Combine(profileDir, MarkerFileName), "PrivateNetRouting browser profile\n");
         if (kind == BrowserKind.Firefox)
         {
             File.WriteAllText(
@@ -102,6 +114,79 @@ public static class BrowserProfileFiles
 
         EnsureChromiumWebRtcPolicy(profileDir);
     }
+
+    /// <summary>
+    /// What a folder typed into the creation dialog is. The decision is made here, in Core, so the
+    /// dialog, the launcher and the tests share one rule: only a folder this application wrote (the
+    /// marker, the configured directory, or a Firefox user.js of an older build) may be re-created;
+    /// a real browser data directory is refused; any other non-empty folder is only an advisory.
+    /// </summary>
+    public static BrowserProfileFolderKind ClassifyFolder(string directory, string? configuredDirectory = null)
+    {
+        var full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(directory.Trim()));
+        if (!Directory.Exists(full))
+        {
+            return BrowserProfileFolderKind.Fresh;
+        }
+
+        if (File.Exists(Path.Combine(full, MarkerFileName)))
+        {
+            return BrowserProfileFolderKind.Ours;
+        }
+
+        if (IsOwnFirefoxProfile(full))
+        {
+            return BrowserProfileFolderKind.Ours;
+        }
+
+        // a real profile of the owner's browser comes before the configured path: a directory the
+        // old build recorded by mistake must not be written into again
+        if (LooksLikeBrowserUserData(full))
+        {
+            return BrowserProfileFolderKind.BrowserUserData;
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredDirectory)
+            && full.Equals(
+                Path.GetFullPath(Environment.ExpandEnvironmentVariables(configuredDirectory.Trim())),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return BrowserProfileFolderKind.Ours;
+        }
+
+        return Directory.EnumerateFileSystemEntries(full).Any()
+            ? BrowserProfileFolderKind.Foreign
+            : BrowserProfileFolderKind.Fresh;
+    }
+
+    /// <summary>A Firefox profile of a build before the marker: the managed user.js is ours.</summary>
+    private static bool IsOwnFirefoxProfile(string directory)
+    {
+        var userJs = Path.Combine(directory, FirefoxUserJsName);
+        if (!File.Exists(userJs))
+        {
+            return false;
+        }
+
+        try
+        {
+            return File.ReadLines(userJs).FirstOrDefault()?.StartsWith(OwnUserJsHeader, StringComparison.Ordinal) == true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The everyday data of either family: Chromium's user-data-dir (Local State at the root), a
+    /// Chromium profile folder (Default\Preferences), a Firefox profile (prefs.js/places.sqlite).
+    /// </summary>
+    private static bool LooksLikeBrowserUserData(string directory) =>
+        File.Exists(Path.Combine(directory, "Local State"))
+        || File.Exists(Path.Combine(directory, ChromiumPreferencesRelativePath))
+        || File.Exists(Path.Combine(directory, FirefoxPrefsJsName))
+        || File.Exists(Path.Combine(directory, "places.sqlite"));
 
     /// <summary>
     /// prefs.js seed for a profile that has never been started: the Terms-of-Use page is accepted
@@ -226,6 +311,22 @@ public static class BrowserProfileFiles
     }
 }
 
+/// <summary>What a folder chosen for the profile is (see <see cref="BrowserProfileFiles.ClassifyFolder"/>).</summary>
+public enum BrowserProfileFolderKind
+{
+    /// <summary>Absent or empty: a fresh profile can be created there.</summary>
+    Fresh,
+
+    /// <summary>A profile this application wrote (the marker, the managed user.js, or the configured path).</summary>
+    Ours,
+
+    /// <summary>A non-empty folder that is not a browser's data: the profile files would land next to someone else's.</summary>
+    Foreign,
+
+    /// <summary>A real browser data directory of the owner (everyday profile): never written into.</summary>
+    BrowserUserData,
+}
+
 /// <summary>
 /// The command line of a profile launch. One builder for the desktop shortcut and for the
 /// application's button: the shortcut carries the same profile and the same proxy, so the owner
@@ -241,6 +342,9 @@ public static class BrowserProfileCommandLine
         bool privateWindow = false,
         string? url = null)
     {
+        // a trailing separator would arrive at CommandLineToArgvW escaped ("C:\profiles\\"), and
+        // the in-app launch (ArgumentList) never carries one either
+        profileDir = Path.TrimEndingDirectorySeparator(profileDir);
         var args = new List<string>();
         if (kind == BrowserKind.Firefox)
         {
@@ -285,8 +389,46 @@ public static class BrowserProfileCommandLine
     public static string ToCommandLine(IEnumerable<string> args) =>
         string.Join(" ", args.Select(Quote));
 
-    private static string Quote(string value) =>
-        value.Contains(' ') || value.Contains('\t') ? "\"" + value + "\"" : value;
+    /// <summary>
+    /// One argument quoted the way CommandLineToArgvW reads it back: a value with spaces, tabs or
+    /// quotes is wrapped; inside, a run of backslashes before a quote is doubled (the quote is
+    /// escaped by the odd one) and a trailing run is doubled as well — the closing quote follows it.
+    /// </summary>
+    private static string Quote(string value)
+    {
+        if (value.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        if (!value.Any(c => c is ' ' or '\t' or '"'))
+        {
+            return value;
+        }
+
+        var quoted = new System.Text.StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var c in value)
+        {
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                quoted.Append('\\', backslashes * 2 + 1).Append('"');
+                backslashes = 0;
+                continue;
+            }
+
+            quoted.Append('\\', backslashes).Append(c);
+            backslashes = 0;
+        }
+
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
+    }
 }
 
 /// <summary>
@@ -399,10 +541,13 @@ public sealed class BrowserProfileService
         var endpoint = BrowserEgress.ResolveEndpoint(_config);
         var scheme = BrowserEgress.Scheme(_config);
         var host = endpoint.Address.ToString();
+        // the same bracketed URL the in-app launch uses: an IPv6 endpoint must not reach the
+        // shortcut as "http://::1:18081"
+        var proxyUrl = BrowserEgress.ProxyUrl(_config);
         var noProxies = BrowserBypassList.BuildFirefoxNoProxies(_config.BypassDomains, _config.DirectTlds);
         var chromiumBypass = BrowserBypassList.BuildChromium(_config.BypassDomains, _config.DirectTlds);
         BrowserProfileFiles.Create(request.Kind, profileDir, scheme, host, endpoint.Port, noProxies);
-        _log.Info($"browser: profile of {BrowserKindParser.DisplayName(request.Kind)} created in {profileDir} (egress {scheme}://{host}:{endpoint.Port})");
+        _log.Info($"browser: profile of {BrowserKindParser.DisplayName(request.Kind)} created in {profileDir} (egress {proxyUrl})");
 
         var shortcutPath = "";
         if (request.CreateDesktopShortcut)
@@ -410,7 +555,7 @@ public sealed class BrowserProfileService
             shortcutPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(
                 request.ShortcutPath.Trim().Length > 0 ? request.ShortcutPath.Trim() : ShortcutPathFor(request.Kind)));
             Directory.CreateDirectory(Path.GetDirectoryName(shortcutPath)!);
-            var arguments = BrowserProfileCommandLine.Build(request.Kind, profileDir, $"{scheme}://{host}:{endpoint.Port}", chromiumBypass);
+            var arguments = BrowserProfileCommandLine.Build(request.Kind, profileDir, proxyUrl, chromiumBypass);
             _shortcuts.CreateShortcut(
                 shortcutPath,
                 executable,

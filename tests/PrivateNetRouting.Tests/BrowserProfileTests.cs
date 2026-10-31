@@ -250,6 +250,101 @@ public class BrowserProfileTests : IDisposable
         Assert.Equal("-profile \"C:\\my profiles\\ff\" --new-instance", BrowserProfileCommandLine.ToCommandLine(args));
     }
 
+    [Fact]
+    public void ShortcutCommandLineEscapesATrailingBackslashAndEmbeddedQuotes()
+    {
+        // the closing quote follows the trailing backslash: it must be doubled, or CommandLineToArgvW
+        // reads it as an escaped quote and the argument swallows the next one
+        Assert.Equal("\"C:\\my profiles\\ch\\\\\"", BrowserProfileCommandLine.ToCommandLine([@"C:\my profiles\ch\"]));
+        Assert.Equal("\"a\\\"b\"", BrowserProfileCommandLine.ToCommandLine(["a\"b"]));
+        Assert.Equal("plain", BrowserProfileCommandLine.ToCommandLine(["plain"]));
+    }
+
+    [Fact]
+    public void TheProfileDirectoryNeverCarriesATrailingSeparator()
+    {
+        var args = BrowserProfileCommandLine.Build(BrowserKind.Chrome, @"C:\profiles\ch\", "http://127.0.0.1:18081", "bypass");
+
+        Assert.Contains(@"--user-data-dir=C:\profiles\ch", args);
+        Assert.DoesNotContain(args, arg => arg.EndsWith(@"ch\"));
+    }
+
+    // ----- the folder predicate: only our own profile or a fresh folder may be written -----
+
+    [Fact]
+    public void ARealChromiumUserDataDirIsRefused()
+    {
+        var dir = ProfileDir("chrome-user-data");
+        Directory.CreateDirectory(Path.Combine(dir, "Default"));
+        File.WriteAllText(Path.Combine(dir, "Local State"), "{}");
+        File.WriteAllText(Path.Combine(dir, "Default", "Preferences"), "{}");
+
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(dir));
+    }
+
+    [Fact]
+    public void AChromiumProfileFolderWithoutOurMarkerIsRefused()
+    {
+        var dir = ProfileDir("chrome-profile-folder");
+        Directory.CreateDirectory(Path.Combine(dir, "Default"));
+        File.WriteAllText(Path.Combine(dir, "Default", "Preferences"), "{}");
+
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(dir, dir));
+    }
+
+    [Fact]
+    public void ARealFirefoxProfileIsRefused()
+    {
+        var dir = ProfileDir("firefox-everyday");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "prefs.js"), "// Mozilla User Preferences\n");
+        File.WriteAllText(Path.Combine(dir, "places.sqlite"), "");
+
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(dir));
+    }
+
+    [Fact]
+    public void AProfileThisApplicationCreatedIsAccepted()
+    {
+        var chrome = ProfileDir("ours-chrome");
+        BrowserProfileFiles.Create(BrowserKind.Chrome, chrome, "http://", "127.0.0.1", 18081, "localhost");
+        Assert.True(File.Exists(Path.Combine(chrome, BrowserProfileFiles.MarkerFileName)));
+        Assert.Equal(BrowserProfileFolderKind.Ours, BrowserProfileFiles.ClassifyFolder(chrome)); // no config needed
+
+        var firefox = ProfileDir("ours-firefox");
+        BrowserProfileFiles.Create(BrowserKind.Firefox, firefox, "socks5", "127.0.0.1", 18083, "localhost");
+        Assert.Equal(BrowserProfileFolderKind.Ours, BrowserProfileFiles.ClassifyFolder(firefox));
+    }
+
+    [Fact]
+    public void AOlderFirefoxProfileOfOursIsRecognisedByItsManagedUserJs()
+    {
+        var dir = ProfileDir("old-firefox");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, BrowserProfileFiles.FirefoxUserJsName),
+            BrowserProfileFiles.RenderFirefoxUserJs("socks5", "127.0.0.1", 18083, "localhost"));
+        File.WriteAllText(Path.Combine(dir, "prefs.js"), "// Mozilla User Preferences\n");
+
+        Assert.Equal(BrowserProfileFolderKind.Ours, BrowserProfileFiles.ClassifyFolder(dir));
+    }
+
+    [Fact]
+    public void AnEmptyOrMissingFolderIsFreshAndAForeignOneIsOnlyAnAdvisory()
+    {
+        var empty = ProfileDir("empty-folder");
+        Directory.CreateDirectory(empty);
+        Assert.Equal(BrowserProfileFolderKind.Fresh, BrowserProfileFiles.ClassifyFolder(empty));
+        Assert.Equal(BrowserProfileFolderKind.Fresh, BrowserProfileFiles.ClassifyFolder(ProfileDir("missing-folder")));
+
+        var foreign = ProfileDir("foreign-folder");
+        Directory.CreateDirectory(foreign);
+        File.WriteAllText(Path.Combine(foreign, "notes.txt"), "x");
+        Assert.Equal(BrowserProfileFolderKind.Foreign, BrowserProfileFiles.ClassifyFolder(foreign));
+        // the configured path is ours when nothing marks it as a browser's own data
+        Assert.Equal(BrowserProfileFolderKind.Ours, BrowserProfileFiles.ClassifyFolder(foreign, foreign));
+    }
+
     // ----- the executable lookup -----
 
     [Fact]
@@ -316,6 +411,25 @@ public class BrowserProfileTests : IDisposable
         var js = File.ReadAllText(Path.Combine(dir, "user.js"));
         Assert.Contains(@"user_pref(""network.proxy.http_port"", 18081);", js);
         Assert.DoesNotContain(@"user_pref(""network.proxy.socks_port"", 18083);", js);
+    }
+
+    [Fact]
+    public void TheShortcutCarriesAnIpv6EgressBracketed()
+    {
+        var config = NewConfig();
+        config.Browser.Egress = "forward-proxy";
+        config.ForwardProxy.Listen = "[::1]:18081";
+        var service = CreateService(config, path => path == @"C:\fake\chrome.exe");
+
+        service.Create(new BrowserProfileRequest(
+            BrowserKind.Chrome,
+            ProfileDir("ipv6"),
+            @"C:\fake\chrome.exe",
+            CreateDesktopShortcut: true));
+
+        // "http://::1:18081" is not a URI: the shortcut needs the same bracketed form the button uses
+        var shortcut = Assert.Single(_shortcuts.Created);
+        Assert.Contains("--proxy-server=http://[::1]:18081", shortcut.Arguments);
     }
 
     [Fact]
