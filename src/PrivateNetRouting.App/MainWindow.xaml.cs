@@ -1865,7 +1865,10 @@ public partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_runtime.Logs.Directory}\"") { UseShellExecute = true });
+            // a trailing separator would escape the closing quote ("…\"") — the argument must
+            // not carry one
+            var directory = Path.TrimEndingDirectorySeparator(_runtime.Logs.Directory);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{directory}\"") { UseShellExecute = true });
         }
         catch (Exception ex)
         {
