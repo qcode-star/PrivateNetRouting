@@ -68,10 +68,18 @@ public sealed record ChainState(
 /// </summary>
 public sealed class ChainRaisedLinks
 {
+    private volatile bool _started;
     private volatile bool _daemon;
     private volatile bool _keeper;
     private volatile bool _node;
     private volatile bool _proxy;
+
+    /// <summary>
+    /// The bring-up got its turn — both operation locks are taken — and began its steps. A bring-up
+    /// cancelled before that (while another process's operation held the lock) touched nothing:
+    /// whatever chain exists then is not its own to extinguish.
+    /// </summary>
+    public bool Started => _started;
 
     public bool Daemon => _daemon;
 
@@ -83,6 +91,8 @@ public sealed class ChainRaisedLinks
     public bool Proxy => _proxy;
 
     public bool Any => Daemon || Keeper || Node || Proxy;
+
+    internal void MarkStarted() => _started = true;
 
     internal void MarkDaemon() => _daemon = true;
 
@@ -255,6 +265,7 @@ public sealed class ChainSupervisor(
         try
         {
             using var crossProcess = await AcquireOperationLockAsync(progress, ct).ConfigureAwait(false);
+            raised?.MarkStarted();
             await EnsureRunningCoreAsync(progress, raised, ct).ConfigureAwait(false);
         }
         finally

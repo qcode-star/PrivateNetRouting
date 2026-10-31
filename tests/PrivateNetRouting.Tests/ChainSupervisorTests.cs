@@ -95,6 +95,32 @@ public class ChainSupervisorTests : IDisposable
     }
 
     /// <summary>
+    /// A bring-up cancelled while another process's operation held the lock never started: the
+    /// record says so, and the card's cancel then brings down nothing — the chain that other
+    /// operation raised is not its own. One that got the lock is marked started.
+    /// </summary>
+    [Fact]
+    public async Task ABringUpCancelledWhileWaitingForTheLockIsNotStarted()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create();
+        var waiting = new ChainRaisedLinks();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => supervisor.EnsureRunningAsync(null, waiting, cts.Token));
+        holder.Dispose();
+
+        Assert.False(waiting.Started);
+        Assert.False(waiting.Any);
+        Assert.Empty(_calls);
+
+        var started = new ChainRaisedLinks();
+        await supervisor.EnsureRunningAsync(null, started, CancellationToken.None);
+        Assert.True(started.Started);
+    }
+
+    /// <summary>
     /// The proxy handover waits for another process's chain operation (a stop must not find the
     /// listener mid-handover) and runs as soon as that operation is over.
     /// </summary>

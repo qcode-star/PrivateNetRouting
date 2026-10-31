@@ -1052,7 +1052,8 @@ public partial class MainWindow : Window
     /// Chain bring-up, shared by the card button and the tray item: the card draws the steps
     /// (the window may be hidden), the tray enablement follows the same Can* flags. The card's
     /// Stop stays enabled meanwhile and cancels the bring-up (RunChainBusy brings down what got
-    /// raised before the cancellation).
+    /// raised before the cancellation; a bring-up cancelled while it still waited for another
+    /// process's chain operation raised nothing and stops nothing).
     /// </summary>
     public async Task ChainUpAsync()
     {
@@ -1061,7 +1062,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (await RunChainBusy(bringUp: true, ct => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), ct)))
+        var raised = new ChainRaisedLinks();
+        if (await RunChainBusy(
+            bringUp: true,
+            ct => _runtime.Chain.EnsureRunningAsync(new Progress<ChainStep>(OnChainStep), raised, ct),
+            raised))
         {
             _viewModel.SetCheckResult("Main.Chain.UpDone");
         }
@@ -1144,7 +1149,7 @@ public partial class MainWindow : Window
         _operationEnded = null;
     }
 
-    private async Task<bool> RunChainBusy(bool bringUp, Func<CancellationToken, Task> action)
+    private async Task<bool> RunChainBusy(bool bringUp, Func<CancellationToken, Task> action, ChainRaisedLinks? raised = null)
     {
         if (_chainBusy)
         {
@@ -1173,6 +1178,13 @@ public partial class MainWindow : Window
             _chainBusyCancellable = false;
             _viewModel.SetChainBusy(true, cancellable: false);
             _viewModel.SetCheckResult("Main.Chain.Cancelled");
+            if (raised is { Started: false })
+            {
+                // cancelled while another process's operation held the lock: this bring-up
+                // touched nothing, and the chain that operation raised is not ours to bring down
+                return false;
+            }
+
             try
             {
                 await _runtime.Chain.StopAsync(null, CancellationToken.None);

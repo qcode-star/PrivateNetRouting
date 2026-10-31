@@ -226,7 +226,9 @@ src/
                              # taken while an operation runs never overwrites the rail,
                              # during a bring-up (own or a launch's) Stop acts as cancel — the
                              # operation aborts, what got raised is extinguished (a launch
-                             # extinguishes only the chain it raised itself),
+                             # extinguishes only the chain it raised itself; a bring-up cancelled
+                             # while it still waited for another process's operation extinguishes
+                             # nothing),
                              # status rows: the PNR listeners with connection counters, the
                              # upstream row (tailscale listeners, or the socks5 egress with its
                              # reachability word), the config with its actions (open the
