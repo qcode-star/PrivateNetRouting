@@ -322,6 +322,43 @@ public class BrowserProfileTests : IDisposable
         Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(copied));
     }
 
+    /// <summary>
+    /// A Chromium profile of a build before the marker gains a Local State of its own after the
+    /// first launch: as the configured folder it is ours and re-created silently — unless it lies
+    /// inside a browser's standard everyday data location, where an older build may have recorded
+    /// the everyday profile by mistake.
+    /// </summary>
+    [Fact]
+    public void TheConfiguredFolderWinsOverBrowserDataSignsOutsideTheEverydayLocations()
+    {
+        var everydayRoot = ProfileDir("everyday-root");
+        var ours = ProfileDir("pre-marker-chrome");
+        Directory.CreateDirectory(Path.Combine(ours, "Default"));
+        File.WriteAllText(Path.Combine(ours, "Local State"), "{}");
+        File.WriteAllText(Path.Combine(ours, "Default", "Preferences"), "{}");
+        var everyday = Path.Combine(everydayRoot, "User Data");
+        Directory.CreateDirectory(Path.Combine(everyday, "Default"));
+        File.WriteAllText(Path.Combine(everyday, "Local State"), "{}");
+        File.WriteAllText(Path.Combine(everyday, "Default", "Preferences"), "{}");
+
+        Assert.Equal(BrowserProfileFolderKind.Ours, BrowserProfileFiles.ClassifyFolder(ours, ours, [everydayRoot]));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(ours, null, [everydayRoot]));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(everyday, everyday, [everydayRoot]));
+    }
+
+    [Fact]
+    public void TheEverydayLocationsCoverTheStandardChromeAndFirefoxData()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+        var roots = BrowserProfileFiles.EverydayBrowserDataRoots();
+
+        Assert.Contains(Path.Combine(local, "Google", "Chrome"), roots);
+        Assert.Contains(Path.Combine(local, "Microsoft", "Edge"), roots);
+        Assert.Contains(Path.Combine(roaming, "Mozilla", "Firefox"), roots);
+    }
+
     [Fact]
     public void ARealFirefoxProfileIsRefused()
     {

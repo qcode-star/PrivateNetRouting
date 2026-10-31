@@ -121,8 +121,16 @@ public static partial class BrowserProfileFiles
     /// dialog, the launcher and the tests share one rule: only a folder this application wrote (the
     /// marker, the configured directory, or a Firefox user.js of an older build) may be re-created;
     /// a real browser data directory is refused; any other non-empty folder is only an advisory.
+    /// The configured directory wins over the browser-data signs — a Chromium profile of a build
+    /// before the marker gains a Local State of its own after the first launch — except inside the
+    /// browsers' standard everyday data locations (<paramref name="everydayRoots"/>, by default
+    /// <see cref="EverydayBrowserDataRoots"/>): a path an older build recorded there by mistake is
+    /// never written into again.
     /// </summary>
-    public static BrowserProfileFolderKind ClassifyFolder(string directory, string? configuredDirectory = null)
+    public static BrowserProfileFolderKind ClassifyFolder(
+        string directory,
+        string? configuredDirectory = null,
+        IReadOnlyList<string>? everydayRoots = null)
     {
         var full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(directory.Trim()));
         if (!Directory.Exists(full))
@@ -140,24 +148,50 @@ public static partial class BrowserProfileFiles
             return BrowserProfileFolderKind.Ours;
         }
 
-        // a real profile of the owner's browser comes before the configured path: a directory the
-        // old build recorded by mistake must not be written into again
+        if (!string.IsNullOrWhiteSpace(configuredDirectory)
+            && full.Equals(
+                Path.GetFullPath(Environment.ExpandEnvironmentVariables(configuredDirectory.Trim())),
+                StringComparison.OrdinalIgnoreCase)
+            && !(everydayRoots ?? EverydayBrowserDataRoots()).Any(root => IsSameOrInside(full, root)))
+        {
+            return BrowserProfileFolderKind.Ours;
+        }
+
         if (LooksLikeBrowserUserData(full))
         {
             return BrowserProfileFolderKind.BrowserUserData;
         }
 
-        if (!string.IsNullOrWhiteSpace(configuredDirectory)
-            && full.Equals(
-                Path.GetFullPath(Environment.ExpandEnvironmentVariables(configuredDirectory.Trim())),
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return BrowserProfileFolderKind.Ours;
-        }
-
         return Directory.EnumerateFileSystemEntries(full).Any()
             ? BrowserProfileFolderKind.Foreign
             : BrowserProfileFolderKind.Fresh;
+    }
+
+    /// <summary>
+    /// The standard locations of the browsers' everyday data (the user-data dirs of the Chromium
+    /// family, the Firefox profiles): a configured path inside them is never trusted as ours.
+    /// </summary>
+    public static IReadOnlyList<string> EverydayBrowserDataRoots()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string[] localRoots =
+        [
+            @"Google\Chrome", @"Google\Chrome Beta", @"Google\Chrome Dev", @"Google\Chrome SxS",
+            @"Microsoft\Edge", @"Microsoft\Edge Beta", @"Microsoft\Edge Dev", @"Microsoft\Edge SxS",
+            "BraveSoftware", "Chromium", "Vivaldi", @"Yandex\YandexBrowser", @"Mozilla\Firefox",
+        ];
+        string[] roamingRoots = [@"Mozilla\Firefox", "Opera Software"];
+        return localRoots.Where(_ => local.Length > 0).Select(root => Path.Combine(local, root))
+            .Concat(roamingRoots.Where(_ => roaming.Length > 0).Select(root => Path.Combine(roaming, root)))
+            .ToList();
+    }
+
+    private static bool IsSameOrInside(string path, string root)
+    {
+        var trimmed = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        return path.Equals(trimmed, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(trimmed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>A Firefox profile of a build before the marker: the managed user.js is ours.</summary>
