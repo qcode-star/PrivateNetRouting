@@ -588,23 +588,28 @@ public sealed class GuardService(
         {
             if (enable)
             {
-                var endpoint = AppProxyEndpoint.EndPoint(config);
+                var server = SystemProxyServer(config);
                 var bypass = SystemProxyBypass.Build(config.BypassDomains, config.DirectTlds);
-                systemProxy.Enable($"{endpoint.Address}:{endpoint.Port}", bypass);
-                log.Info($"guard sysproxy on: {endpoint.Address}:{endpoint.Port} (bypass {config.BypassDomains.Count} domains + {config.DirectTlds.Count} TLDs)");
+                systemProxy.Enable(server, bypass);
+                log.Info($"guard sysproxy on: {server} (bypass {config.BypassDomains.Count} domains + {config.DirectTlds.Count} TLDs)");
             }
             else
             {
                 // the address this installation writes while on: the store uses it to tell its own
                 // leftover values from the user's
-                var endpoint = AppProxyEndpoint.EndPoint(config);
                 var before = systemProxy.Read();
-                systemProxy.Disable($"{endpoint.Address}:{endpoint.Port}");
+                systemProxy.Disable(SystemProxyServer(config));
                 log.Info(before is { Enabled: true, Ours: false }
                     ? $"guard sysproxy off: {before.Server} is not this application's proxy - left alone"
                     : "guard sysproxy off");
             }
         }, ct);
+
+    /// <summary>
+    /// The ProxyServer value of the applications proxy endpoint: host:port, an IPv6 host in
+    /// brackets (a bare "::1:18081" is not an address WinINET can split).
+    /// </summary>
+    internal static string SystemProxyServer(AppConfig config) => AppProxyEndpoint.EndPoint(config).ToString();
 
     /// <summary>
     /// Live checks: every probe name (guard.banProbes) must not resolve and must not answer a

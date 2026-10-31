@@ -2748,6 +2748,21 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task SystemProxyBracketsAnIpv6Endpoint()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "[::1]:18082";
+        var sysProxy = new FakeSystemProxyStore();
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), sysProxy, new FakeElevatedRunner(), out _);
+
+        await service.SetSystemProxyAsync(true, CancellationToken.None);
+        await service.SetSystemProxyAsync(false, CancellationToken.None);
+
+        Assert.Equal("[::1]:18082", sysProxy.EnabledWith?.Server);
+        Assert.Equal(["[::1]:18082"], sysProxy.DisabledWith);
+    }
+
+    [Fact]
     public async Task SystemProxyOnUsesListenerAddress()
     {
         var config = new AppConfig();
