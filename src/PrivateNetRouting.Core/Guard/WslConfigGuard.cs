@@ -925,11 +925,11 @@ public sealed class WslConfigGuard(
                 export HTTP_PROXY="http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT"
                 export HTTPS_PROXY="$HTTP_PROXY"
                 export ALL_PROXY="$HTTP_PROXY"
-                export NO_PROXY="{{noProxy}}"
+                export NO_PROXY={{BashQuote(noProxy)}}
                 _pnr_env="$CODEX_HOME/.env"
                 if [ -f "$_pnr_env" ] && ! grep -qxF "HTTP_PROXY=$HTTP_PROXY" "$_pnr_env"; then
                     _pnr_tmp=$(mktemp "${_pnr_env}.pnr-XXXXXX")
-                    awk -v _proxy="$HTTP_PROXY" -v _no_proxy='{{noProxy}}' '
+                    awk -v _proxy="$HTTP_PROXY" -v _no_proxy="$NO_PROXY" '
                         BEGIN { _h=0; _s=0; _a=0; _n=0 }
                         /^[ \t]*(export[ \t]+)?HTTP_PROXY[ \t]*=/  { print "HTTP_PROXY=" _proxy;  _h=1; next }
                         /^[ \t]*(export[ \t]+)?HTTPS_PROXY[ \t]*=/ { print "HTTPS_PROXY=" _proxy; _s=1; next }
@@ -1125,7 +1125,7 @@ public sealed class WslConfigGuard(
         # Logs to /var/log/wsl-boot.log; one failing script does not stop the rest unless
         # FAIL_FAST=true is set in the environment.
         LOG_FILE="/var/log/wsl-boot.log"
-        SCRIPT_DIR="{{startupDir}}"
+        SCRIPT_DIR={{BashQuote(startupDir)}}
         FAIL_FAST="${FAIL_FAST:-false}"
 
         export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

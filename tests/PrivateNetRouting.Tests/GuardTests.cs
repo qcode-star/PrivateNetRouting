@@ -1087,7 +1087,7 @@ public class GuardTests : IDisposable
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
 
     /// <summary>The NO_PROXY export of the Codex snippet as the probe reads it back (no bypass domains configured).</summary>
-    private const string CodexNoProxyLine = "    export NO_PROXY=\"localhost,127.0.0.1,.local\"\n";
+    private const string CodexNoProxyLine = "    export NO_PROXY='localhost,127.0.0.1,.local'\n";
 
     /// <summary>The boot layer as the sync leaves it: the marked runner, wsl.conf pointing at it.</summary>
     private static readonly string WslBootWired =
@@ -1520,7 +1520,7 @@ public class GuardTests : IDisposable
         // the address is the WSL NAT gateway recomputed at every shell start, not 127.0.0.1
         Assert.Contains("ip route show default", script);
         Assert.Contains("export HTTP_PROXY=\"http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT\"", script);
-        Assert.Contains("export NO_PROXY=\"localhost,127.0.0.1,.local,corp.example.com,.corp.example.com\"", script);
+        Assert.Contains("export NO_PROXY='localhost,127.0.0.1,.local,corp.example.com,.corp.example.com'", script);
         // the port line is what `pnr guard status` reads back
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", script);
         Assert.DoesNotContain("127.0.0.1:18082", script);
@@ -1531,6 +1531,19 @@ public class GuardTests : IDisposable
         Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
         Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
         Assert.Contains("cat \"$_pnr_tmp\" > \"$_pnr_env\"", script);
+    }
+
+    [Fact]
+    public void ConfigValuesInTheDistroScriptsAreShellQuoted()
+    {
+        // a bypass domain or a path with a quote or a dollar must stay one literal word
+        var script = WslConfigGuard.BuildCodexProxyEnvScript(18082, "localhost,we\"ird$x'd.example");
+        Assert.Contains("export NO_PROXY='localhost,we\"ird$x'\\''d.example'", script);
+        Assert.Contains("-v _no_proxy=\"$NO_PROXY\"", script); // the .env rewrite takes the exported value
+        Assert.DoesNotContain("_no_proxy='", script);
+
+        var runner = WslConfigGuard.BuildBootRunner("/etc/wsl.d/start'up");
+        Assert.Contains("SCRIPT_DIR='/etc/wsl.d/start'\\''up'", runner);
     }
 
     [Fact]
@@ -2256,7 +2269,7 @@ public class GuardTests : IDisposable
         var runnerFile = Encoding.UTF8.GetString(Convert.FromBase64String(runnerPayload));
         Assert.StartsWith("#!/bin/bash", runnerFile);
         Assert.Contains(WslConfigGuard.BootRunnerMarker, runnerFile);
-        Assert.Contains("SCRIPT_DIR=\"/etc/wsl.d/startup\"", runnerFile);
+        Assert.Contains("SCRIPT_DIR='/etc/wsl.d/startup'", runnerFile);
         Assert.Contains("for script in \"${files[@]}\"; do", runnerFile);
         Assert.Contains("*.pnr-bak-*|*.bak-*)", runnerFile); // backups in the startup dir never run
         Assert.DoesNotContain("\r", runnerFile); // the distro runs bash: LF only
