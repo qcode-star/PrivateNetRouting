@@ -320,6 +320,19 @@ public class DohResolverTests : IDisposable
         Assert.Equal(5000, inner.Calls); // the newest entry is still cached
     }
 
+    [Fact]
+    public async Task InvertedCacheTtlBoundsStillResolve()
+    {
+        var inner = new FakeResolver(_ => new ResolveResult(IPAddress.Parse("198.51.100.1"), "fake", 300));
+        var resolver = new CachingDnsResolver(inner, TimeSpan.FromSeconds(3600), TimeSpan.FromSeconds(60));
+
+        var first = await resolver.ResolveAsync("inverted.example", CancellationToken.None);
+        var second = await resolver.ResolveAsync("inverted.example", CancellationToken.None);
+
+        Assert.Equal(IPAddress.Parse("198.51.100.1"), first.Ip);
+        Assert.Equal(1, inner.Calls); // swapped bounds cache the answer instead of Math.Clamp throwing
+    }
+
     private sealed class FakeResolverAsync(Func<string, Task<ResolveResult>> resolve) : IDnsResolver
     {
         public Task<ResolveResult> ResolveAsync(string host, CancellationToken ct) => resolve(host);

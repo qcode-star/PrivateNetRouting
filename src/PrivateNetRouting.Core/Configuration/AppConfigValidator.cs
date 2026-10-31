@@ -151,6 +151,15 @@ public static class AppConfigValidator
         Positive("chain.healthWaitSeconds", config.Chain.HealthWaitSeconds, errors);
         Positive("forwardProxy.socksTimeoutSeconds", config.ForwardProxy.SocksTimeoutSeconds, errors);
         Positive("forwardProxy.headerTimeoutSeconds", config.ForwardProxy.HeaderTimeoutSeconds, errors);
+        Positive("forwardProxy.dohRefreshSeconds", config.ForwardProxy.DohRefreshSeconds, errors);
+        Positive("forwardProxy.dohProbeTimeoutSeconds", config.ForwardProxy.DohProbeTimeoutSeconds, errors);
+        Positive("forwardProxy.dohDeadCooldownSeconds", config.ForwardProxy.DohDeadCooldownSeconds, errors);
+        Positive("forwardProxy.cacheTtlMinSeconds", config.ForwardProxy.CacheTtlMinSeconds, errors);
+        if (config.ForwardProxy.CacheTtlMaxSeconds < config.ForwardProxy.CacheTtlMinSeconds)
+        {
+            errors.Add(
+                $"forwardProxy.cacheTtlMaxSeconds: {config.ForwardProxy.CacheTtlMaxSeconds} is below forwardProxy.cacheTtlMinSeconds ({config.ForwardProxy.CacheTtlMinSeconds})");
+        }
         Positive("logging.maxBytes", config.Logging.MaxBytes, errors);
         NotNegative("logging.keep", config.Logging.Keep, errors);
     }

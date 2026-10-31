@@ -70,9 +70,9 @@ public sealed partial class DohEndpointPool : IDisposable
         _source = source;
         _probe = prober ?? DefaultProbeAsync;
         _log = log;
-        _refreshInterval = refreshInterval;
-        _probeTimeout = probeTimeout;
-        _deadCooldown = deadCooldown;
+        _refreshInterval = FloorSecond(refreshInterval);
+        _probeTimeout = FloorSecond(probeTimeout);
+        _deadCooldown = FloorSecond(deadCooldown);
         _probeName = probeName;
         _time = time ?? TimeProvider.System;
         _pool = [.. seed];
@@ -185,6 +185,13 @@ public sealed partial class DohEndpointPool : IDisposable
 
         return delay < cap ? delay : cap;
     }
+
+    /// <summary>
+    /// A non-positive interval would spin the refresh loop, make Task.Delay throw (killing the
+    /// fire-and-forget loop silently) or expire a cooldown at once; the validator reports such
+    /// values, the pool still keeps itself sane.
+    /// </summary>
+    private static TimeSpan FloorSecond(TimeSpan value) => value < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : value;
 
     private async Task RefreshForeverAsync()
     {

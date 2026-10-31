@@ -52,6 +52,24 @@ public class DohEndpointPoolTests : IDisposable
     }
 
     [Fact]
+    public void NonPositiveIntervalsAreFlooredToOneSecond()
+    {
+        var log = new FileLog(_logPath);
+        _logs.Add(log);
+        using var pool = new DohEndpointPool(
+            new Socks5Client("127.0.0.1:1"),
+            [],
+            log,
+            refreshInterval: TimeSpan.Zero,
+            probeTimeout: TimeSpan.FromSeconds(-5),
+            deadCooldown: TimeSpan.Zero,
+            probeName: "example.com",
+            time: new ManualTimeProvider());
+
+        Assert.Equal(TimeSpan.FromSeconds(1), pool.NextRefreshDelay()); // a zero would spin the loop
+    }
+
+    [Fact]
     public async Task DeadEndpointCoolsDownAndReturns()
     {
         var time = new ManualTimeProvider();

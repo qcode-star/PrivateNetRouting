@@ -221,6 +221,27 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ValidationRejectsNonsenseDohTimings()
+    {
+        var timings = LoadError(
+            """{ "forwardProxy": { "dohRefreshSeconds": 0, "dohProbeTimeoutSeconds": -1, "dohDeadCooldownSeconds": 0, "cacheTtlMinSeconds": 0 } }""");
+
+        Assert.Contains("forwardProxy.dohRefreshSeconds", timings);
+        Assert.Contains("forwardProxy.dohProbeTimeoutSeconds", timings);
+        Assert.Contains("forwardProxy.dohDeadCooldownSeconds", timings);
+        Assert.Contains("forwardProxy.cacheTtlMinSeconds", timings);
+    }
+
+    [Fact]
+    public void ValidationRejectsInvertedCacheTtlBounds()
+    {
+        var message = LoadError("""{ "forwardProxy": { "cacheTtlMinSeconds": 600, "cacheTtlMaxSeconds": 60 } }""");
+
+        Assert.Contains("forwardProxy.cacheTtlMaxSeconds", message);
+        Assert.Contains("cacheTtlMinSeconds", message); // the error names both keys
+    }
+
+    [Fact]
     public void ValidationRejectsAChainSocketThatWouldChangeTheCommandLine()
     {
         var config = new AppConfig();

@@ -176,6 +176,10 @@ public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, Time
     private static readonly TimeSpan NegativeTtl = TimeSpan.FromSeconds(10);
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    // inverted bounds must not reach Math.Clamp (it throws and every resolution fails with a 502):
+    // a bad runtime value is swapped into a sane range instead of bricking the cache
+    private readonly TimeSpan _ttlMin = ttlMin <= ttlMax ? ttlMin : ttlMax;
+    private readonly TimeSpan _ttlMax = ttlMin <= ttlMax ? ttlMax : ttlMin;
     private readonly object _gate = new();
     private readonly Dictionary<string, (ResolveResult Result, DateTimeOffset Expires)> _cache = [];
     private readonly Dictionary<string, (DnsNegativeAnswerException Error, DateTimeOffset Expires)> _negative = [];
@@ -225,8 +229,8 @@ public sealed class CachingDnsResolver(IDnsResolver inner, TimeSpan ttlMin, Time
         {
             var resolved = await inner.ResolveAsync(host, CancellationToken.None).ConfigureAwait(false);
             var ttl = resolved.TtlSeconds is { } seconds
-                ? TimeSpan.FromSeconds(Math.Clamp(seconds, (long)ttlMin.TotalSeconds, (long)ttlMax.TotalSeconds))
-                : ttlMin;
+                ? TimeSpan.FromSeconds(Math.Clamp(seconds, (long)_ttlMin.TotalSeconds, (long)_ttlMax.TotalSeconds))
+                : _ttlMin;
             lock (_gate)
             {
                 var now = _time.GetUtcNow();
