@@ -818,6 +818,49 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         await proxy.StopAsync();
     }
 
+    /// <summary>
+    /// A start that fails after the listener is bound (a later step throws) rolls that listener
+    /// back: the port is free and the service restartable. The busy-port case above fails in the
+    /// bind itself, before anything is recorded — this one is what the rollback exists for.
+    /// </summary>
+    [Fact]
+    public async Task AFailedStartAfterTheBindStopsTheListenerItBound()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        var config = new ForwardProxyConfig
+        {
+            Listen = $"127.0.0.1:{port}",
+            BindWslGateway = false,
+            HeaderTimeoutSeconds = 5,
+            SocksTimeoutSeconds = 5,
+        };
+        var proxy = new ForwardProxyService(
+            config,
+            new FakeResolver(host => new ResolveResult(FixtureIp, "fake", 300)),
+            new Socks5Client("127.0.0.1:1"),
+            new ActivityMarker(Path.Combine(_tempDir, "marker-rollback"), TimeSpan.FromSeconds(60)),
+            new FileLog(Path.Combine(_tempDir, "proxy-rollback.log")))
+        {
+            TestAfterBind = () => throw new InvalidOperationException("a later start step failed"),
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => proxy.StartAsync(CancellationToken.None));
+
+        Assert.False(proxy.IsRunning);
+        Assert.Empty(proxy.ListenerEndpoints); // the bound listener did not survive the failed start
+        var rebound = new TcpListener(IPAddress.Loopback, port);
+        rebound.Start(); // the port was released, not left bound by the failed start
+        rebound.Stop();
+
+        proxy.TestAfterBind = null;
+        await proxy.StartAsync(CancellationToken.None);
+        Assert.True(proxy.IsRunning);
+        await proxy.StopAsync();
+    }
+
     private async Task<(ForwardProxyService Proxy, IPEndPoint Endpoint)> StartProxyAsync(
         string socksUpstream,
         Func<string, Core.Net.Dns.ResolveResult> resolve,

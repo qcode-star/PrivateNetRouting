@@ -103,6 +103,12 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
 
     public bool IsRunning => _running;
 
+    /// <summary>
+    /// Fault injection for the regression test of the start rollback: runs after the listener is
+    /// bound and before the start completes. Production leaves it null.
+    /// </summary>
+    internal Action? TestAfterBind { get; set; }
+
     public IReadOnlyList<string> ListenerEndpoints
     {
         get
@@ -156,6 +162,8 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
                 {
                     _wslBindTask = Task.Run(() => WslBindWaitAsync(listen.Port, token), CancellationToken.None);
                 }
+
+                TestAfterBind?.Invoke();
             }
             catch
             {
