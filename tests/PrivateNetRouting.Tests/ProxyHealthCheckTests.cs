@@ -46,6 +46,37 @@ public class ProxyHealthCheckTests
         Assert.Contains("CONNECT health.example:443 HTTP/1.1", await seenRequest.Task);
     }
 
+    /// <summary>An IPv6 health target rides the CONNECT in brackets: unbracketed, the proxy reads
+    /// the address's colons as a port separator and rejects the request.</summary>
+    [Fact]
+    public async Task BracketsAnIpv6Target()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var seenRequest = new TaskCompletionSource<string>();
+        _ = Task.Run(async () =>
+        {
+            using var session = await listener.AcceptTcpClientAsync();
+            var stream = session.GetStream();
+            var data = new MemoryStream();
+            var buffer = new byte[1024];
+            while (!Encoding.ASCII.GetString(data.ToArray()).Contains("\r\n\r\n"))
+            {
+                data.Write(buffer, 0, await stream.ReadAsync(buffer));
+            }
+
+            seenRequest.TrySetResult(Encoding.ASCII.GetString(data.ToArray()));
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection Established\r\n\r\n"));
+        });
+
+        var result = await ProxyHealthCheck.ProbeAsync(
+            "127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "2001:db8::1", 443, TimeSpan.FromSeconds(5));
+        listener.Stop();
+
+        Assert.True(result.Ok, result.Detail);
+        Assert.Contains("CONNECT [2001:db8::1]:443 HTTP/1.1", await seenRequest.Task);
+    }
+
     [Fact]
     public async Task ReportsANonSuccessStatusLine()
     {

@@ -52,7 +52,10 @@ public static class ProxyHealthCheck
             // traffic: otherwise every status poll would refresh the activity marker and the
             // idle stopper would never see an idle chain
             // HTTP/1.1 requires Host; a strict upstream proxy (the http mode) answers 400 without it
-            var request = $"CONNECT {targetHost}:{targetPort} HTTP/1.1\r\nHost: {targetHost}:{targetPort}\r\n" +
+            // the target is bracketed when it is an IPv6 literal (ConnectRequest.Authority) — an
+            // unbracketed one is rejected by the proxy as an ambiguous port
+            var target = ConnectRequest.Authority(targetHost, targetPort);
+            var request = $"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n" +
                           $"{ConnectRequestParser.ProbeHeaderName}: 1\r\n\r\n";
             await stream.WriteAsync(Encoding.ASCII.GetBytes(request), cts.Token);
 

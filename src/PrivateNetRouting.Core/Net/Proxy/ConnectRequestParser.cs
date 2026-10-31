@@ -8,7 +8,10 @@ namespace PrivateNetRouting.Core.Net.Proxy;
 public sealed record ConnectRequest(string Host, int Port, bool IsProbe = false)
 {
     /// <summary>Host:port as written in a CONNECT (an IPv6 literal in brackets).</summary>
-    public override string ToString() => Host.Contains(':') ? $"[{Host}]:{Port}" : $"{Host}:{Port}";
+    public override string ToString() => Authority(Host, Port);
+
+    /// <summary>host:port with an IPv6 literal in brackets — the only form a CONNECT line may carry.</summary>
+    public static string Authority(string host, int port) => host.Contains(':') ? $"[{host}]:{port}" : $"{host}:{port}";
 }
 
 /// <summary>
