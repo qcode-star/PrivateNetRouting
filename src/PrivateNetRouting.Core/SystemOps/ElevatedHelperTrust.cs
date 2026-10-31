@@ -126,10 +126,13 @@ public static partial class ElevatedHelperTrust
 
     /// <summary>
     /// Writes a result file so that the waiting parent never sees half of it: a temp file next to
-    /// it, then a rename over the target.
+    /// it, then a rename over the target. The pinned directory is created on the way: the asking
+    /// side creates it before the helper runs, and the helper reports through this file even when
+    /// that never happened (a cancelled wait, a fresh machine, the in-process path).
     /// </summary>
     public static void WriteResultFile(string path, string text)
     {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";
         File.WriteAllText(temp, text);
         File.Move(temp, path, overwrite: true);

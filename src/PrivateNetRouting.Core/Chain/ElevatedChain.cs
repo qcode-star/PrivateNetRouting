@@ -431,6 +431,7 @@ public sealed class ElevatedRunner(
     {
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(resultPath)!);
             File.WriteAllText(resultPath + CancelSuffix, string.Empty);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
