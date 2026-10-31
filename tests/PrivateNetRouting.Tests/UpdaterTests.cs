@@ -624,6 +624,26 @@ public class UpdaterTests : IDisposable
                     {
                         using var client = await listener.AcceptTcpClientAsync();
                         var stream = client.GetStream();
+                        // the request head is drained before answering: a response written over
+                        // an unread request races the client's own write and the connection can
+                        // die (RST) before the answer is ever received
+                        var buffer = new byte[8192];
+                        var received = 0;
+                        while (received < buffer.Length)
+                        {
+                            var read = await stream.ReadAsync(buffer.AsMemory(received));
+                            if (read == 0)
+                            {
+                                break;
+                            }
+
+                            received += read;
+                            if (Encoding.ASCII.GetString(buffer, 0, received).Contains("\r\n\r\n"))
+                            {
+                                break;
+                            }
+                        }
+
                         await stream.WriteAsync(Encoding.ASCII.GetBytes(
                             "HTTP/1.1 302 Found\r\nLocation: https://evil.example/x.msix\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
                     }
