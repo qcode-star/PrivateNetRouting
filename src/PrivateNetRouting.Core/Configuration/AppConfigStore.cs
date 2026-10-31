@@ -58,7 +58,19 @@ public static class AppConfigStore
         // saved first: the file keeps %VAR% as written (no user name leaks into it), the
         // in-memory copy is expanded afterwards
         var fresh = new AppConfig();
-        Save(fresh, path);
+        try
+        {
+            Save(fresh, path);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            // a lost create race: another process wrote the config first — its file is the truth
+            var winner = Deserialize(ReadShared(path), path);
+            AppConfigValidator.ThrowIfInvalid(winner, path);
+            winner.ExpandEnvironmentVariables(environment);
+            return winner;
+        }
+
         fresh.ExpandEnvironmentVariables(environment);
         return fresh;
     }
@@ -83,13 +95,30 @@ public static class AppConfigStore
         }
     }
 
+    /// <summary>
+    /// The async form of <see cref="Update"/> for the UI: the whole read-modify-write — its
+    /// sharing-violation retries included — runs on a worker thread, so a settings click never
+    /// blocks the UI thread for the retry time.
+    /// </summary>
+    public static Task UpdateAsync(Action<AppConfig> mutate, string? path = null, Action<string>? log = null) =>
+        Task.Run(() => Update(mutate, path, log));
+
     private static void UpdateLocked(Action<AppConfig> mutate, string path, Action<string> log)
     {
         if (!File.Exists(path))
         {
             var fresh = new AppConfig();
             mutate(fresh);
-            Save(fresh, path);
+            try
+            {
+                Save(fresh, path);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                // a lost create race: the winner's file is already there — mutate it instead
+                UpdateLocked(mutate, path, log);
+            }
+
             return;
         }
 

@@ -306,13 +306,13 @@ public partial class MainWindow : Window
         });
     }
 
-    private void OnToggleGuardsCard(object sender, RoutedEventArgs e)
+    private async void OnToggleGuardsCard(object sender, RoutedEventArgs e)
     {
         _guardsCardExpanded = !_guardsCardExpanded;
         ApplyCardLayout();
         try
         {
-            AppConfigStore.Update(config => config.Ui.GuardsCardExpanded = _guardsCardExpanded);
+            await AppConfigStore.UpdateAsync(config => config.Ui.GuardsCardExpanded = _guardsCardExpanded);
         }
         catch (Exception ex)
         {
@@ -330,9 +330,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        _ = PersistChainCardExpandedAsync(expanded);
+    }
+
+    /// <summary>The persisted write goes to a worker thread: the read retries never block the UI.</summary>
+    private async Task PersistChainCardExpandedAsync(bool expanded)
+    {
         try
         {
-            AppConfigStore.Update(config => config.Ui.ChainCardExpanded = expanded);
+            await AppConfigStore.UpdateAsync(config => config.Ui.ChainCardExpanded = expanded);
         }
         catch (Exception ex)
         {
@@ -1190,7 +1196,7 @@ public partial class MainWindow : Window
     /// stopper itself after every successful raise. The choice is persisted to the user config
     /// and applied to the shared config object, so the next raise sees it immediately.
     /// </summary>
-    private void OnAutoStartToggled(object sender, RoutedEventArgs e)
+    private async void OnAutoStartToggled(object sender, RoutedEventArgs e)
     {
         if (_autoStartSyncing)
         {
@@ -1200,7 +1206,7 @@ public partial class MainWindow : Window
         var enabled = AutoStartBox.IsChecked == true;
         try
         {
-            AppConfigStore.Update(config => config.Watchdog.AutoStart = enabled);
+            await AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = enabled);
             _runtime.Config.Watchdog.AutoStart = enabled;
         }
         catch (Exception ex)
@@ -2028,7 +2034,7 @@ public partial class MainWindow : Window
         return culture.TextInfo.ToTitleCase(culture.NativeName);
     }
 
-    private void OnLanguageSelected(object sender, SelectionChangedEventArgs e)
+    private async void OnLanguageSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_fillingLanguages || LanguageBox.SelectedItem is not LanguageOption selected)
         {
@@ -2041,7 +2047,7 @@ public partial class MainWindow : Window
         try
         {
             Loc.Apply(preference);
-            AppConfigStore.Update(config => config.Ui.Language = preference);
+            await AppConfigStore.UpdateAsync(config => config.Ui.Language = preference);
         }
         catch (Exception ex)
         {

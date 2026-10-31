@@ -347,6 +347,16 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateAsyncAppliesTheMutationOffTheCallerThread()
+    {
+        File.WriteAllText(_path, """{ "ui": { "language": "en" } }""");
+
+        await AppConfigStore.UpdateAsync(config => config.Ui.Language = "ru", _path);
+
+        Assert.Equal("ru", AppConfigStore.LoadOrCreate(_path).Ui.Language);
+    }
+
+    [Fact]
     public void TheDefaultConfigIsValid()
         => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));
 
