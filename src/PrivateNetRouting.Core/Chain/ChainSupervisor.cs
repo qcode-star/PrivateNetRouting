@@ -158,8 +158,7 @@ public sealed class ChainSupervisor(
     Func<CancellationToken, Task>? chainStopped = null,
     Func<CancellationToken, Task<bool>>? upstreamCheck = null,
     Func<CancellationToken, Task<string?>>? systemControlUrl = null,
-    bool proxyDisabled = false,
-    TimeSpan? crossProcessLockWait = null) : IChainSupervisor
+    bool proxyDisabled = false) : IChainSupervisor
 {
     /// <summary>The external-upstream modes (socks5, http): no daemon/keeper/node links exist there.</summary>
     private readonly bool _external = config.EffectiveMode is ChainMode.Socks5 or ChainMode.Http;
@@ -255,7 +254,7 @@ public sealed class ChainSupervisor(
         await _operation.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            using var crossProcess = await AcquireOperationLockAsync(ct).ConfigureAwait(false);
+            using var crossProcess = await AcquireOperationLockAsync(progress, ct).ConfigureAwait(false);
             await EnsureRunningCoreAsync(progress, raised, ct).ConfigureAwait(false);
         }
         finally
@@ -272,12 +271,14 @@ public sealed class ChainSupervisor(
 
     private async Task StopSerializedAsync(IProgress<ChainStep>? progress, CancellationToken ct, ChainRaisedLinks? raised = null)
     {
-        // a stop is never abandoned while it waits for its turn (the steps run to the end even on
-        // a cancelled token): the bring-up in flight is cancelled by its own owner and lets go
+        // a stop is never abandoned while it waits for this process's turn (the bring-up in flight
+        // is cancelled by its own owner and lets go); another process's operation may hold the
+        // cross-process lock for minutes (a login), so that wait honours the caller's token. Once
+        // the lock is taken the steps run to the end even on a cancelled token
         await _operation.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            using var crossProcess = await AcquireOperationLockAsync(CancellationToken.None).ConfigureAwait(false);
+            using var crossProcess = await AcquireOperationLockAsync(progress, ct).ConfigureAwait(false);
             await StopCoreAsync(progress, ct, raised).ConfigureAwait(false);
         }
         finally
@@ -286,45 +287,60 @@ public sealed class ChainSupervisor(
         }
     }
 
-    /// <summary>How long an operation waits for another process's chain operation (a bring-up may
-    /// hold the lock through a tailscale login wait — minutes).</summary>
-    private readonly TimeSpan _crossProcessLockWait = crossProcessLockWait ?? TimeSpan.FromMinutes(5);
+    /// <summary>The progress component of the wait for another process's operation (not a chain link).</summary>
+    public const string LockComponent = "Lock";
 
     /// <summary>
     /// The cross-process half of the operation exclusion (the GUI and `pnr chain up` have separate
     /// semaphores): a lock file next to the chain log — a directory both share — is held for the
-    /// whole operation. A bring-up may legitimately hold it for minutes, so the waiter waits
-    /// generously; a lock still held after that is logged and ignored — the operations are
-    /// idempotent, and a wedged lock must never keep the chain card from acting (the same
-    /// fails-open rule the watchdog spawn lock follows). The OS closes a dead holder's handle, so
-    /// the lock never outlives its process.
+    /// whole operation. A bring-up legitimately holds it through a UAC prompt and a tailscale login
+    /// wait (minutes), so a waiter waits as long as the holder runs — without a deadline, but on
+    /// the caller's token (the card's Stop, Ctrl+C), with a "Lock" step on the progress while it
+    /// waits. The OS closes a dead holder's handle, so the lock never outlives its process. Only a
+    /// sharing violation means "held": a lock file that cannot be opened at all (an ACL, a
+    /// read-only folder) is logged and the operation runs without it at once — the operations are
+    /// idempotent, and a broken lock must never keep the chain card from acting.
     /// </summary>
-    private async Task<IDisposable> AcquireOperationLockAsync(CancellationToken waitToken)
+    private async Task<IDisposable> AcquireOperationLockAsync(IProgress<ChainStep>? progress, CancellationToken waitToken)
     {
         var path = Path.Combine(
             Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
             "chain-operation.lock");
-        var deadline = DateTime.UtcNow + _crossProcessLockWait;
+        var waiting = false;
         while (true)
         {
-            FileStream? stream = null;
             try
             {
-                return stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+                var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+                if (waiting)
+                {
+                    log.Info("chain: the other process's chain operation is over, proceeding");
+                    Report(progress, LockComponent, ChainStepStatus.Done, "the other operation is over");
+                }
+
+                return stream;
+            }
+            catch (IOException ex) when (IsHeldByAnotherProcess(ex))
+            {
+                if (!waiting)
+                {
+                    waiting = true;
+                    log.Info($"chain: another process runs a chain operation ({path} is held), waiting for it");
+                    Report(progress, LockComponent, ChainStepStatus.Active, "waiting for another process's chain operation");
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                stream?.Dispose();
-                if (DateTime.UtcNow >= deadline)
-                {
-                    log.Warn($"chain: the operation lock {path} is still held after {_crossProcessLockWait.TotalMinutes:0} min, running without it: {ex.Message}");
-                    return NoOperationLock.Instance;
-                }
+                log.Warn($"chain: the operation lock {path} cannot be opened, running without it: {ex.Message}");
+                return NoOperationLock.Instance;
             }
 
             await Task.Delay(50, waitToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: another handle holds the file.</summary>
+    private static bool IsHeldByAnotherProcess(IOException ex) => (ex.HResult & 0xFFFF) is 32 or 33;
 
     private sealed class NoOperationLock : IDisposable
     {

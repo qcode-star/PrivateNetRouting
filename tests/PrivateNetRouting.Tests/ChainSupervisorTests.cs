@@ -27,8 +27,7 @@ public class ChainSupervisorTests : IDisposable
         Func<CancellationToken, Task<bool>>? upstream = null,
         Func<CancellationToken, Task<string?>>? systemControlUrl = null,
         string? loginServer = null,
-        bool proxyDisabled = false,
-        TimeSpan? crossProcessLockWait = null)
+        bool proxyDisabled = false)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
@@ -49,8 +48,7 @@ public class ChainSupervisorTests : IDisposable
             chainStopped,
             upstream,
             systemControlUrl,
-            proxyDisabled,
-            crossProcessLockWait);
+            proxyDisabled);
     }
 
     /// <summary>
@@ -62,7 +60,7 @@ public class ChainSupervisorTests : IDisposable
     {
         var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
         using var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
-        var supervisor = Create(crossProcessLockWait: TimeSpan.FromSeconds(10));
+        var supervisor = Create();
 
         var operation = supervisor.StopAsync(null, CancellationToken.None);
         await Task.Delay(300);
@@ -73,17 +71,47 @@ public class ChainSupervisorTests : IDisposable
         Assert.Contains("keeper.kill", _calls); // the stop ran to its steps, not just failed open
     }
 
-    /// <summary>A lock held past the deadline is logged and ignored — it must never wedge the chain card.</summary>
+    /// <summary>
+    /// A held lock is waited on with no deadline (a bring-up holds it through a login) but on the
+    /// caller's token — a stop included: the card's Stop and Ctrl+C end the wait, and a cancelled
+    /// waiter runs no step beside the holder's operation.
+    /// </summary>
     [Fact]
-    public async Task AStuckCrossProcessLockIsLoggedAndIgnored()
+    public async Task AWaitForAHeldCrossProcessLockEndsOnTheCallersToken()
     {
         var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
-        using var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
-        var supervisor = Create(crossProcessLockWait: TimeSpan.FromMilliseconds(150));
+        var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create();
+        var steps = new StepCollector();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
-        await supervisor.StopAsync(null, CancellationToken.None);
+        var stop = supervisor.StopAsync(steps, cts.Token);
+        await Task.Delay(1000);
+        holder.Dispose();
 
-        Assert.Contains("keeper.kill", _calls); // fail-open: the stop ran its steps
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stop);
+        Assert.Empty(_calls);
+        Assert.Contains(steps.Steps, step => step.Component == "Lock" && step.Status == ChainStepStatus.Active);
+    }
+
+    /// <summary>A lock file that cannot be opened at all is not "held": the operation runs without it at once.</summary>
+    [Fact]
+    public async Task AnUnopenableCrossProcessLockIsLoggedAndIgnoredAtOnce()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        Directory.CreateDirectory(lockPath); // a path that never opens as a file
+        try
+        {
+            var supervisor = Create();
+
+            await supervisor.StopAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Contains("keeper.kill", _calls); // fail-open: the stop ran its steps
+        }
+        finally
+        {
+            Directory.Delete(lockPath);
+        }
     }
 
     [Fact]

@@ -499,6 +499,21 @@ public partial class MainWindow : Window
         };
         _rail.SetStage(Array.IndexOf(_chainComponents, step.Component), stage);
 
+        // not a link: another process (`pnr chain up`, the idle stopper) runs a chain operation
+        // and this one waits for it — without a deadline, Stop cancels the wait
+        if (step.Component == ChainSupervisor.LockComponent)
+        {
+            if (step.Status == ChainStepStatus.Active)
+            {
+                ChainHint.Text = Loc.S("Main.Chain.Hint.Lock");
+                ChainHint.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ChainHint.Visibility = Visibility.Collapsed;
+            }
+        }
+
         if (step.Component == "Daemon")
         {
             if (step.Status == ChainStepStatus.Active && step.NeedsUac)
