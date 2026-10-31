@@ -6,6 +6,7 @@ using System.Windows.Media;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Diagnostics;
+using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.App;
@@ -145,7 +146,7 @@ public partial class DiagnosticsWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_runtime.Logs.Directory}\"") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", ProcessOps.ExplorerFolderArgument(_runtime.Logs.Directory)) { UseShellExecute = true });
         }
         catch (Exception ex)
         {

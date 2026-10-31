@@ -10,6 +10,14 @@ public class RuntimePiecesTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("pnr-runtime-").FullName;
 
+    /// <summary>A trailing separator would escape the closing quote of the explorer argument (both "Open logs" buttons share it).</summary>
+    [Fact]
+    public void ExplorerFolderArgumentCarriesNoTrailingSeparator()
+    {
+        Assert.Equal("\"C:\\logs\"", ProcessOps.ExplorerFolderArgument(@"C:\logs\"));
+        Assert.Equal("\"C:\\logs\"", ProcessOps.ExplorerFolderArgument(@"C:\logs"));
+    }
+
     [Fact]
     public void CmdArgumentsWrapQuotedCommandLineOnce()
     {

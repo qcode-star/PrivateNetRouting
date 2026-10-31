@@ -92,6 +92,14 @@ public static class WindowsPrivilege
 public static class ProcessOps
 {
     /// <summary>
+    /// The explorer.exe argument that opens <paramref name="directory"/>: quoted, without a
+    /// trailing separator — a backslash right before the closing quote would escape it, and
+    /// explorer would open the default folder instead.
+    /// </summary>
+    public static string ExplorerFolderArgument(string directory) =>
+        $"\"{Path.TrimEndingDirectorySeparator(directory)}\"";
+
+    /// <summary>
     /// Opens and keeps the OS handle of <paramref name="process"/>. Process.GetProcessById opens
     /// nothing — a PID alone pins nothing and is handed to another process soon after the original
     /// exits. With the handle held the PID cannot be reused, and every later call on this object

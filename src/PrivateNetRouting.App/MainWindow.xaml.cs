@@ -1957,10 +1957,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // a trailing separator would escape the closing quote ("…\"") — the argument must
-            // not carry one
-            var directory = Path.TrimEndingDirectorySeparator(_runtime.Logs.Directory);
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{directory}\"") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("explorer.exe", ProcessOps.ExplorerFolderArgument(_runtime.Logs.Directory)) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
