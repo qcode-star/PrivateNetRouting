@@ -4,7 +4,7 @@ using PrivateNetRouting.Core.SystemOps;
 
 namespace PrivateNetRouting.Core.Watchdog;
 
-/// <summary>Established connections on the port (either end): the listener side for a local proxy, the remote side when the endpoint belongs to an external process.</summary>
+/// <summary>Established connections on the LOCAL end of the port: a listener side — of the local proxy, or of the chain's egress. An external endpoint is matched by the remote end instead (<see cref="CountToRemote"/>).</summary>
 public interface IEstablishedConnectionCounter
 {
     int CountOnLocalPort(int port);
@@ -19,11 +19,14 @@ public interface IEstablishedConnectionCounter
 
 public sealed class TcpEstablishedConnectionCounter : IEstablishedConnectionCounter
 {
+    /// <summary>Only the LOCAL end: an unrelated outbound connection to a remote port of the same
+    /// number is not our listener and proves nothing. Windows reports a loopback client and its
+    /// listener as two rows — the listener-side row carries our port on the local end.</summary>
     public int CountOnLocalPort(int port) =>
         IPGlobalProperties.GetIPGlobalProperties()
             .GetActiveTcpConnections()
             .Count(connection => connection.State == TcpState.Established
-                && (connection.LocalEndPoint.Port == port || connection.RemoteEndPoint.Port == port));
+                && connection.LocalEndPoint.Port == port);
 
     public int CountToRemote(IPAddress address, int port) =>
         IPGlobalProperties.GetIPGlobalProperties()

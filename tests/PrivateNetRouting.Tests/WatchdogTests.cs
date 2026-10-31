@@ -562,6 +562,25 @@ public class WatchdogTests : IDisposable
         public int CountOnLocalPort(int port) => count;
     }
 
+    /// <summary>
+    /// The real TCP table: a loopback client and its listener are two rows, and only the
+    /// listener-side row carries our port on the local end — the count is 1, not 2. An unrelated
+    /// outbound connection to a remote port of the same number (the client's row) proves nothing.
+    /// </summary>
+    [Fact]
+    public async Task EstablishedConnectionsCountTheListeningSideOnly()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var client = new System.Net.Sockets.TcpClient();
+        await client.ConnectAsync(System.Net.IPAddress.Loopback, port);
+        var counter = new TcpEstablishedConnectionCounter();
+
+        Assert.Equal(1, counter.CountOnLocalPort(port));
+        listener.Stop();
+    }
+
     /// <summary>Connection counts per local port — the probe asks about the proxy and the egress separately.</summary>
     private sealed class PortsCounter(Dictionary<int, int> counts) : IEstablishedConnectionCounter
     {
