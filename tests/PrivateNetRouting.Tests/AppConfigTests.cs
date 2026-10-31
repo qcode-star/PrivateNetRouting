@@ -364,6 +364,74 @@ public class AppConfigTests : IDisposable
         Assert.Equal("ru", AppConfigStore.LoadOrCreate(_path).Ui.Language);
     }
 
+    /// <summary>
+    /// A quick on→off (or a run of language picks) must land on disk in the order it was asked
+    /// for: the asynchronous writes are queued, never raced on the thread pool and the write lock.
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsyncWritesInTheOrderTheyWereAskedFor()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        using var release = new ManualResetEventSlim();
+        var applied = new List<int>();
+        var first = AppConfigStore.UpdateAsync(
+            config =>
+            {
+                release.Wait(TimeSpan.FromSeconds(10)); // holds the write lock while the rest queue up
+                applied.Add(0);
+                config.Watchdog.CheckSeconds = 1000;
+            },
+            _path);
+        var rest = Enumerable.Range(1, 20)
+            .Select(i => AppConfigStore.UpdateAsync(
+                config =>
+                {
+                    lock (applied)
+                    {
+                        applied.Add(i);
+                    }
+
+                    config.Watchdog.CheckSeconds = 1000 + i;
+                },
+                _path))
+            .ToList();
+        await Task.Delay(200);
+        release.Set();
+
+        await Task.WhenAll(rest.Prepend(first));
+
+        Assert.Equal(Enumerable.Range(0, 21), applied);
+        Assert.Equal(1020, AppConfigStore.LoadOrCreate(_path).Watchdog.CheckSeconds);
+    }
+
+    /// <summary>Back-to-back writes from one caller (a quick on→off): the last asked-for value wins every time.</summary>
+    [Fact]
+    public async Task BackToBackUpdatesLeaveTheLastValue()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+        for (var round = 0; round < 100; round++)
+        {
+            var on = AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = true, _path);
+            var off = AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = false, _path);
+            await Task.WhenAll(on, off);
+
+            Assert.False(AppConfigStore.LoadOrCreate(_path).Watchdog.AutoStart, $"round {round}");
+        }
+    }
+
+    [Fact]
+    public async Task AFailedQueuedUpdateDoesNotStopTheNextOne()
+    {
+        AppConfigStore.LoadOrCreate(_path);
+
+        var failing = AppConfigStore.UpdateAsync(_ => throw new InvalidOperationException("broken mutation"), _path);
+        var next = AppConfigStore.UpdateAsync(config => config.Ui.Language = "ru", _path);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failing);
+        await next;
+        Assert.Equal("ru", AppConfigStore.LoadOrCreate(_path).Ui.Language);
+    }
+
     [Fact]
     public void TheDefaultConfigIsValid()
         => Assert.Empty(AppConfigValidator.Validate(new AppConfig()));

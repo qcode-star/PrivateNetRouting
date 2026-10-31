@@ -98,10 +98,28 @@ public static class AppConfigStore
     /// <summary>
     /// The async form of <see cref="Update"/> for the UI: the whole read-modify-write — its
     /// sharing-violation retries included — runs on a worker thread, so a settings click never
-    /// blocks the UI thread for the retry time.
+    /// blocks the UI thread for the retry time. The writes run in the order they were asked for:
+    /// a quick on→off of a checkbox must leave "off" on disk, and neither the thread pool nor the
+    /// write lock keeps an order of their own. A failed write does not stop the ones queued after it.
     /// </summary>
-    public static Task UpdateAsync(Action<AppConfig> mutate, string? path = null, Action<string>? log = null) =>
-        Task.Run(() => Update(mutate, path, log));
+    public static Task UpdateAsync(Action<AppConfig> mutate, string? path = null, Action<string>? log = null)
+    {
+        lock (QueueGate)
+        {
+            var next = _queueTail.ContinueWith(
+                _ => Update(mutate, path, log),
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default);
+            _queueTail = next;
+            return next;
+        }
+    }
+
+    private static readonly object QueueGate = new();
+
+    /// <summary>The last queued asynchronous write; the next one runs after it.</summary>
+    private static Task _queueTail = Task.CompletedTask;
 
     private static void UpdateLocked(Action<AppConfig> mutate, string path, Action<string> log)
     {

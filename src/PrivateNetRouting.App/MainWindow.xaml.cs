@@ -1290,11 +1290,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // the shared config follows the click at once, in click order: an await in between would let
+        // a quick on→off finish its writes out of order and leave the other value in memory
         var enabled = AutoStartBox.IsChecked == true;
+        _runtime.Config.Watchdog.AutoStart = enabled;
         try
         {
             await AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = enabled);
-            _runtime.Config.Watchdog.AutoStart = enabled;
         }
         catch (Exception ex)
         {
@@ -2118,6 +2120,9 @@ public partial class MainWindow : Window
         return culture.TextInfo.ToTitleCase(culture.NativeName);
     }
 
+    /// <summary>The number of the latest language pick: only its completion refills the selector.</summary>
+    private int _languageRequest;
+
     private async void OnLanguageSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_fillingLanguages || LanguageBox.SelectedItem is not LanguageOption selected)
@@ -2128,6 +2133,7 @@ public partial class MainWindow : Window
         // the options are the supported codes only, so a manual choice is always concrete:
         // the config stops saying "auto" from the moment the user picks a language
         var preference = selected.Code;
+        var request = ++_languageRequest;
         try
         {
             Loc.Apply(preference);
@@ -2137,6 +2143,11 @@ public partial class MainWindow : Window
         {
             _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
             return;
+        }
+
+        if (request != _languageRequest)
+        {
+            return; // a later pick is applied already: its own completion refills the list
         }
 
         FillLanguages(preference);
