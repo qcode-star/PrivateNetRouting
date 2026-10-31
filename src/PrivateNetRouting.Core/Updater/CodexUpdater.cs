@@ -143,6 +143,18 @@ public sealed class CodexUpdater(
         }
         catch (OperationCanceledException)
         {
+            // the update timed out: the Store keeps the item queued and would install it
+            // unattended — cancel it the same way the caller's cancellation does
+            try
+            {
+                handle.Cancel();
+                log.Warn("codex-updater: the timed-out Store update was canceled");
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"codex-updater: cannot cancel the Store item: {ex.Message}");
+            }
+
             throw new IOException(
                 $"the Store update did not finish within {config.Codex.Update.UpdateTimeoutSeconds} s — check the Store app");
         }

@@ -391,6 +391,23 @@ public class CodexTests : IDisposable
     }
 
     [Fact]
+    public async Task AStoreUpdateTimeoutCancelsTheQueuedItem()
+    {
+        var config = DefaultConfig();
+        config.Codex.Update.UpdateTimeoutSeconds = 1;
+        var appx = new FakeAppxSource();
+        var store = new FakeStoreSource();
+        var updater = new CodexUpdater(config, appx, store, new FakeProcessSource(), new FakeManifest(), _log);
+        appx.Installed = Package("26.1007.2314.0", "OpenAI.Codex_2p2nqsd0c76g0");
+        store.Handle.StatusSequence = [new StoreInstallStatus(StoreInstallPhase.Downloading, 100, 30, 30, null)]; // never completes
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => updater.UpdateAsync(null, CancellationToken.None));
+
+        Assert.Contains("did not finish within 1 s", ex.Message);
+        Assert.True(store.Handle.CancelCalled); // the queue does not keep downloading unattended
+    }
+
+    [Fact]
     public async Task StoreErrorFailsTheUpdate()
     {
         var (updater, store, appx, _, _) = CreateUpdater();
