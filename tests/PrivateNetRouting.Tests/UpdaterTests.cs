@@ -717,6 +717,27 @@ public class UpdaterTests : IDisposable
         Assert.Equal(0, ClaudeUpdater.DownloadSpaceNeeded(file, 1_000));
     }
 
+    /// <summary>
+    /// `pnr update` refuses a flag its mode would silently ignore: --check installs nothing (only
+    /// --url still means something there), --install-from never downloads.
+    /// </summary>
+    [Fact]
+    public void UpdateModesRefuseTheFlagsTheyWouldIgnore()
+    {
+        Assert.Null(UpdateOptions.Default.ConflictWith(checkOnly: true, installFrom: false));
+        Assert.Null(new UpdateOptions { ManualUrl = "https://example.invalid/x.msix" }.ConflictWith(checkOnly: true, installFrom: false));
+        Assert.Null(new UpdateOptions { Force = true, KeepFile = true, KeepRunning = true }.ConflictWith(checkOnly: false, installFrom: true));
+        Assert.Null(new UpdateOptions { DownloadOnly = true, ManualUrl = "https://example.invalid/x.msix" }.ConflictWith(false, false));
+
+        Assert.Equal(
+            "--check cannot be combined with --download-only, --force, --keep-file, --keep-running",
+            new UpdateOptions { DownloadOnly = true, Force = true, KeepFile = true, KeepRunning = true }.ConflictWith(true, false));
+        Assert.Equal("--check cannot be combined with --install-from", UpdateOptions.Default.ConflictWith(true, true));
+        Assert.Equal(
+            "--install-from cannot be combined with --download-only, --url",
+            new UpdateOptions { DownloadOnly = true, ManualUrl = "https://example.invalid/x.msix" }.ConflictWith(false, true));
+    }
+
     [Fact]
     public async Task DownloadKeepsActivityMarkerFresh()
     {

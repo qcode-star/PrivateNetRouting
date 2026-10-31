@@ -925,18 +925,11 @@ internal static class Program
             }
         }
 
-        if (checkOnly && installFrom is not null)
+        // a flag the chosen mode would silently ignore is an error: --check is read-only and must
+        // never turn into an installation, --install-from installs a given file and never downloads
+        if (options.ConflictWith(checkOnly, installFrom is not null) is { } conflict)
         {
-            // --check is read-only: it must never turn into an installation
-            Console.Error.WriteLine("--check cannot be combined with --install-from");
-            return 1;
-        }
-
-        if (options.DownloadOnly && installFrom is not null)
-        {
-            // the two flags contradict each other: one says "do not install", the other names a
-            // package to install — installing would close Claude against an explicit instruction
-            Console.Error.WriteLine("--download-only cannot be combined with --install-from");
+            Console.Error.WriteLine(conflict);
             return 1;
         }
 
@@ -1018,8 +1011,10 @@ internal static class Program
         switch (result.Outcome)
         {
             case UpdateOutcome.UpToDate:
+                // the feed may have been asked over a chain this run raised: a failed handover
+                // leaves it without a proxy — the same failure as after a download
                 Console.WriteLine($"up to date: {result.Installed?.Version}");
-                return 0;
+                return handedOver ? 0 : 1;
             case UpdateOutcome.Downloaded:
                 Console.WriteLine($"package ready: {result.PackageFile}");
                 Console.WriteLine("install: pnr update --install-from <file>");

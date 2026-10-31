@@ -36,6 +36,47 @@ public sealed record UpdateOptions
 
     /// <summary>Do not close Claude before install (the install will most likely fail).</summary>
     public bool KeepRunning { get; init; }
+
+    /// <summary>
+    /// Why a combination of the `pnr update` modes cannot run (null — it can): a flag the chosen
+    /// mode would silently ignore is refused instead. --check is read-only and installs nothing,
+    /// so the download/install flags mean nothing there (--url still names the package to check);
+    /// --install-from installs a given file, so it never downloads (--download-only, --url).
+    /// </summary>
+    public string? ConflictWith(bool checkOnly, bool installFrom)
+    {
+        var ignored = new List<string>();
+        if (checkOnly)
+        {
+            if (installFrom)
+            {
+                ignored.Add("--install-from");
+            }
+
+            AddIf(DownloadOnly, "--download-only");
+            AddIf(Force, "--force");
+            AddIf(KeepFile, "--keep-file");
+            AddIf(KeepRunning, "--keep-running");
+            return ignored.Count > 0 ? $"--check cannot be combined with {string.Join(", ", ignored)}" : null;
+        }
+
+        if (installFrom)
+        {
+            AddIf(DownloadOnly, "--download-only");
+            AddIf(ManualUrl is not null, "--url");
+            return ignored.Count > 0 ? $"--install-from cannot be combined with {string.Join(", ", ignored)}" : null;
+        }
+
+        return null;
+
+        void AddIf(bool set, string flag)
+        {
+            if (set)
+            {
+                ignored.Add(flag);
+            }
+        }
+    }
 }
 
 /// <summary>Version check: installed and offered, without the chain and without UAC.</summary>
