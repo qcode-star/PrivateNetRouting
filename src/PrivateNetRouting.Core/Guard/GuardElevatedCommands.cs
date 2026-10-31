@@ -124,35 +124,41 @@ public static class GuardElevatedCommands
         }
         else
         {
-            // a hosts file the block cannot be cut out of (a begin marker without its end) is
-            // refused, but that must not keep the other layers in place: they are removed anyway
-            // and the hosts failure is reported afterwards
-            IOException? hostsFailure = null;
-            try
+            // every layer is removed independently: a hosts file the block cannot be cut out of (a
+            // begin marker without its end) or a failing NRPT/firewall cmdlet must not keep the
+            // other layers in place — they are removed anyway and the failures are reported afterwards
+            var removed = new List<string>();
+            var failures = new List<(string Layer, Exception Error)>();
+            RemoveLayer("hosts block", () => HostsFileBlock.Remove(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker));
+            RemoveLayer("NRPT rule", () => ops.RemoveNrptAsync(CancellationToken.None).GetAwaiter().GetResult());
+            RemoveLayer("firewall rules", () => ops.RemoveFirewallAsync(CancellationToken.None).GetAwaiter().GetResult());
+            FlushTolerantly(ops, log);
+            if (failures.Count > 0)
             {
-                HostsFileBlock.Remove(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker);
-            }
-            catch (IOException ex)
-            {
-                hostsFailure = ex;
-                log.Error($"elevated ban off: hosts block left in place: {ex.Message}");
+                var done = removed.Count > 0 ? string.Join(" and ", removed) + " removed" : "nothing removed";
+                var left = string.Join("; ", failures.Select(failure => $"the {failure.Layer} was NOT removed: {failure.Error.Message}"));
+                throw new BanPartiallyRemovedException($"{done}; {left}", failures[0].Error);
             }
 
-            ops.RemoveNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ops.RemoveFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
-            FlushTolerantly(ops, log);
-            if (hostsFailure is not null)
+            void RemoveLayer(string layer, Action remove)
             {
-                throw new BanPartiallyRemovedException(
-                    $"NRPT rule and firewall rules removed; the hosts block was NOT removed: {hostsFailure.Message}",
-                    hostsFailure);
+                try
+                {
+                    remove();
+                    removed.Add(layer);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add((layer, ex));
+                    log.Error($"elevated ban off: {layer} left in place: {ex.Message}");
+                }
             }
 
             return "ban removed: hosts block, NRPT rule, firewall rules; DNS cache flushed";
         }
     }
 
-    /// <summary>The ban removal reached every layer it could, but the hosts block stayed in place.</summary>
+    /// <summary>The ban removal reached every layer it could, but at least one of them stayed in place.</summary>
     internal sealed class BanPartiallyRemovedException(string message, Exception inner) : IOException(message, inner);
 
     /// <summary>
@@ -173,8 +179,8 @@ public static class GuardElevatedCommands
 
     /// <summary>
     /// The combined action of the collapsed guards card: the three ban layers and the managed
-    /// policy in one elevation — "enable/disable all" costs one UAC prompt. On disable a hosts
-    /// block that could not be removed does not keep the policy: it is removed too, and the
+    /// policy in one elevation — "enable/disable all" costs one UAC prompt. On disable a ban
+    /// layer that could not be removed does not keep the policy: it is removed too, and the
     /// failure is reported after it.
     /// </summary>
     internal static string ApplyAll(AppConfig config, FileLog log, IBanSystemOps ops, IEgressPolicyStore policy, bool enable)

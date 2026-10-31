@@ -37,6 +37,9 @@ internal sealed class FakeBanSystemOps : IBanSystemOps
 
     public List<string> Calls { get; } = [];
 
+    /// <summary>Calls (by their name in Calls) that throw after being recorded.</summary>
+    public HashSet<string> Failing { get; } = [];
+
     public Task<BanLayersState> GetLayersStateAsync(CancellationToken ct)
     {
         Calls.Add("status");
@@ -50,32 +53,36 @@ internal sealed class FakeBanSystemOps : IBanSystemOps
 
     public Task ApplyNrptAsync(CancellationToken ct)
     {
-        Calls.Add("nrpt-on");
-        return Task.CompletedTask;
+        return Record("nrpt-on");
     }
 
     public Task RemoveNrptAsync(CancellationToken ct)
     {
-        Calls.Add("nrpt-off");
-        return Task.CompletedTask;
+        return Record("nrpt-off");
     }
 
     public Task ApplyFirewallAsync(CancellationToken ct)
     {
-        Calls.Add("fw-on");
-        return Task.CompletedTask;
+        return Record("fw-on");
     }
 
     public Task RemoveFirewallAsync(CancellationToken ct)
     {
-        Calls.Add("fw-off");
-        return Task.CompletedTask;
+        return Record("fw-off");
     }
 
     public Task FlushDnsCacheAsync(CancellationToken ct)
     {
         Calls.Add("flush");
         return Task.CompletedTask;
+    }
+
+    private Task Record(string call)
+    {
+        Calls.Add(call);
+        return Failing.Contains(call)
+            ? Task.FromException(new InvalidOperationException($"{call} failed"))
+            : Task.CompletedTask;
     }
 }
 
@@ -3318,6 +3325,30 @@ public class GuardTests : IDisposable
         Assert.Contains("egressProxyUrl and disableWslSessions removed", all.Message);
         Assert.Contains("hosts block was NOT removed", all.Message);
         Assert.Equal(hosts, File.ReadAllText(config.Guard.HostsFile));
+    }
+
+    [Fact]
+    public void ElevatedBanOffWithAFailingNrptRemovalStillRemovesTheFirewallAndThePolicy()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-nrpt-fail");
+        File.WriteAllText(config.Guard.HostsFile, $"127.0.0.1 localhost\r\n{config.Guard.HostsBeginMarker}\r\n0.0.0.0 a.example\r\n{config.Guard.HostsEndMarker}\r\n");
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        using var log = new FileLog(Path.Combine(_tempDir, "elev-nrpt-fail.log"));
+
+        var ops = new FakeBanSystemOps { Failing = { "nrpt-off" } };
+        var ban = Assert.ThrowsAny<IOException>(() => GuardElevatedCommands.ApplyBanLayers(config, log, ops, enable: false));
+        Assert.Equal(["nrpt-off", "fw-off", "flush"], ops.Calls);
+        Assert.Contains("hosts block and firewall rules removed", ban.Message);
+        Assert.Contains("the NRPT rule was NOT removed: nrpt-off failed", ban.Message);
+        Assert.DoesNotContain(config.Guard.HostsBeginMarker, File.ReadAllText(config.Guard.HostsFile));
+
+        var allOps = new FakeBanSystemOps { Failing = { "nrpt-off" } };
+        var policy = new FakeEgressPolicyStore();
+        var all = Assert.ThrowsAny<IOException>(() => GuardElevatedCommands.ApplyAll(config, log, allOps, policy, enable: false));
+        Assert.Equal(["nrpt-off", "fw-off", "flush"], allOps.Calls);
+        Assert.True(policy.Removed);
+        Assert.Contains("the NRPT rule was NOT removed", all.Message);
     }
 
     /// <summary>The combined action: ban layers first, then the policy — one helper run, one UAC.</summary>
