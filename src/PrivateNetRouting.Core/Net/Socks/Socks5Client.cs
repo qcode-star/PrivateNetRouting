@@ -150,6 +150,13 @@ public sealed class Socks5Client
 
             var header = new byte[4]; // VER REP RSV ATYP
             await ReadExactAsync(stream, header, cts.Token);
+            if (header[0] != 0x05 || header[2] != 0x00)
+            {
+                // a wrong version or a non-zero reserve is not a SOCKS5 reply: the stream is
+                // desynchronised, dialing on would read tunnel bytes as protocol ones
+                throw new IOException($"socks5: malformed reply (ver={header[0]}, rsv={header[2]})");
+            }
+
             if (header[1] != 0x00)
             {
                 throw new IOException($"socks5: connect rejected (rep={header[1]})");

@@ -204,6 +204,44 @@ public class Socks5ClientTests
         _ = new Socks5Client("127.0.0.1:1080", "alice", "s3cret"); // both — fine
     }
 
+    [Theory]
+    [InlineData(new byte[] { 4, 0, 0, 1, 0, 0, 0, 0, 0, 0 })] // wrong VER
+    [InlineData(new byte[] { 5, 0, 1, 1, 0, 0, 0, 0, 0, 0 })] // non-zero RSV
+    public async Task RejectsAMalformedReplyHeader(byte[] reply)
+    {
+        var upstream = await StartScriptedUpstreamAsync(reply);
+        var client = new Socks5Client(upstream);
+
+        var ex = await Assert.ThrowsAsync<IOException>(() =>
+            client.ConnectAsync(IPAddress.Parse("198.51.100.3"), 443, TimeSpan.FromSeconds(5), CancellationToken.None));
+        Assert.Contains("malformed reply", ex.Message);
+    }
+
+    /// <summary>A one-shot upstream: handshake, read the ATYP=1 CONNECT, send the canned reply.</summary>
+    private static async Task<IPEndPoint> StartScriptedUpstreamAsync(byte[] connectReply)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var endpoint = (IPEndPoint)listener.LocalEndpoint;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var session = await listener.AcceptTcpClientAsync();
+                var stream = session.GetStream();
+                await ReadExactAsync(stream, new byte[3]); // the greeting
+                await stream.WriteAsync(new byte[] { 5, 0 });
+                await ReadExactAsync(stream, new byte[10]); // the CONNECT request
+                await stream.WriteAsync(connectReply);
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        });
+        return endpoint;
+    }
+
     [Fact]
     public async Task ThrowsOnTimeout()
     {
