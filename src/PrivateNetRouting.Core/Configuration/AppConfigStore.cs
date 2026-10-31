@@ -329,13 +329,15 @@ public static class AppConfigStore
     /// forwardProxy and chain sections are NOT replaced: the running proxy,
     /// the chain and every endpoint the launchers and guards derive (AppProxyEndpoint, the chain
     /// mode) stay one consistent snapshot until the application restarts. Returns true when the
-    /// file holds different values for those two sections, i.e. a restart is needed to apply them.
+    /// file holds different values for those two sections, or for a value the runtime composition
+    /// captured (<see cref="CapturedAtComposition"/>), i.e. a restart is needed to apply them.
     /// </summary>
     public static bool ReloadInto(AppConfig target, string? path = null)
     {
         var fresh = LoadOrCreate(path);
         var restartRequired = SectionDiffers(target.ForwardProxy, fresh.ForwardProxy)
-            || SectionDiffers(target.Chain, fresh.Chain);
+            || SectionDiffers(target.Chain, fresh.Chain)
+            || SectionDiffers(CapturedAtComposition(target), CapturedAtComposition(fresh));
         CopyProperties(fresh.Watchdog, target.Watchdog);
         target.BypassDomains = fresh.BypassDomains;
         target.DirectTlds = fresh.DirectTlds;
@@ -358,6 +360,26 @@ public static class AppConfigStore
         target.Guard = fresh.Guard;
         return restartRequired;
     }
+
+    /// <summary>
+    /// The values ProxyRuntime.FromConfig hands to its components as copies: the log files (the
+    /// directory, the level and the rotation limits), the PowerShell runners, the process markers
+    /// of both applications (the alias path, the package names, the Codex process name) and the
+    /// application switches and the distro list of the WSL stopper. A reload copies them into the
+    /// config, but the running components keep the old ones until the application restarts.
+    /// </summary>
+    private static object CapturedAtComposition(AppConfig config) => new
+    {
+        config.Logging,
+        config.PowerShellPath,
+        ClaudeEnabled = config.Claude.Enabled,
+        config.Claude.AliasPath,
+        ClaudePackageName = config.Claude.Update.PackageName,
+        CodexEnabled = config.Codex.Enabled,
+        CodexPackageName = config.Codex.PackageName,
+        config.Codex.ProcessName,
+        Distros = config.Wsl.Distros.Select(distro => distro.Name).ToList(),
+    };
 
     private static bool SectionDiffers<T>(T current, T fresh) =>
         JsonSerializer.Serialize(current, JsonOptions) != JsonSerializer.Serialize(fresh, JsonOptions);

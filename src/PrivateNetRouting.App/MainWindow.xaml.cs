@@ -1346,7 +1346,7 @@ public partial class MainWindow : Window
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);
-            _viewModel.SetCheckResult(_runtime.ProxyConfigNeedsRestart
+            _viewModel.SetCheckResult(_runtime.ConfigNeedsRestart
                 ? "Main.Config.Reloaded.RestartHint"
                 : "Main.Config.Reloaded");
         }

@@ -346,6 +346,25 @@ public class AppConfigTests : IDisposable
         Assert.Equal(555, capturedCodexUpdate.UpdateTimeoutSeconds);
     }
 
+    /// <summary>
+    /// The composition hands some values to its components as copies (the log files, the
+    /// PowerShell runners, the application markers, the WSL distro list): a reload that changes
+    /// them asks for a restart instead of claiming they apply.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "logging": { "level": "debug" } }""")]
+    [InlineData("""{ "powerShellPath": "C:\\Tools\\pwsh.exe" }""")]
+    [InlineData("""{ "claude": { "aliasPath": "C:\\Tools\\claude.exe" } }""")]
+    [InlineData("""{ "codex": { "processName": "codex-renamed" } }""")]
+    [InlineData("""{ "wsl": { "distros": [ { "name": "Sample", "user": "user" } ] } }""")]
+    public void ReloadOfAValueCapturedAtCompositionNeedsARestart(string json)
+    {
+        var running = AppConfigStore.LoadOrCreate(_path);
+        File.WriteAllText(_path, json);
+
+        Assert.True(AppConfigStore.ReloadInto(running, _path));
+    }
+
     [Fact]
     public void ReloadOfAnUnchangedProxyAndChainNeedsNoRestart()
     {

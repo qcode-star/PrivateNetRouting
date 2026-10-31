@@ -22,7 +22,7 @@
     <s:String x:Key="Main.Config.Button.Open">Open</s:String>
     <s:String x:Key="Main.Config.Button.Reload">Reload</s:String>
     <s:String x:Key="Main.Config.Reloaded">Config reloaded</s:String>
-    <s:String x:Key="Main.Config.Reloaded.RestartHint">Config reloaded; the running proxy and chain keep their previous settings — an application restart applies them</s:String>
+    <s:String x:Key="Main.Config.Reloaded.RestartHint">Config reloaded; some changed settings (the proxy and chain, logging, the PowerShell path, the application identities, the WSL distros) keep their previous values while the application runs — a restart applies them</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Chain</s:String>

@@ -469,15 +469,17 @@ public sealed class ProxyRuntime : IAsyncDisposable
         Chain.HandOverProxyAsync(ProxyControl.DetachAsync, TimeSpan.FromSeconds(Config.ForwardProxy.HandoverLockWaitSeconds), ct);
 
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
-    public void ReloadConfig() => ProxyConfigNeedsRestart = AppConfigStore.ReloadInto(Config);
+    public void ReloadConfig() => ConfigNeedsRestart = AppConfigStore.ReloadInto(Config);
 
     /// <summary>
-    /// Whether the user file holds forwardProxy or chain values that differ from the ones this
-    /// process runs with. ReloadConfig keeps those two sections as built (the proxy, the chain
-    /// and every derived endpoint stay consistent), so the flag stays true until the file
-    /// matches the running values again or the application restarts.
+    /// Whether the user file holds values this process cannot apply without a restart: the
+    /// forwardProxy and chain sections (ReloadConfig keeps them as built — the proxy, the chain
+    /// and every derived endpoint stay consistent) or a value the composition handed to its
+    /// components as a copy (the logs, the PowerShell path, the application markers, the WSL
+    /// distro list). The flag stays true until the file matches the running values again or the
+    /// application restarts.
     /// </summary>
-    public bool ProxyConfigNeedsRestart { get; private set; }
+    public bool ConfigNeedsRestart { get; private set; }
 
     /// <summary>The SOCKS5 upstream for the proxy's dials: in the socks5 mode — the external
     /// trusted proxy from chain.socks5 (with its RFC 1929 credentials); in the tailscale

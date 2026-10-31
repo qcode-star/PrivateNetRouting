@@ -22,7 +22,7 @@
     <s:String x:Key="Main.Config.Button.Open">Открыть</s:String>
     <s:String x:Key="Main.Config.Button.Reload">Перезагрузить</s:String>
     <s:String x:Key="Main.Config.Reloaded">Конфиг перечитан</s:String>
-    <s:String x:Key="Main.Config.Reloaded.RestartHint">Конфиг перечитан; работающие прокси и цепочка держат прежние настройки — применятся после перезапуска приложения</s:String>
+    <s:String x:Key="Main.Config.Reloaded.RestartHint">Конфиг перечитан; часть изменённых настроек (прокси и цепочка, логи, путь к PowerShell, идентификаторы приложений, дистрибутивы WSL) держит прежние значения, пока приложение работает, — применятся после перезапуска</s:String>
 
     <!-- Chain -->
     <s:String x:Key="Main.Chain">Цепочка</s:String>

@@ -232,8 +232,10 @@ src/
                              # status rows: the PNR listeners with connection counters, the
                              # upstream row (tailscale listeners, or the socks5 egress with its
                              # reachability word), the config with its actions (open the
-                             # folder / reload; a reload that changed the running proxy's
-                             # section says an application restart applies it), the idle
+                             # folder / reload; a reload that changed the proxy or chain
+                             # section, or a value the composition captured — the logs, the
+                             # PowerShell path, the application markers, the WSL distros —
+                             # says an application restart applies it), the idle
                              # stopper with its status, the
                              # auto-start flag and the toggle; collapsible to one compact row —
                              # overall status dot + word and the same two buttons, a chain
