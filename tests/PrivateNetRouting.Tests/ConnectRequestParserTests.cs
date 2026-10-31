@@ -66,6 +66,9 @@ public class ConnectRequestParserTests
     [InlineData("CONNECT host.123:443 HTTP/1.1")]        // a numeric last label
     [InlineData("CONNECT a..b:443 HTTP/1.1")]            // empty label
     [InlineData("CONNECT .:443 HTTP/1.1")]               // nothing left after the trailing dot
+    [InlineData("CONNECT a\nb:443 HTTP/1.1")]            // a control character: a log-line forgery
+    [InlineData("CONNECT %68ost.example.com:443 HTTP/1.1")] // percent-encoding is not a DNS name
+    [InlineData("CONNECT host~name.example.com:443 HTTP/1.1")] // LDH + underscore only
     public void Rejects(string firstLine)
     {
         var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes(firstLine + "\r\n\r\n"), out _, out var error);
@@ -89,6 +92,7 @@ public class ConnectRequestParserTests
     [InlineData("203.0.113.5")]
     [InlineData("host1.example.com")]
     [InlineData("localhost")]
+    [InlineData("sub_domain.example.com")] // the underscore is a real (internal) DNS name
     public void AcceptsCanonicalIpv4AndNames(string host)
     {
         var ok = ConnectRequestParser.TryParse(Encoding.Latin1.GetBytes($"CONNECT {host}:443 HTTP/1.1\r\n\r\n"), out var request, out _);

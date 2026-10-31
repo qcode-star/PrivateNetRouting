@@ -108,9 +108,10 @@ public static class ConnectRequestParser
     }
 
     /// <summary>
-    /// A bracketed IPv6 literal (no zone), an IPv4 literal, or a DNS name: non-empty labels of at
-    /// most 63 bytes, 253 in all. Anything else ("a..b", a colon in a name) could only fail after
-    /// the upstream dial was spent.
+    /// A bracketed IPv6 literal (no zone), an IPv4 literal, or a DNS name: non-empty LDH labels
+    /// (letters, digits, hyphen, underscore) of at most 63 bytes, 253 in all. Anything else
+    /// ("a..b", a control character, a percent sign) is a log-line forgery or an undialable name
+    /// that could only fail after the upstream dial was spent.
     /// </summary>
     private static bool IsDialableHost(string host, bool ipv6Literal)
     {
@@ -137,7 +138,7 @@ public static class ConnectRequestParser
         var labels = host.Split('.');
         foreach (var label in labels)
         {
-            if (label.Length is < 1 or > 63)
+            if (label.Length is < 1 or > 63 || !IsLdhLabel(label))
             {
                 return false;
             }
@@ -145,12 +146,22 @@ public static class ConnectRequestParser
 
         // a name whose last label is numeric (or hex) is a malformed address, never a DNS name
         var last = labels[^1];
-        if (last.All(char.IsAsciiDigit) || last.StartsWith("0x", StringComparison.Ordinal))
+        return !last.All(char.IsAsciiDigit) && !last.StartsWith("0x", StringComparison.Ordinal);
+    }
+
+    /// <summary>Letters, digits, hyphen and underscore only: a control character or a space in a
+    /// name forges the log line it is written to, and no resolver would take it.</summary>
+    private static bool IsLdhLabel(string label)
+    {
+        foreach (var ch in label)
         {
-            return false;
+            if (!char.IsAsciiLetterOrDigit(ch) && ch is not ('-' or '_'))
+            {
+                return false;
+            }
         }
 
-        return !host.Contains('[') && !host.Contains(']') && !host.Contains(':');
+        return true;
     }
 
     /// <summary>Whether the header block (the part after the request line) holds the probe marker header.</summary>
