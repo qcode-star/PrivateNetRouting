@@ -267,7 +267,13 @@ internal static class Program
     /// handover as the tray "Exit". A no-op when a worker, the GUI or nobody holds the port, and
     /// in the skipped shapes. False — the worker did not come up; the caller exits non-zero.
     /// </summary>
-    private static async Task<bool> HandOverProxyAsync(ProxyRuntime runtime)
+    private static Task<bool> HandOverProxyAsync(ProxyRuntime runtime) => HandOverProxyAsync(runtime, null);
+
+    /// <summary>The handover failed after a chain was raised by a command that leaves no client of its own.</summary>
+    private const string ChainLeftUpMessage =
+        "the chain was raised, but nothing will listen on the proxy address once this command exits";
+
+    private static async Task<bool> HandOverProxyAsync(ProxyRuntime runtime, string? consequence)
     {
         try
         {
@@ -277,7 +283,8 @@ internal static class Program
         catch (IOException ex)
         {
             Console.Error.WriteLine($"the forward proxy could not be handed over to a background worker: {ex.Message}");
-            Console.Error.WriteLine("the client was started, but nothing will listen on the proxy address once this command exits");
+            Console.Error.WriteLine(consequence
+                ?? "the client was started, but nothing will listen on the proxy address once this command exits");
             return false;
         }
     }
@@ -944,7 +951,21 @@ internal static class Program
             return 0;
         }
 
-        var result = await runtime.Updater.RunAsync(options, progress, chainProgress, Interrupt.Token);
+        UpdateRunResult result;
+        try
+        {
+            result = await runtime.Updater.RunAsync(options, progress, chainProgress, Interrupt.Token);
+        }
+        catch
+        {
+            // the chain may have been raised before the failure — never leave it half-up
+            await HandOverProxyAsync(runtime, ChainLeftUpMessage);
+            throw;
+        }
+
+        // the update raises the chain on its own way to the package: this process holds the
+        // in-process listener, and it would die with the command (the daemon and the keeper stay)
+        var handedOver = await HandOverProxyAsync(runtime, ChainLeftUpMessage);
         switch (result.Outcome)
         {
             case UpdateOutcome.UpToDate:
@@ -953,10 +974,10 @@ internal static class Program
             case UpdateOutcome.Downloaded:
                 Console.WriteLine($"package ready: {result.PackageFile}");
                 Console.WriteLine("install: pnr update --install-from <file>");
-                return 0;
+                return handedOver ? 0 : 1;
             case UpdateOutcome.Installed:
                 Console.WriteLine($"done: {result.Installed?.Version} -> {result.InstalledAfter?.Version}");
-                return 0;
+                return handedOver ? 0 : 1;
             default:
                 return 1;
         }
