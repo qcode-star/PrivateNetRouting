@@ -66,20 +66,27 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
         using var key = Registry.CurrentUser.CreateSubKey(_keyPath, writable: true);
         // whatever the owner has is preserved once: a re-enable of our own switch (an address
         // change) keeps the save, while a switch the owner replaced after a crashed cycle is saved
-        // afresh, so the value they chose now is the one that comes back
+        // afresh, so the value they chose now is the one that comes back. A current value equal to
+        // the address being written is ours too: a build that predates the ownership record (or a
+        // crash before the record was written) leaves exactly that, and saving it would make a
+        // later off "restore" our own proxy as the owner's
         var currentServer = key.GetValue("ProxyServer") as string;
         var saveHoldsCurrent = HasSave(key)
             && string.Equals(currentServer, key.GetValue(SavedServerName) as string, StringComparison.OrdinalIgnoreCase);
-        if (!IsOurs(key, currentServer) && !saveHoldsCurrent)
+        var currentIsOurs = IsOurs(key, currentServer)
+            || string.Equals(currentServer, server, StringComparison.OrdinalIgnoreCase);
+        if (!currentIsOurs && !saveHoldsCurrent)
         {
             SaveCurrent(key, "ProxyServer", SavedServerName);
             SaveCurrent(key, "ProxyOverride", SavedOverrideName);
             key.SetValue(SavedEnableName, CurrentEnable(key) ? 1 : 0, RegistryValueKind.DWord);
         }
 
+        // the record goes first: a crash between the two writes then leaves a record over the
+        // owner's value (not ours, the save holds it), never our value without a record
+        key.SetValue(OursServerName, server, RegistryValueKind.String);
         key.SetValue("ProxyServer", server, RegistryValueKind.String);
         key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
-        key.SetValue(OursServerName, server, RegistryValueKind.String);
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
         NotifySettingsChanged();
     }

@@ -2660,6 +2660,61 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void SysProxyReEnableOverALegacySaveWithoutTheRecordKeepsTheOwnersProxy()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            // the state a build that saved but did not record ownership leaves while on (the same
+            // a crash between the server write and the record write would leave)
+            SeedUserProxy(keyPath, "http://127.0.0.1:18081", "localhost", proxyEnable: 1);
+            using (var legacy = Registry.CurrentUser.OpenSubKey(keyPath, writable: true))
+            {
+                legacy!.SetValue("ProxyServer.pnr-saved", "http://192.0.2.1:8080", RegistryValueKind.String);
+                legacy.SetValue("ProxyOverride.pnr-saved", "*.example.com", RegistryValueKind.String);
+                legacy.SetValue("ProxyEnable.pnr-saved", 0, RegistryValueKind.DWord);
+            }
+
+            var store = new WinInetSystemProxyStore(keyPath);
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Disable("http://127.0.0.1:18081");
+
+            var off = store.Read();
+            Assert.False(off.Enabled); // the owner's switch was off
+            Assert.Equal("http://192.0.2.1:8080", off.Server); // their proxy, not our address
+            Assert.Equal("*.example.com", off.Override);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyReEnableOverALegacySwitchWithoutASaveDoesNotSaveOurAddress()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            // a build that wrote neither the save nor the record left our address switched on
+            SeedUserProxy(keyPath, "http://127.0.0.1:18081", "localhost", proxyEnable: 1);
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Disable("http://127.0.0.1:18081");
+
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            Assert.Equal(0, key!.GetValue("ProxyEnable")); // not "restored" to our own enabled proxy
+            Assert.Null(key.GetValue("ProxyServer"));
+            Assert.Null(key.GetValue("ProxyServer.pnr-saved"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
     public void SysProxyReEnableAfterTheOwnerReplacedOurServerSavesTheirNewValue()
     {
         var keyPath = NewSysProxyKey();
