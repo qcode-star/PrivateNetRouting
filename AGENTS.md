@@ -513,3 +513,11 @@ scripts) or `pwsh -NoProfile -Command '…'` in bash single quotes (for short on
 quotes — bash would expand `$`). Cyrillic in the output of PS/native utilities — run
 `chcp 65001 >/dev/null` first. Do not execute PS code in bash and do not grep-parse `.ps1` — only
 run it. These quirks belong to the shell environment, not to the application.
+
+If `dotnet test` dies at testhost start with `OpenProcess` access denied (error 5) only when the
+binaries live under the repository folder (elevated runs and copies elsewhere work), look at the
+folder's integrity label first: an agent sandbox run with workspace write may leave an inheritable
+Low mandatory label on it (`icacls <repo>` shows the Low mandatory level), so every exe built there
+starts at Low integrity and cannot open the Medium-integrity processes of the same user. No
+antivirus log shows it. The fix is to put the label back to the default:
+`icacls <repo> /setintegritylevel "(OI)(CI)M"`.
