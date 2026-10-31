@@ -168,7 +168,8 @@ public static partial class PackageUrl
 
     /// <summary>
     /// Extracts the package URL from the event message. The URL in the message may be broken
-    /// by a line break — so whitespace is collapsed before the search.
+    /// by a line break — so whitespace is collapsed before the search. The match is lazy: a
+    /// message carrying two URLs would otherwise yield one malformed "URL" spanning both.
     /// </summary>
     public static string? ExtractFromMessage(string message, string host)
     {
@@ -178,7 +179,7 @@ public static partial class PackageUrl
         }
 
         var flat = Whitespace().Replace(message, "");
-        var match = Regex.Match(flat, $"https://{Regex.Escape(host)}/[^\"']+\\.msix", RegexOptions.IgnoreCase);
+        var match = Regex.Match(flat, $"https://{Regex.Escape(host)}/[^\"']+?\\.msix", RegexOptions.IgnoreCase);
         return match.Success ? match.Value : null;
     }
 

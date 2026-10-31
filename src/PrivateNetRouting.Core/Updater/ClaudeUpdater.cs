@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
@@ -201,19 +202,43 @@ public sealed class ClaudeUpdater(
         return file;
     }
 
-    /// <summary>Step "Package verification": the manifest is present, the Publisher matches the installed one.</summary>
+    /// <summary>Step "Package verification": the manifest is present, the identity matches the installed package and this machine.</summary>
     public async Task<MsixIdentity> VerifyAsync(string file, CancellationToken ct)
     {
         var identity = MsixPackage.TryReadIdentity(file)
             ?? throw new IOException("no AppxManifest.xml in the package — this is not a standalone MSIX; it cannot be installed manually");
         var installed = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
+        if (!string.Equals(identity.Name, installed.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                "package name mismatch — the package is not the installed application:\n" +
+                $"  package:    {identity.Name}\n" +
+                $"  installed:  {installed.Name}");
+        }
+
         if (!string.Equals(identity.Publisher, installed.Publisher, StringComparison.OrdinalIgnoreCase))
         {
             throw new IOException(
                 "publisher mismatch — the package will not install over the existing one:\n" +
                 $"  package:    {identity.Publisher}\n" +
                 $"  installed:  {installed.Publisher}");
+        }
+
+        var machineArch = RuntimeInformation.OSArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "x86",
+            _ => RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
+        };
+        if (!string.Equals(identity.Architecture, machineArch, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(identity.Architecture, "neutral", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"architecture mismatch — the package is built for another machine:\n" +
+                $"  package:    {identity.Architecture}\n" +
+                $"  machine:    {machineArch}");
         }
 
         // an older package cannot be installed over a newer one (0x80073D06) — find out before

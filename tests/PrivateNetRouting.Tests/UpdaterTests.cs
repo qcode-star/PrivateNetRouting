@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using PrivateNetRouting.Core.Chain;
@@ -411,6 +412,44 @@ public class UpdaterTests : IDisposable
     }
 
     [Fact]
+    public async Task APackageOfAnotherApplicationIsRejectedByVerification()
+    {
+        var package = await WritePackageAsync(MatchingPublisher, name: "SomethingElse");
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.VerifyAsync(package, CancellationToken.None));
+
+        Assert.Contains("package name mismatch", error.Message);
+        Assert.Empty(_appx.AddedFiles);
+    }
+
+    [Fact]
+    public async Task APackageOfAnotherArchitectureIsRejectedByVerification()
+    {
+        var machine = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "x64" : "arm64";
+        var package = await WritePackageAsync(MatchingPublisher, architecture: machine);
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.VerifyAsync(package, CancellationToken.None));
+
+        Assert.Contains("architecture mismatch", error.Message);
+        Assert.Empty(_appx.AddedFiles);
+    }
+
+    [Fact]
+    public async Task ANeutralArchitecturePackagePassesVerification()
+    {
+        var package = await WritePackageAsync(MatchingPublisher, architecture: "neutral");
+        var updater = Create();
+
+        var identity = await updater.VerifyAsync(package, CancellationToken.None);
+
+        Assert.Equal("neutral", identity.Architecture);
+    }
+
+    [Fact]
     public async Task KeepRunningSkipsClosingAndStillInstalls()
     {
         _claude.Processes = [new FakeClaudeProcess()];
@@ -524,6 +563,9 @@ public class UpdaterTests : IDisposable
         "https://downloads.claude.ai/releases/win32/x64/2.26455.1/Claude-abc.msix")]
     [InlineData("error 0x80072EE2 for 'https://downloads.claude.ai/pkg/Claude-x.msix?token=1'", "https://downloads.claude.ai/pkg/Claude-x.msix")]
     [InlineData("some other error about https://example.com/a.msix", null)]
+    [InlineData(
+        "download of https://downloads.claude.ai/a/Claude-1.msix failed, retry https://downloads.claude.ai/b/Claude-2.msix",
+        "https://downloads.claude.ai/a/Claude-1.msix")] // two URLs — one whole, not one malformed span
     public void JournalMessageYieldsPackageUrl(string message, string? expected)
     {
         Assert.Equal(expected, PackageUrl.ExtractFromMessage(message, "downloads.claude.ai"));
@@ -798,17 +840,17 @@ public class UpdaterTests : IDisposable
         }
     }
 
-    private async Task<string> WritePackageAsync(string publisher)
+    private async Task<string> WritePackageAsync(string publisher, string name = "Claude", string architecture = "x64")
     {
         var path = Path.Combine(_root, $"pkg-{Guid.NewGuid():N}.msix");
-        await Task.Run(() => WritePackage(path, publisher));
+        await Task.Run(() => WritePackage(path, publisher, name, architecture));
         return path;
     }
 
     private static string WritePackageSync(string publisher, string root) =>
         WritePackage(Path.Combine(root, $"pnr-pkg-{Guid.NewGuid():N}.msix"), publisher);
 
-    private static string WritePackage(string path, string publisher)
+    private static string WritePackage(string path, string publisher, string name = "Claude", string architecture = "x64")
     {
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         var entry = zip.CreateEntry("AppxManifest.xml");
@@ -816,7 +858,7 @@ public class UpdaterTests : IDisposable
         writer.Write($"""
             <?xml version="1.0" encoding="utf-8"?>
             <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
-              <Identity Name="Claude" Version="2.26455.1.0" Publisher="{publisher}" ProcessorArchitecture="x64"/>
+              <Identity Name="{name}" Version="2.26455.1.0" Publisher="{publisher}" ProcessorArchitecture="{architecture}"/>
             </Package>
             """);
         return path;
