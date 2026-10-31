@@ -146,7 +146,9 @@ Architecture notes:
   global usings are removed to avoid name conflicts with WPF); the tray menu is show window,
   chain up / chain down / launch Claude (the same code paths as the chain card and the launch
   button, enablement follows the card's buttons), "Exit" (the chain keeps working: an in-process
-  proxy is handed to a detached worker) and "Exit with full chain stop"; the started idle stopper
+  proxy is handed to a detached worker) and "Exit with full chain stop" — both first cancel a
+  bring-up or launch in flight and wait for its rollback (the chain is left as it was before that
+  operation), and an exiting instance ignores the shortcut signals; the started idle stopper
   keeps working — it lives in its own detached process and survives even the real exit. Desktop
   shortcuts: Claude → `--launch`, "Claude (browser)" → `--launch-browser`.
 - Elevation: a separate helper launch (runas) with a window-0, not a restart of the whole

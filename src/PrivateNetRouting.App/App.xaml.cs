@@ -288,7 +288,15 @@ public partial class App : Application
     private RegisteredWaitHandle Subscribe(EventWaitHandle signal, Action action) =>
         ThreadPool.RegisterWaitForSingleObject(
             signal,
-            callBack: (_, _) => Dispatcher.BeginInvoke(action),
+            // an instance on its way out ignores the signals: a launch started now would be
+            // orphaned by the exit just like a bring-up in flight
+            callBack: (_, _) => Dispatcher.BeginInvoke(() =>
+            {
+                if (!_exiting)
+                {
+                    action();
+                }
+            }),
             state: null,
             millisecondsTimeOutInterval: -1,
             executeOnlyOnce: false);
@@ -333,11 +341,17 @@ public partial class App : Application
         {
             try
             {
+                // a bring-up or launch in flight holds the chain operation lock (a login, a UAC
+                // wait) and would go on in the pool after the exit: cancel it the way the card's
+                // Stop does and wait until its rollback is over — the links it raised itself go
+                // down, the chain is left as it was before the operation
+                if (MainWindow is MainWindow window)
+                {
+                    await window.CancelChainOperationAsync();
+                }
+
                 if (stopChain)
                 {
-                    // a bring-up or launch in flight holds the chain operation lock (a login, a UAC
-                    // wait): cancel it the way the card's Stop does, then the stop gets its turn
-                    (MainWindow as MainWindow)?.CancelChainOperation();
                     await runtime.Chain.StopAsync(null, CancellationToken.None);
                 }
                 else

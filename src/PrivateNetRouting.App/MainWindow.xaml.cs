@@ -77,6 +77,7 @@ public partial class MainWindow : Window
     private string? _openedAuthUrl; // the browser opens the login page once per URL
     private bool _launchBusy;
     private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
+    private TaskCompletionSource? _operationEnded; // completes when that operation (and its rollback) is over
     private bool _fillingLanguages;
     private UpdateWindow? _updateWindow;
     private CodexUpdateWindow? _codexUpdateWindow;
@@ -1090,6 +1091,33 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Cancels a running bring-up or launch like <see cref="CancelChainOperation"/> and completes
+    /// once that operation — its rollback included — is over (a running stop is waited for). The
+    /// tray exits wait on it: a bring-up left running in the pool would start the detached links
+    /// after the in-process listener is gone, or hold the lock the exit's own stop needs.
+    /// </summary>
+    public Task CancelChainOperationAsync()
+    {
+        CancelChainOperation();
+        return _operationEnded?.Task ?? Task.CompletedTask;
+    }
+
+    private CancellationTokenSource StartOperationSlot()
+    {
+        var cts = new CancellationTokenSource();
+        _operationCts = cts;
+        _operationEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        return cts;
+    }
+
+    private void EndOperationSlot()
+    {
+        _operationCts = null;
+        _operationEnded?.TrySetResult();
+        _operationEnded = null;
+    }
+
     private async Task<bool> RunChainBusy(bool bringUp, Func<CancellationToken, Task> action)
     {
         if (_chainBusy)
@@ -1103,8 +1131,7 @@ public partial class MainWindow : Window
         _viewModel.SetChainBusy(true, bringUp);
         BeginOperation();
         var success = false;
-        var cts = new CancellationTokenSource();
-        _operationCts = cts;
+        var cts = StartOperationSlot();
         try
         {
             await action(cts.Token);
@@ -1138,7 +1165,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _operationCts = null;
+            EndOperationSlot();
             cts.Dispose();
             _chainBusy = false;
             _chainBusyCancellable = false;
@@ -1391,8 +1418,7 @@ public partial class MainWindow : Window
         _viewModel.SetLaunchBusy(true);
         var success = false;
         var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
-        var cts = new CancellationTokenSource();
-        _operationCts = cts;
+        var cts = StartOperationSlot();
         try
         {
             var running = await Task.Run(() => _runtime.Launcher.InspectRunning());
@@ -1441,7 +1467,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _operationCts = null;
+            EndOperationSlot();
             cts.Dispose();
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
@@ -1512,8 +1538,7 @@ public partial class MainWindow : Window
     {
         var success = false;
         var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
-        var cts = new CancellationTokenSource();
-        _operationCts = cts;
+        var cts = StartOperationSlot();
         try
         {
             if (!_runtime.Browser.IsConfigured)
@@ -1621,7 +1646,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _operationCts = null;
+            EndOperationSlot();
             cts.Dispose();
         }
 
@@ -1681,8 +1706,7 @@ public partial class MainWindow : Window
         _viewModel.SetLaunchBusy(true);
         var success = false;
         var raised = new ChainRaisedLinks(); // what the launch's bring-up starts itself: a cancel stops only that
-        var cts = new CancellationTokenSource();
-        _operationCts = cts;
+        var cts = StartOperationSlot();
         try
         {
             var running = await Task.Run(() => _runtime.CodexLauncher.InspectRunning());
@@ -1731,7 +1755,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _operationCts = null;
+            EndOperationSlot();
             cts.Dispose();
             _launchBusy = false;
             _viewModel.SetLaunchBusy(false);
