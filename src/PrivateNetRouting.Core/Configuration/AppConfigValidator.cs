@@ -161,7 +161,7 @@ public static class AppConfigValidator
                 $"forwardProxy.cacheTtlMaxSeconds: {config.ForwardProxy.CacheTtlMaxSeconds} is below forwardProxy.cacheTtlMinSeconds ({config.ForwardProxy.CacheTtlMinSeconds})");
         }
         Positive("logging.maxBytes", config.Logging.MaxBytes, errors);
-        NotNegative("logging.keep", config.Logging.Keep, errors);
+        Positive("logging.keep", config.Logging.Keep, errors);
     }
 
     private static void Endpoint(string key, string value, List<string> errors)

@@ -242,6 +242,14 @@ public class AppConfigTests : IDisposable
     }
 
     [Fact]
+    public void ValidationRejectsAZeroKeepWindow()
+    {
+        // keep=0 would leave the shifted .1 forever: the age chain is never deleted, "beyond
+        // keep — deleted" would be a lie
+        Assert.Contains("logging.keep", LoadError("""{ "logging": { "keep": 0 } }"""));
+    }
+
+    [Fact]
     public void ValidationRejectsAChainSocketThatWouldChangeTheCommandLine()
     {
         var config = new AppConfig();
