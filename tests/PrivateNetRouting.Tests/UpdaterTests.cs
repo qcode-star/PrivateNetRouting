@@ -318,6 +318,41 @@ public class UpdaterTests : IDisposable
     }
 
     [Fact]
+    public async Task AnInstallThatKeepsTheVersionIsNoChange()
+    {
+        _appx.AfterInstall = _appx.Installed; // Add-AppxPackage returned, the registration did not move
+        var updater = Create();
+        var progress = new List<UpdateProgress>();
+
+        var result = await updater.RunAsync(
+            UpdateOptions.Default,
+            new SyncProgress(progress.Add),
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.NoChange, result.Outcome);
+        Assert.Equal("2.26454.2.0", result.InstalledAfter?.Version);
+        Assert.Contains(progress, p => p.Phase == UpdatePhase.Done && p.Message.Contains("did not change"));
+        Assert.DoesNotContain(progress, p => p.Message == "installed 2.26454.2.0 -> 2.26454.2.0");
+    }
+
+    [Fact]
+    public async Task InstallAsyncReportsWhetherTheVersionAdvanced()
+    {
+        var package = await WritePackageAsync(MatchingPublisher);
+        _appx.AfterInstall = _appx.Installed; // this pass does not move the version
+        var unchanged = await Create().InstallAsync(package, new UpdateOptions { KeepFile = true }, null, CancellationToken.None);
+        Assert.False(unchanged.VersionChanged);
+        Assert.Equal(UpdateOutcome.NoChange, unchanged.Outcome);
+
+        _appx.AfterInstall = new InstalledPackage("Claude", "2.26456.0.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var advanced = await Create().InstallAsync(package, new UpdateOptions { KeepFile = true }, null, CancellationToken.None);
+        Assert.True(advanced.VersionChanged);
+        Assert.Equal(UpdateOutcome.Installed, advanced.Outcome);
+        Assert.Equal("2.26456.0.0", advanced.Package.Version);
+    }
+
+    [Fact]
     public async Task InstallNeverDeletesAFileOutsideTheCache()
     {
         var updater = Create();
@@ -838,6 +873,12 @@ public class UpdaterTests : IDisposable
         catch (IOException)
         {
         }
+    }
+
+    /// <summary>Synchronous collector (Progress&lt;T&gt; posts asynchronously — unusable in asserts).</summary>
+    private sealed class SyncProgress(Action<UpdateProgress> report) : IProgress<UpdateProgress>
+    {
+        public void Report(UpdateProgress value) => report(value);
     }
 
     private async Task<string> WritePackageAsync(string publisher, string name = "Claude", string architecture = "x64")

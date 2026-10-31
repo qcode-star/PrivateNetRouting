@@ -68,9 +68,10 @@ public sealed class CodexUpdater(
     /// Full update: close the app, queue the Store update, poll until the Store reports the
     /// new package registered. The queued install item is handed to <paramref name="onHandle"/>
     /// as soon as it exists (the caller can cancel it); the poll continues until the Store
-    /// finishes. Returns the package after the update.
+    /// finishes. Returns the package after the update and whether its version advanced (a Store
+    /// item that completes without registering a new version is NoChange, not a success).
     /// </summary>
-    public async Task<InstalledPackage> UpdateAsync(
+    public async Task<UpdateInstallResult> UpdateAsync(
         IProgress<UpdateProgress>? progress,
         CancellationToken ct,
         Action<IStoreInstallHandle>? onHandle = null)
@@ -101,17 +102,20 @@ public sealed class CodexUpdater(
                 {
                     case StoreInstallPhase.Completed:
                         var after = await appx.GetInstalledAsync(config.Codex.PackageName, ct).ConfigureAwait(false) ?? installed;
-                        if (after.Version == installed.Version)
-                        {
-                            log.Warn("codex-updater: version did not change after the Store update — the Store may need another pass");
-                        }
-                        else
+                        var changed = !string.Equals(after.Version, installed.Version, StringComparison.Ordinal);
+                        if (changed)
                         {
                             log.Info($"codex-updater: installed {installed.Version} -> {after.Version}");
                         }
+                        else
+                        {
+                            log.Warn("codex-updater: version did not change after the Store update — the Store may need another pass");
+                        }
 
-                        progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {installed.Version} -> {after.Version}"));
-                        return after;
+                        progress?.Report(changed
+                            ? new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {installed.Version} -> {after.Version}")
+                            : new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {installed.Version}: the version did not change"));
+                        return new UpdateInstallResult(after, changed);
 
                     case StoreInstallPhase.Error:
                         throw new IOException($"the Store failed to update Codex: {status.Error ?? "unknown error"}");

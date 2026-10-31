@@ -271,6 +271,7 @@
     <s:String x:Key="Update.Install.NoClose">Installation is in progress — do not close the window.</s:String>
     <s:String x:Key="Update.Install.RightsHintFmt">If it complains about rights, run from an admin console:&#10;Add-AppxPackage -Path "{0}" -ForceApplicationShutdown</s:String>
     <s:String x:Key="Update.Install.VersionWarn">Warning: the version did not change after installation — check the AppX journal.</s:String>
+    <s:String x:Key="Update.Install.NoChangeFmt">Not installed: {0} → {1} — the version did not change.</s:String>
     <s:String x:Key="Update.AutoCloseFmt">The window closes itself in {0} s — click anywhere to keep it open.</s:String>
     <s:String x:Key="Update.Done.InstalledFmt">Installed: {0} → {1}</s:String>
     <s:String x:Key="Update.Done.Stopped">Stopped.</s:String>
@@ -306,6 +307,7 @@
     <s:String x:Key="CodexUpdate.Done.Declined">Update declined while Codex is running.</s:String>
     <s:String x:Key="CodexUpdate.Done.InstalledFmt">Installed: {0} → {1}</s:String>
     <s:String x:Key="CodexUpdate.Install.VersionWarn">Warning: the version did not change after the Store update — the Store may need another pass.</s:String>
+    <s:String x:Key="CodexUpdate.Install.NoChangeFmt">Not updated: {0} → {1} — the version did not change.</s:String>
     <s:String x:Key="CodexUpdate.Launch.Done">Codex launched.</s:String>
     <s:String x:Key="CodexUpdate.Button.LaunchCodex">Launch Codex</s:String>
 

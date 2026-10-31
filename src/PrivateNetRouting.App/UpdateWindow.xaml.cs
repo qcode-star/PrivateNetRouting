@@ -286,18 +286,23 @@ public partial class UpdateWindow : Window
             SetPhase(UpdatePhase.Install);
             SetStep(3, ChainStepStatus.Active);
             SetProgressUnknown();
-            var after = await _runtime.Updater.InstallAsync(_packageFile, UpdateOptions.Default, updateProgress, ct);
+            var install = await _runtime.Updater.InstallAsync(_packageFile, UpdateOptions.Default, updateProgress, ct);
+            var after = install.Package;
+            if (!install.VersionChanged)
+            {
+                // the installer reported no error but the version did not advance: not a success,
+                // and the update dot must stay as it was
+                SetStep(3, ChainStepStatus.Failed, after.Version);
+                SetDetailKey("Update.Install.NoChangeFmt", _beforeVersion, after.Version);
+                SetHintKey("Update.Install.VersionWarn");
+                Finish(success: false);
+                return;
+            }
+
             SetStep(3, ChainStepStatus.Done, after.Version);
             SetDetailKey("Update.Done.InstalledFmt", _beforeVersion, after.Version);
-            if (after.Version == _beforeVersion)
-            {
-                SetHintKey("Update.Install.VersionWarn");
-            }
-            else
-            {
-                // the URL we downloaded from now offers what is installed — no "update available" is left
-                VersionStateResolved?.Invoke(new UpdateCheckResult(after, check.PackageUrl, after.Version, UpToDate: true));
-            }
+            // the URL we downloaded from now offers what is installed — no "update available" is left
+            VersionStateResolved?.Invoke(new UpdateCheckResult(after, check.PackageUrl, after.Version, UpToDate: true));
 
             Finish(success: true, showLaunch: true, progressFull: true);
             StartAutoClose();

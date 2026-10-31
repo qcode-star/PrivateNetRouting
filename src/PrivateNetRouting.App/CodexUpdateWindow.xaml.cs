@@ -195,23 +195,27 @@ public partial class CodexUpdateWindow : Window
             }
 
             SetStep(1, ChainStepStatus.Active);
-            var after = await _runtime.CodexUpdater.UpdateAsync(
+            var update = await _runtime.CodexUpdater.UpdateAsync(
                 new Progress<UpdateProgress>(OnUpdateProgress),
                 ct,
                 handle => _installHandle = handle);
             // the poll walk lights Download itself; make sure both are settled
             SetStep(1, ChainStepStatus.Done);
-            SetStep(2, ChainStepStatus.Done, after.Version);
-            SetDetailKey("CodexUpdate.Done.InstalledFmt", _beforeVersion, after.Version);
-            if (after.Version == _beforeVersion)
+            if (!update.VersionChanged)
             {
+                // the Store item completed without registering a new version: not a success, and
+                // the update dot must stay as it was
+                SetStep(2, ChainStepStatus.Failed, update.Package.Version);
+                SetDetailKey("CodexUpdate.Install.NoChangeFmt", _beforeVersion, update.Package.Version);
                 SetHintKey("CodexUpdate.Install.VersionWarn");
+                Finish(success: false);
+                return;
             }
-            else
-            {
-                // the update is installed — no "update available" is left
-                VersionStateResolved?.Invoke(new CodexUpdateCheck(after, UpdateAvailable: false, StoreUnavailable: false));
-            }
+
+            SetStep(2, ChainStepStatus.Done, update.Package.Version);
+            SetDetailKey("CodexUpdate.Done.InstalledFmt", _beforeVersion, update.Package.Version);
+            // the update is installed — no "update available" is left
+            VersionStateResolved?.Invoke(new CodexUpdateCheck(update.Package, UpdateAvailable: false, StoreUnavailable: false));
 
             Finish(success: true, showLaunch: true, progressFull: true);
             StartAutoClose();

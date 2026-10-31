@@ -794,8 +794,16 @@ internal static class Program
 
         var progress = new SyncProgress<UpdateProgress>(p =>
             Console.WriteLine($"[{p.Phase}] {p.Message}"));
-        var after = await runtime.CodexUpdater.UpdateAsync(progress, Interrupt.Token);
-        Console.WriteLine($"codex updated: {check.Installed.Version} -> {after.Version}");
+        var update = await runtime.CodexUpdater.UpdateAsync(progress, Interrupt.Token);
+        if (!update.VersionChanged)
+        {
+            // a Store item that completed without registering a new version is not "updated"
+            Console.Error.WriteLine(
+                $"codex: {update.Package.Version} — the version did not change after the Store update");
+            return 1;
+        }
+
+        Console.WriteLine($"codex updated: {check.Installed.Version} -> {update.Package.Version}");
         return 0;
     }
 
@@ -926,8 +934,16 @@ internal static class Program
 
         if (installFrom is not null)
         {
-            var after = await runtime.Updater.InstallAsync(installFrom, options, progress, Interrupt.Token);
-            Console.WriteLine($"installed: {after.Version}");
+            var install = await runtime.Updater.InstallAsync(installFrom, options, progress, Interrupt.Token);
+            if (!install.VersionChanged)
+            {
+                Console.Error.WriteLine(
+                    $"installed: {install.Package.Version} — the version did not change after the install" +
+                    (options.Force ? "" : " (pass --force to accept it)"));
+                return options.Force ? 0 : 1;
+            }
+
+            Console.WriteLine($"installed: {install.Package.Version}");
             return 0;
         }
 
@@ -978,6 +994,13 @@ internal static class Program
             case UpdateOutcome.Installed:
                 Console.WriteLine($"done: {result.Installed?.Version} -> {result.InstalledAfter?.Version}");
                 return handedOver ? 0 : 1;
+            case UpdateOutcome.NoChange:
+                // the run completed but the observation says the version is the same: a failure
+                // unless the owner asked for a reinstall on purpose
+                Console.Error.WriteLine(
+                    $"no change: {result.InstalledAfter?.Version} — the version did not change after the install" +
+                    (options.Force ? "" : " (pass --force to accept it)"));
+                return handedOver && options.Force ? 0 : 1;
             default:
                 return 1;
         }

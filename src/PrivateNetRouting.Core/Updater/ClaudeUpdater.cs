@@ -50,6 +50,9 @@ public enum UpdateOutcome
     UpToDate,
     Downloaded,
     Installed,
+
+    /// <summary>The install/Store pass completed, but the observed version did not advance.</summary>
+    NoChange,
 }
 
 public sealed record UpdateRunResult(
@@ -58,6 +61,16 @@ public sealed record UpdateRunResult(
     InstalledPackage? InstalledAfter,
     string? PackageFile,
     string? PackageUrl);
+
+/// <summary>
+/// What an install pass left behind: the package seen afterwards and whether its version really
+/// advanced. The outcome is derived from the observation, not from "the command returned", so a
+/// silent AppX/Store failure is NoChange rather than a success with a run of identical versions.
+/// </summary>
+public sealed record UpdateInstallResult(InstalledPackage Package, bool VersionChanged)
+{
+    public UpdateOutcome Outcome => VersionChanged ? UpdateOutcome.Installed : UpdateOutcome.NoChange;
+}
 
 /// <summary>
 /// Manual update of Claude Desktop: version check
@@ -256,9 +269,10 @@ public sealed class ClaudeUpdater(
     /// <summary>
     /// Step "Install" (including the two-phase run on an already downloaded file): repeated Publisher
     /// verification, closing Claude (unless KeepRunning), Add-AppxPackage, version verification,
-    /// deleting the package from the cache (unless KeepFile). Returns the package after install.
+    /// deleting the package from the cache (unless KeepFile). Returns the package after install and
+    /// whether its version advanced.
     /// </summary>
-    public async Task<InstalledPackage> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
+    public async Task<UpdateInstallResult> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         await VerifyAsync(file, ct);
         var before = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
@@ -273,7 +287,8 @@ public sealed class ClaudeUpdater(
         await appx.AddPackageAsync(file, ct);
 
         var after = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct) ?? before;
-        if (after.Version == before.Version)
+        var changed = !string.Equals(after.Version, before.Version, StringComparison.Ordinal);
+        if (!changed)
         {
             log.Warn("updater: version did not change after install — check the AppX journal");
         }
@@ -291,7 +306,7 @@ public sealed class ClaudeUpdater(
             }
         }
 
-        return after;
+        return new UpdateInstallResult(after, changed);
     }
 
     /// <summary>Only a package the updater downloaded itself is ours to delete — never a file the user pointed at.</summary>
@@ -347,9 +362,11 @@ public sealed class ClaudeUpdater(
             return new UpdateRunResult(UpdateOutcome.Downloaded, check.Installed, check.Installed, file, packageUrl);
         }
 
-        var after = await InstallAsync(file, options, progress, ct);
-        progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} -> {after.Version}"));
-        return new UpdateRunResult(UpdateOutcome.Installed, check.Installed, after, file, packageUrl);
+        var install = await InstallAsync(file, options, progress, ct);
+        progress?.Report(install.VersionChanged
+            ? new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} -> {install.Package.Version}")
+            : new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version}: the version did not change"));
+        return new UpdateRunResult(install.Outcome, check.Installed, install.Package, file, packageUrl);
     }
 
     /// <summary>Closing Claude: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>
