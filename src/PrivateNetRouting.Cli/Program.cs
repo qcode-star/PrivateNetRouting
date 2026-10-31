@@ -244,7 +244,7 @@ internal static class Program
                 return 0;
 
             case "up":
-                await runtime.Chain.EnsureRunningAsync(progress, Interrupt.Token);
+                await HandOverOnFailureAsync(runtime, () => runtime.Chain.EnsureRunningAsync(progress, Interrupt.Token));
                 Console.WriteLine("chain is up");
                 await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
                 return await HandOverProxyAsync(runtime) ? 0 : 1;
@@ -272,6 +272,33 @@ internal static class Program
     /// <summary>The handover failed after a chain was raised by a command that leaves no client of its own.</summary>
     private const string ChainLeftUpMessage =
         "the chain was raised, but nothing will listen on the proxy address once this command exits";
+
+    /// <summary>
+    /// Runs a step that may raise the chain (a launch, a browser start, an update, `chain up`): when
+    /// it fails after the raise, the in-process listener would die with this command while the
+    /// daemon and the keeper stay — so the failure path, too, waits for the stopper's re-arm and
+    /// hands the proxy over before the exception is reported.
+    /// </summary>
+    private static async Task<T> HandOverOnFailureAsync<T>(ProxyRuntime runtime, Func<Task<T>> step)
+    {
+        try
+        {
+            return await step();
+        }
+        catch
+        {
+            await AwaitAutoStartQuietlyAsync(runtime);
+            await HandOverProxyAsync(runtime, ChainLeftUpMessage);
+            throw;
+        }
+    }
+
+    private static Task HandOverOnFailureAsync(ProxyRuntime runtime, Func<Task> step) =>
+        HandOverOnFailureAsync(runtime, async () =>
+        {
+            await step();
+            return true;
+        });
 
     /// <summary>The re-arm spawn on a failure path: its own failure must not replace the one being reported.</summary>
     private static async Task AwaitAutoStartQuietlyAsync(ProxyRuntime runtime)
@@ -546,7 +573,9 @@ internal static class Program
             restart = answer.Value;
         }
 
-        var result = await runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token);
+        var result = await HandOverOnFailureAsync(
+            runtime,
+            () => runtime.Launcher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token));
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == LaunchOutcome.CheckOnly)
@@ -655,10 +684,9 @@ internal static class Program
 
         var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
-        var result = await runtime.Browser.LaunchAsync(
-            options with { ConfirmDeadEgress = ConfirmDeadEgress },
-            progress,
-            Interrupt.Token);
+        var result = await HandOverOnFailureAsync(
+            runtime,
+            () => runtime.Browser.LaunchAsync(options with { ConfirmDeadEgress = ConfirmDeadEgress }, progress, Interrupt.Token));
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == BrowserLaunchOutcome.Cancelled)
@@ -746,7 +774,9 @@ internal static class Program
             restart = answer.Value;
         }
 
-        var result = await runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token);
+        var result = await HandOverOnFailureAsync(
+            runtime,
+            () => runtime.CodexLauncher.LaunchAsync(new LauncherOptions(checkOnly, restart), progress, Interrupt.Token));
         await runtime.WatchdogControl.LastAutoStart; // the re-arm spawn must survive this process
         var handedOver = await HandOverProxyAsync(runtime);
         if (result.Outcome == CodexLaunchOutcome.CheckOnly)
@@ -990,19 +1020,10 @@ internal static class Program
             return 0;
         }
 
-        UpdateRunResult result;
-        try
-        {
-            result = await runtime.Updater.RunAsync(options, progress, chainProgress, Interrupt.Token);
-        }
-        catch
-        {
-            // the chain may have been raised before the failure — never leave it half-up, and let
-            // the stopper's re-arm spawn finish before this process exits
-            await AwaitAutoStartQuietlyAsync(runtime);
-            await HandOverProxyAsync(runtime, ChainLeftUpMessage);
-            throw;
-        }
+        // the chain may have been raised before a failure — never leave it without its proxy
+        var result = await HandOverOnFailureAsync(
+            runtime,
+            () => runtime.Updater.RunAsync(options, progress, chainProgress, Interrupt.Token));
 
         await runtime.WatchdogControl.LastAutoStart; // a raise re-arms the stopper — the spawn must survive this process
         // the update raises the chain on its own way to the package: this process holds the
