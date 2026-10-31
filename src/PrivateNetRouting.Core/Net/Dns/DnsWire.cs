@@ -69,6 +69,12 @@ public static class DnsWire
         for (var i = 0; i < qdcount; i++)
         {
             offset = SkipName(data, offset);
+            if (offset + 4 > data.Length)
+            {
+                // a truncated question must not parse as an empty answer: that is a cacheable NODATA
+                throw new FormatException("dns: truncated question record");
+            }
+
             offset += 4; // QTYPE + QCLASS
         }
 
@@ -95,9 +101,11 @@ public static class DnsWire
             {
                 ips ??= [];
                 ips.Add(new IPAddress(data[offset..(offset + 4)]));
-                minTtl = minTtl is null ? ttl : Math.Min(minTtl.Value, ttl);
             }
 
+            // every answer record's TTL folds into the minimum: a CNAME chain lives only as long
+            // as its shortest link, not as long as the trailing A record
+            minTtl = minTtl is null ? ttl : Math.Min(minTtl.Value, ttl);
             offset += rdlen;
         }
 
@@ -122,6 +130,11 @@ public static class DnsWire
 
             if ((length & 0xC0) == 0xC0)
             {
+                if (offset + 2 > data.Length)
+                {
+                    throw new FormatException("dns: truncated name pointer");
+                }
+
                 return offset + 2;
             }
 

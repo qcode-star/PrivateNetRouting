@@ -43,9 +43,10 @@ public class DnsWireTests
     }
 
     [Fact]
-    public void SkipsCnameAnswers()
+    public void FoldsCnameTtlIntoTheMinimum()
     {
-        // CNAME first, then A: the parser must skip CNAME and collect A
+        // CNAME first, then A: the parser collects only the A record, but the chain's cache life
+        // is its shortest link — the CNAME's TTL folds into the minimum
         var writer = new MemoryStream();
         WriteHeader(writer, qd: 1, an: 2);
         WriteQuestion(writer, "www.example.com");
@@ -57,7 +58,19 @@ public class DnsWireTests
         var answer = DnsWire.ParseResponse(writer.ToArray());
 
         Assert.Equal([IPAddress.Parse("10.0.0.1")], answer.Ips);
-        Assert.Equal(240u, answer.MinTtl);
+        Assert.Equal(60u, answer.MinTtl);
+    }
+
+    [Fact]
+    public void TruncatedQuestionIsAnErrorNotAnEmptyAnswer()
+    {
+        // the header promises a question the message does not carry: without the bounds check
+        // this parsed as an empty answer — a cacheable NODATA
+        var writer = new MemoryStream();
+        WriteHeader(writer, qd: 1, an: 0);
+        WriteName(writer, "cut.example"); // the QTYPE/QCLASS tail is cut off
+
+        Assert.Throws<FormatException>(() => DnsWire.ParseResponse(writer.ToArray()));
     }
 
     [Fact]
