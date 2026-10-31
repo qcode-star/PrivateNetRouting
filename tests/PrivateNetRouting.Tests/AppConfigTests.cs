@@ -149,6 +149,36 @@ public class AppConfigTests : IDisposable
             JsonTextPatch.Apply("{ \"a\": 1, \"a\": 2 }", [new JsonTextPatch.Edit(["a"], System.Text.Json.Nodes.JsonValue.Create(3))]));
     }
 
+    /// <summary>
+    /// The text patch follows the file's own layout: a CRLF file stays CRLF (an edited value and
+    /// an inserted member alike — no bare LF leaks in), the first member of an empty object lands
+    /// on an indented line, and an object whose last member ends with a trailing comma takes the
+    /// new member after it without losing the comma.
+    /// </summary>
+    [Fact]
+    public void TextPatchKeepsCrLfInsertsIntoAnEmptyObjectAndKeepsATrailingComma()
+    {
+        System.Text.Json.Nodes.JsonNode Value(int value) => System.Text.Json.Nodes.JsonValue.Create(value);
+
+        Assert.Equal(
+            "{\r\n  \"a\": 2\r\n}\r\n",
+            JsonTextPatch.Apply("{\r\n  \"a\": 1\r\n}\r\n", [new JsonTextPatch.Edit(["a"], Value(2))]));
+        Assert.Equal(
+            "{\r\n  \"a\": 1,\r\n  \"b\": 2\r\n}\r\n",
+            JsonTextPatch.Apply("{\r\n  \"a\": 1\r\n}\r\n", [new JsonTextPatch.Edit(["b"], Value(2))]));
+
+        Assert.Equal(
+            "{\n  \"ui\": {\n    \"language\": \"ru\"\n  }\n}\n",
+            JsonTextPatch.Apply("{\n  \"ui\": {\n  }\n}\n", [new JsonTextPatch.Edit(["ui", "language"], System.Text.Json.Nodes.JsonValue.Create("ru"))]));
+
+        Assert.Equal(
+            "{ \"a\": 1, \"b\": 2, }",
+            JsonTextPatch.Apply("{ \"a\": 1, }", [new JsonTextPatch.Edit(["b"], Value(2))]));
+        Assert.Equal(
+            "{\n  \"a\": 1,\n  \"b\": 2,\n}\n",
+            JsonTextPatch.Apply("{\n  \"a\": 1,\n}\n", [new JsonTextPatch.Edit(["b"], Value(2))]));
+    }
+
     [Fact]
     public void UpdateThatChangesNothingDoesNotTouchTheFile()
     {
