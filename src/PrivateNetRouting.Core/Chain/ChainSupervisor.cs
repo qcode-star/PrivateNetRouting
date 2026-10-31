@@ -653,7 +653,16 @@ public sealed class ChainSupervisor(
         // of ours running must not leave a stopper over a chain that is down.
         if (wholeChain && chainStopped is not null)
         {
-            await chainStopped(CancellationToken.None);
+            try
+            {
+                await chainStopped(CancellationToken.None);
+            }
+            catch (Exception ex) when (failures.Count > 0)
+            {
+                // the step failure is what the caller acts on (the stopper's failure count, the
+                // card's message); a failing hook must not replace it
+                log.Warn($"chain: stop: the chain-stopped hook failed too: {ex.Message}");
+            }
         }
 
         if (failures.Count > 0)

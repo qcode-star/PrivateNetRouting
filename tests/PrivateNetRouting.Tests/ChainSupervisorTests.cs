@@ -550,6 +550,18 @@ public class ChainSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task AFailingHookDoesNotReplaceTheStepFailure()
+    {
+        var supervisor = Create(
+            daemon: new FakeDaemon(_calls) { KillThrows = new IOException("UAC declined") },
+            chainStopped: _ => throw new InvalidOperationException("hook broke"));
+
+        var error = await Assert.ThrowsAsync<ChainException>(() => supervisor.StopAsync(null, CancellationToken.None));
+
+        Assert.StartsWith("chain: daemon:", error.Message);
+    }
+
+    [Fact]
     public async Task StopRaisedLeavesTheLinksThatWereUpBefore()
     {
         var stoppedHooks = 0;
