@@ -160,6 +160,19 @@ public sealed class ForwardProxyService : IForwardProxyInstance, IAsyncDisposabl
             catch
             {
                 await cts.CancelAsync().ConfigureAwait(false);
+                // the listeners this start bound must not outlive it: a failure after BindListener
+                // used to leave the port bound while _running stayed false — StopAsync returned at
+                // once and every later start failed with "address already in use"
+                lock (_gate)
+                {
+                    foreach (var listener in _listeners)
+                    {
+                        listener.Stop();
+                    }
+
+                    _listeners.Clear();
+                }
+
                 throw;
             }
 

@@ -751,6 +751,73 @@ public class ForwardProxyEndToEndTests : IAsyncDisposable
         return ((IPEndPoint)listener.LocalEndpoint).ToString();
     }
 
+    /// <summary>
+    /// A log IO failure used to throw out of the start after BindListener and leave the port bound
+    /// while <see cref="IProxyStatistics.IsRunning"/> stayed false (A-13). Write now swallows the
+    /// failure — the start completes.
+    /// </summary>
+    [Fact]
+    public async Task ALogWriteFailureDoesNotAbortTheStart()
+    {
+        var logPath = Path.Combine(_tempDir, "dying.log");
+        var log = new FileLog(logPath);
+        File.Delete(logPath);
+        Directory.CreateDirectory(logPath); // every open of the log path now fails
+        var config = new ForwardProxyConfig
+        {
+            Listen = "127.0.0.1:0",
+            BindWslGateway = false,
+            HeaderTimeoutSeconds = 5,
+            SocksTimeoutSeconds = 5,
+        };
+        var proxy = new ForwardProxyService(
+            config,
+            new FakeResolver(host => new ResolveResult(FixtureIp, "fake", 300)),
+            new Socks5Client("127.0.0.1:1"),
+            new ActivityMarker(Path.Combine(_tempDir, "marker-dying"), TimeSpan.FromSeconds(60)),
+            log);
+
+        await proxy.StartAsync(CancellationToken.None);
+
+        Assert.True(proxy.IsRunning);
+        Assert.NotEmpty(proxy.ListenerEndpoints);
+        await proxy.StopAsync();
+    }
+
+    /// <summary>
+    /// A start that fails on a busy port must leave nothing behind: the catch stops what this start
+    /// bound, IsRunning stays false and the service can start again once the port frees.
+    /// </summary>
+    [Fact]
+    public async Task AFailedStartLeavesTheServiceRestartable()
+    {
+        var foreign = new TcpListener(IPAddress.Loopback, 0);
+        foreign.Start();
+        _listeners.Add(foreign);
+        var port = ((IPEndPoint)foreign.LocalEndpoint).Port;
+        var config = new ForwardProxyConfig
+        {
+            Listen = $"127.0.0.1:{port}",
+            BindWslGateway = false,
+            HeaderTimeoutSeconds = 5,
+            SocksTimeoutSeconds = 5,
+        };
+        var proxy = new ForwardProxyService(
+            config,
+            new FakeResolver(host => new ResolveResult(FixtureIp, "fake", 300)),
+            new Socks5Client("127.0.0.1:1"),
+            new ActivityMarker(Path.Combine(_tempDir, "marker-collision"), TimeSpan.FromSeconds(60)),
+            new FileLog(Path.Combine(_tempDir, "proxy-collision.log")));
+
+        await Assert.ThrowsAnyAsync<SocketException>(() => proxy.StartAsync(CancellationToken.None));
+        Assert.False(proxy.IsRunning);
+
+        foreign.Stop();
+        await proxy.StartAsync(CancellationToken.None); // the failed start left no bound listener
+        Assert.True(proxy.IsRunning);
+        await proxy.StopAsync();
+    }
+
     private async Task<(ForwardProxyService Proxy, IPEndPoint Endpoint)> StartProxyAsync(
         string socksUpstream,
         Func<string, Core.Net.Dns.ResolveResult> resolve,

@@ -305,9 +305,18 @@ public sealed class FileLog : IDisposable
         var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {LevelTag(level)} {message}{Environment.NewLine}";
         lock (_gate)
         {
-            RotateBySize();
-            using var stream = OpenForAppend(FilePath);
-            stream.Write(Utf8.GetBytes(line));
+            // logging must never fail the operation it reports: a log IO failure used to throw out
+            // of Write and abort whatever was in progress (a proxy start left its listener bound);
+            // the next record tries the file again
+            try
+            {
+                RotateBySize();
+                using var stream = OpenForAppend(FilePath);
+                stream.Write(Utf8.GetBytes(line));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
         }
     }
 

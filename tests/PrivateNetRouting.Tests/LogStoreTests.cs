@@ -336,6 +336,19 @@ public class LogStoreTests : IDisposable
 
         Assert.True(log.RotateNow());
     }
+
+    [Fact]
+    public void ALogIoFailureDoesNotThrowOutOfWrite()
+    {
+        var path = Path.Combine(_tempDir, "dying.log");
+        var log = new FileLog(path);
+        File.Delete(path);
+        Directory.CreateDirectory(path); // the log path can no longer be opened as a file
+        using (log)
+        {
+            log.Info("this write fails, silently");
+        }
+    }
     /// <summary>Read a file opened by a writer (FileLog grants only FileShare.Read).</summary>
     private static string ReadShared(string path)
     {
