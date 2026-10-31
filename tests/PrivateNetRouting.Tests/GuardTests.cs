@@ -1356,6 +1356,28 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task ACodexOnlyWslSyncNeedsNoGateway()
+    {
+        // mirrored networking (no vEthernet) or a WSL adapter gone for a moment: the Codex snippet
+        // computes the address itself at every shell start, so its sync still goes through
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
+        var config = WslConfig("on", syncClaude: false, syncCodex: true, ("d1", "u1"));
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => null);
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var distro = Assert.Single(result.Distros);
+        Assert.False(distro.Failed, distro.Reason);
+        Assert.True(distro.ProxyEnvWritten);
+
+        // the Claude pass does bake the address: without a gateway it still fails with the reason
+        var claude = new WslConfigGuard(WslConfig("on", syncClaude: true, syncCodex: false, ("d1", "u1")), runner, gatewayProvider: () => null);
+        var failed = Assert.Single((await claude.SyncAsync(CancellationToken.None)).Distros);
+        Assert.True(failed.Failed);
+        Assert.Contains("gateway", failed.Reason);
+    }
+
+    [Fact]
     public async Task WslStatusIgnoresCodexProxyEnvWhenSyncCodexIsOff()
     {
         var runner = new FakeWslRunner

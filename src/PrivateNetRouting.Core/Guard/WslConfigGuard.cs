@@ -431,8 +431,13 @@ public sealed class WslConfigGuard(
 
     private async Task<WslDistroSyncResult> SyncDistroAsync(WslDistroConfig distro, System.Net.IPAddress? gateway, CancellationToken ct)
     {
-        var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config)
-            ?? throw new IOException($"WSL NAT gateway (vEthernet) not found for '{distro.Name}' — is WSL up?");
+        // only the Claude pass bakes the gateway address (into settings.json): the Codex snippet
+        // recomputes it at every shell start, so a Codex-only sync needs no gateway here
+        var proxy = ClaudeEnvValues.WslProxyUrl(gateway, config);
+        if (config.Wsl.SyncClaude && proxy is null)
+        {
+            throw new IOException($"WSL NAT gateway (vEthernet) not found for '{distro.Name}' — is WSL up?");
+        }
 
         if (config.Wsl.SyncClaude && !IsDedicatedStartupScriptPath(config.Wsl.StartupScriptPath))
         {
@@ -495,7 +500,7 @@ public sealed class WslConfigGuard(
             // privacy switches and the attribution keys), foreign keys are preserved; the backup
             // is made only when the content actually changes
             var root = read.SettingsRoot ?? [];
-            ClaudeSettingsShape.Apply(root, proxy, ClaudeEnvValues.BuildNoProxy(config.BypassDomains));
+            ClaudeSettingsShape.Apply(root, proxy!, ClaudeEnvValues.BuildNoProxy(config.BypassDomains)); // checked above for the Claude pass
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
             var settingsScript = NormalizeLf($$"""
