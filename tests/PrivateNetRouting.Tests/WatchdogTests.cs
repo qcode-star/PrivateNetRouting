@@ -199,16 +199,35 @@ public class WatchdogTests : IDisposable
         Assert.Contains("STATE=", WslAppHostStopper.Script(true, true));
     }
 
-    /// <summary>The Codex pass keys on the desktop app's signature — CODEX_HOME in the
-    /// process environment — and never names a bare codex process.</summary>
+    /// <summary>The Codex pass keys on the desktop app's signature — a codex app-server whose
+    /// environment carries CODEX_HOME, plus its descendants — and never on CODEX_HOME alone (a
+    /// user who exports it has it in every shell, tmux and a manual codex) nor on a bare codex
+    /// process name.</summary>
     [Fact]
-    public void StopScriptTargetsCodexByCodexHomeEnvOnly()
+    public void StopScriptTargetsOnlyTheCodexAppServerTrees()
     {
         var script = WslAppHostStopper.Script(true, true);
-        Assert.Contains("CODEX_HOME=*)", script);
+        Assert.Contains("CODEX_HOME=*) home=1", script);
         Assert.Contains("< \"$p/environ\"", script);
+        Assert.Contains("[ \"$home\" = \"1\" ] || continue", script);
+        Assert.Contains("[ \"$arg\" = \"app-server\" ]", script);
+        Assert.Contains("< \"$p/cmdline\"", script);
+        Assert.Contains("[ -n \"${target[${parent[$pid]}]:-}\" ]", script); // descendants
         Assert.DoesNotContain("pgrep codex", script);
         Assert.DoesNotContain("pkill codex", script);
+    }
+
+    /// <summary>The wait after a signal follows the pids of the first scan: a child the signal
+    /// orphaned is no longer a descendant of the root but is still alive, and the escalation must
+    /// reach it.</summary>
+    [Fact]
+    public void StopScriptWaitsOnTheTargetsOfTheFirstScan()
+    {
+        var script = WslAppHostStopper.Script(false, true);
+        var term = script.IndexOf("kill -TERM $CODEX_PIDS", StringComparison.Ordinal);
+        Assert.True(term >= 0);
+        Assert.Contains("codex_wait_gone 10", script[term..]);
+        Assert.DoesNotContain("codex_scan", script[term..]);
     }
 
     /// <summary>The app gates are baked into the script: an app disabled in the config

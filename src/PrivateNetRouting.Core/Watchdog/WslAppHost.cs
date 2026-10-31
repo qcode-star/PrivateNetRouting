@@ -21,8 +21,10 @@ public sealed record WslHostStopResult(WslHostState State, string Detail);
 /// Graceful stop of the app hosts the Windows desktop apps leave inside the WSL distros:
 /// the Claude remote host (daemon remote/srv/&lt;hash&gt;/server is stopped by its own binary via
 /// RPC server.shutdown, ccd-cli sessions by the same; orphans — SIGTERM → SIGKILL escalation)
-/// and the leftover Codex processes (SIGTERM → SIGKILL; recognized by CODEX_HOME in their
-/// environment — the desktop app's signature, a manually started codex CLI stays alone).
+/// and the process trees of the Codex desktop app's core (SIGTERM → SIGKILL; a root is a codex
+/// app-server whose environment carries CODEX_HOME — the desktop app's signature — and its
+/// descendants go with it; a manually started codex CLI, or a shell that merely exports
+/// CODEX_HOME, stays alone).
 /// Only the RUNNING distros of the configured list are touched — no distro is booted just for
 /// a check; the rest of the distro is left alone.
 /// </summary>
@@ -206,9 +208,9 @@ public sealed class WslAppHostStopper(
     /// <summary>
     /// The stop script of one distro. Output contract: detail lines (English) plus the final
     /// STATE= line (none | stopped | stuck). The Claude pass: the daemon is stopped by its own
-    /// binary (RPC), sessions and orphans — SIGTERM → SIGKILL. The Codex pass: every process
-    /// whose environment carries CODEX_HOME (what the desktop app passes to its WSL processes —
-    /// the same signature the profile.d snippet keys on), SIGTERM → SIGKILL.
+    /// binary (RPC), sessions and orphans — SIGTERM → SIGKILL. The Codex pass: the trees rooted
+    /// at a codex app-server whose environment carries CODEX_HOME (what the desktop app passes to
+    /// its WSL processes), SIGTERM → SIGKILL; CODEX_HOME alone marks no target.
     /// </summary>
     internal static string Script(bool stopClaude, bool stopCodex) => $$"""
         set -u
@@ -216,14 +218,17 @@ public sealed class WslAppHostStopper(
         STOP_CLAUDE={{(stopClaude ? 1 : 0)}}
         STOP_CODEX={{(stopCodex ? 1 : 0)}}
 
-        # --- codex: leftover processes of the desktop app (env carries CODEX_HOME) ---
+        # --- codex: the process trees of the desktop app's core (codex app-server + CODEX_HOME) ---
+        # A root is a process whose environment carries CODEX_HOME (what the desktop app passes to
+        # its WSL processes) AND whose argv runs the codex app-server; the targets are the roots
+        # and their descendants. CODEX_HOME alone is not the app's signature: a user who exports it
+        # in the profile (or forwards it through WSLENV) has it in tmux, editors, a manual codex.
         # This script and its ancestors are never targets: a CODEX_HOME forwarded through WSLENV
-        # (or exported by the user's profile) would otherwise make the stopper kill itself.
-        # /proc/<pid>/environ is the environment a process was exec'd with, so every subshell the
-        # script forks shows the inherited CODEX_HOME too: the variable is dropped here (helpers
-        # exec'd from now on do not carry it), and the scan runs in this very shell - builtins
-        # only, no command substitution or pipeline around it - so no forked copy of the script
-        # exists while /proc is being read.
+        # would otherwise make the stopper kill itself. /proc/<pid>/environ is the environment a
+        # process was exec'd with, so every subshell the script forks shows the inherited
+        # CODEX_HOME too: the variable is dropped here (helpers exec'd from now on do not carry
+        # it), and the scan runs in this very shell - builtins only, no command substitution or
+        # pipeline around it - so no forked copy of the script exists while /proc is being read.
         unset CODEX_HOME
         self_pids=" "
         q=$$
@@ -234,28 +239,68 @@ public sealed class WslAppHostStopper(
         CODEX_PIDS=""
         CODEX_N=0
         codex_scan() {
-            local p pid entry
+            local p pid entry arg line home runs_codex server changed
+            local -A parent=() target=()
             CODEX_PIDS=""
             CODEX_N=0
             for p in /proc/[0-9]*; do
                 pid=${p#/proc/}
                 case "$self_pids" in *" $pid "*) continue ;; esac
-                [ -r "$p/environ" ] || continue
+                line=""
+                { read -r line < "$p/stat"; } 2>/dev/null || continue
+                line=${line##*) }
+                set -f
+                set -- $line
+                set +f
+                [ "${1:-}" = "Z" ] && continue
+                parent[$pid]=${2:-0}
+                home=0
                 while IFS= read -r -d '' entry; do
-                    case "$entry" in
-                        CODEX_HOME=*)
-                            CODEX_PIDS="$CODEX_PIDS $pid"
-                            CODEX_N=$((CODEX_N + 1))
-                            break
-                            ;;
-                    esac
+                    case "$entry" in CODEX_HOME=*) home=1; break ;; esac
                 done 2>/dev/null < "$p/environ"
+                [ "$home" = "1" ] || continue
+                runs_codex=0
+                server=0
+                while IFS= read -r -d '' arg; do
+                    case "${arg##*/}" in codex|codex.js|codex-*) runs_codex=1 ;; esac
+                    [ "$runs_codex" = "1" ] && [ "$arg" = "app-server" ] && server=1
+                done 2>/dev/null < "$p/cmdline"
+                [ "$server" = "1" ] && target[$pid]=1
+            done
+            changed=1
+            while [ "$changed" = "1" ]; do
+                changed=0
+                for pid in "${!parent[@]}"; do
+                    [ -n "${target[$pid]:-}" ] && continue
+                    [ -n "${target[${parent[$pid]}]:-}" ] || continue
+                    target[$pid]=1
+                    changed=1
+                done
+            done
+            for pid in "${!target[@]}"; do
+                CODEX_PIDS="$CODEX_PIDS $pid"
+                CODEX_N=$((CODEX_N + 1))
             done
         }
-        codex_wait_empty() {
+        # the targets are fixed by the first scan: a child the signal orphaned is re-parented and
+        # is no longer a descendant, but it is still one of the app's processes until it is gone
+        codex_alive() {
+            local pid line alive=""
+            CODEX_N=0
+            for pid in $CODEX_PIDS; do
+                line=""
+                { read -r line < "/proc/$pid/stat"; } 2>/dev/null || continue
+                line=${line##*) }
+                [ "${line%% *}" = "Z" ] && continue
+                alive="$alive $pid"
+                CODEX_N=$((CODEX_N + 1))
+            done
+            CODEX_PIDS=$alive
+        }
+        codex_wait_gone() {
             local i=0
             while [ "$i" -lt "$1" ]; do
-                codex_scan
+                codex_alive
                 [ "$CODEX_N" -eq 0 ] && return 0
                 sleep 1
                 i=$((i + 1))
@@ -270,14 +315,14 @@ public sealed class WslAppHostStopper(
             codex_left=$CODEX_N
             if [ "$codex_left" -gt 0 ]; then
                 was_any=1
-                echo "CODEX=$codex_left (CODEX_HOME env) - SIGTERM"
+                echo "CODEX=$codex_left (codex app-server trees) - SIGTERM"
                 kill -TERM $CODEX_PIDS 2>/dev/null
-                if ! codex_wait_empty 10; then
+                if ! codex_wait_gone 10; then
                     echo "ESCALATE: SIGTERM did not help, codex left $CODEX_N - SIGKILL"
                     kill -KILL $CODEX_PIDS 2>/dev/null
                     sleep 2
                 fi
-                codex_scan
+                codex_alive
                 codex_left=$CODEX_N
                 echo "CODEX_REMAIN=$codex_left"
             fi
