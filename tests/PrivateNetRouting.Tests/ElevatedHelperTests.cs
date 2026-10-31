@@ -522,7 +522,7 @@ public class ElevatedHelperTests : IDisposable
     public async Task AHelperStopWithAStillRespondingDaemonReportsFail()
     {
         var name = $"pnr-test-{Guid.NewGuid():N}";
-        var socket = $@"\.\pipe\{name}";
+        var socket = $@"\\.\pipe\{name}";
         _ = Task.Run(async () =>
         {
             try
@@ -568,6 +568,8 @@ public class ElevatedHelperTests : IDisposable
     public async Task AHelperWithACancelMarkerDoesNotStartTheDaemon()
     {
         var resultFile = Path.Combine(PinnedDir, "elevated-start-daemon=0a1b2c3d.result");
+        // the asking side creates the pinned directory before the helper ever runs (MakeResultPath)
+        Directory.CreateDirectory(PinnedDir);
         File.WriteAllText(resultFile + ElevatedRunner.CancelSuffix, string.Empty);
 
         var code = await Task.Run(() => ElevatedChainCommands.Execute(
@@ -580,8 +582,10 @@ public class ElevatedHelperTests : IDisposable
     private string WriteTailscaleConfig(string socket)
     {
         var configPath = Path.Combine(_dir, $"chain-{Guid.NewGuid():N}.json");
+        // every backslash of the interpolated paths is doubled for JSON — including the literal
+        // \state suffix, which a single one would make an invalid JSON escape
         File.WriteAllText(configPath, $$"""
-            { "chain": { "tailscale": { "socket": "{{socket.Replace("\\", "\\\\")}}", "stateDir": "{{_dir.Replace("\\", "\\\\")}}\state" } } }
+            { "chain": { "tailscale": { "socket": "{{socket.Replace("\\", "\\\\")}}", "stateDir": "{{_dir.Replace("\\", "\\\\")}}\\state" } } }
             """);
         return configPath;
     }

@@ -1327,8 +1327,8 @@ public class ChainSupervisorTests : IDisposable
             Assert.Equal("test", result.Detail); // the helper's own detail, not a canned one
             Assert.NotNull(writtenTo);
             Assert.True(Directory.Exists(pinned));
-            Assert.True(File.Exists(Path.Combine(pinned, Path.GetFileName(writtenTo!))));
-            Assert.False(File.Exists(writtenTo)); // the collected result is removed
+            // the runner reads the result and removes it — no result files pile up
+            Assert.False(File.Exists(writtenTo));
             log.Dispose();
             File.Delete(logPath);
         }
