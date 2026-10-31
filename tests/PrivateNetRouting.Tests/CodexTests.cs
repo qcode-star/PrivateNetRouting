@@ -444,6 +444,22 @@ public class CodexTests : IDisposable
         Assert.Contains("0x80073D02", ex.Message);
     }
 
+    /// <summary>
+    /// The Store may queue nothing (no update offered any more): the run fails with a message that
+    /// says so — not a NullReferenceException after Codex was already closed.
+    /// </summary>
+    [Fact]
+    public async Task AStoreThatQueuesNothingFailsWithAClearMessage()
+    {
+        var (updater, store, appx, _, _) = CreateUpdater();
+        appx.Installed = Package("26.1007.2314.0", "OpenAI.Codex_2p2nqsd0c76g0");
+        store.QueuesNothing = true;
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => updater.UpdateAsync(null, CancellationToken.None));
+
+        Assert.Contains("queued no update", ex.Message);
+    }
+
     [Fact]
     public async Task UpdateWithoutPackageFamilyNameFails()
     {
@@ -592,16 +608,19 @@ public class CodexTests : IDisposable
 
         public FakeStoreHandle Handle { get; } = new();
 
+        /// <summary>The Store queues nothing (UpdateAppByPackageFamilyNameAsync answers null).</summary>
+        public bool QueuesNothing { get; set; }
+
         public Task<bool> HasUpdateAsync(string storeProductId, CancellationToken ct)
         {
             LastProductId = storeProductId;
             return Error is not null ? Task.FromException<bool>(Error) : Task.FromResult(HasUpdate);
         }
 
-        public Task<IStoreInstallHandle> StartUpdateAsync(string packageFamilyName, CancellationToken ct)
+        public Task<IStoreInstallHandle?> StartUpdateAsync(string packageFamilyName, CancellationToken ct)
         {
             LastFamilyName = packageFamilyName;
-            return Task.FromResult<IStoreInstallHandle>(Handle);
+            return Task.FromResult<IStoreInstallHandle?>(QueuesNothing ? null : Handle);
         }
     }
 

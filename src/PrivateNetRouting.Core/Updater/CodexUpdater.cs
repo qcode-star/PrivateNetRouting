@@ -88,6 +88,16 @@ public sealed class CodexUpdater(
 
         log.Info($"codex-updater: queuing the Store update for {installed.PackageFamilyName}");
         var handle = await store.StartUpdateAsync(installed.PackageFamilyName, ct).ConfigureAwait(false);
+        if (handle is null)
+        {
+            // the check saw an update, but by now the Store offers none (it may have installed it
+            // itself meanwhile): Codex is closed already, so say what happened instead of failing blindly
+            log.Warn($"codex-updater: the Store queued no update for {installed.PackageFamilyName}");
+            throw new IOException(
+                "the Store queued no update for Codex (none is offered any more — it may already be installed); "
+                + "Codex was closed for the update, start it again");
+        }
+
         onHandle?.Invoke(handle);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.Codex.Update.UpdateTimeoutSeconds)));

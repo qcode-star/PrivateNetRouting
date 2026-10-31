@@ -46,8 +46,11 @@ public interface IStoreUpdateSource
     /// <summary>Whether the Store catalog offers an update newer than the installed version.</summary>
     Task<bool> HasUpdateAsync(string storeProductId, CancellationToken ct);
 
-    /// <summary>Queues the update for the package family (idempotent: an already queued one is returned).</summary>
-    Task<IStoreInstallHandle> StartUpdateAsync(string packageFamilyName, CancellationToken ct);
+    /// <summary>
+    /// Queues the update for the package family (idempotent: an already queued one is returned);
+    /// null — the Store queued nothing (no update is offered for the family any more).
+    /// </summary>
+    Task<IStoreInstallHandle?> StartUpdateAsync(string packageFamilyName, CancellationToken ct);
 }
 
 /// <summary>The real Store source (WinRT AppInstallManager; needs no package identity).</summary>
@@ -60,11 +63,12 @@ public sealed class StoreUpdateSource : IStoreUpdateSource
         return item is not null;
     }
 
-    public async Task<IStoreInstallHandle> StartUpdateAsync(string packageFamilyName, CancellationToken ct)
+    public async Task<IStoreInstallHandle?> StartUpdateAsync(string packageFamilyName, CancellationToken ct)
     {
         var manager = new AppInstallManager();
+        // the WinRT call answers null when the Store has nothing to queue for the family
         var item = await manager.UpdateAppByPackageFamilyNameAsync(packageFamilyName).AsTask(ct).ConfigureAwait(false);
-        return new StoreInstallHandle(item);
+        return item is null ? null : new StoreInstallHandle(item);
     }
 
     private sealed class StoreInstallHandle(AppInstallItem item) : IStoreInstallHandle
