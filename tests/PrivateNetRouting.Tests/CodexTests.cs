@@ -337,15 +337,15 @@ public class CodexTests : IDisposable
             new StoreInstallStatus(StoreInstallPhase.Completed, 100, 100, 100, null),
         ];
 
-        var progress = new List<UpdateProgress>();
-        var update = await updater.UpdateAsync(new Progress<UpdateProgress>(progress.Add), CancellationToken.None);
+        var progress = new SyncProgress();
+        var update = await updater.UpdateAsync(progress, CancellationToken.None);
 
         Assert.True(update.VersionChanged);
         Assert.Equal("26.1101.0.0", update.Package.Version);
         Assert.Equal("OpenAI.Codex_2p2nqsd0c76g0", store.LastFamilyName);
         Assert.True(processes.FindResult[0].CloseMainWindowCalled);
-        Assert.Contains(progress, p => p.Phase == UpdatePhase.Download);
-        Assert.Contains(progress, p => p.Phase == UpdatePhase.Install);
+        Assert.Contains(progress.Items, p => p.Phase == UpdatePhase.Download);
+        Assert.Contains(progress.Items, p => p.Phase == UpdatePhase.Install);
     }
 
     [Fact]
@@ -358,15 +358,15 @@ public class CodexTests : IDisposable
             new StoreInstallStatus(StoreInstallPhase.Downloading, 100, 100, 100, null),
             new StoreInstallStatus(StoreInstallPhase.Completed, 100, 100, 100, null),
         ];
-        var progress = new List<UpdateProgress>();
+        var progress = new SyncProgress();
 
-        var update = await updater.UpdateAsync(new Progress<UpdateProgress>(progress.Add), CancellationToken.None);
+        var update = await updater.UpdateAsync(progress, CancellationToken.None);
 
         Assert.False(update.VersionChanged);
         Assert.Equal(UpdateOutcome.NoChange, update.Outcome);
         Assert.Equal("26.1007.2314.0", update.Package.Version);
-        Assert.Contains(progress, p => p.Phase == UpdatePhase.Done && p.Message.Contains("did not change"));
-        Assert.DoesNotContain(progress, p => p.Message == "installed 26.1007.2314.0 -> 26.1007.2314.0");
+        Assert.Contains(progress.Items, p => p.Phase == UpdatePhase.Done && p.Message.Contains("did not change"));
+        Assert.DoesNotContain(progress.Items, p => p.Message == "installed 26.1007.2314.0 -> 26.1007.2314.0");
     }
 
     [Fact]
