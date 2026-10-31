@@ -293,8 +293,10 @@ internal static class Program
             await runtime.ProxyControl.DetachAsync(CancellationToken.None);
             return true;
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
         {
+            // a worker that cannot be spawned (Win32Exception) is the same failed handover: on an
+            // error path it must not replace the exception being reported
             Console.Error.WriteLine($"the forward proxy could not be handed over to a background worker: {ex.Message}");
             Console.Error.WriteLine(consequence
                 ?? "the client was started, but nothing will listen on the proxy address once this command exits");
