@@ -102,7 +102,14 @@ internal sealed class FakeSystemProxyStore : ISystemProxyStore
 
     public void Enable(string server, string bypass) => EnabledWith = (server, bypass);
 
-    public void Disable(string? ourServer = null) => DisabledWith.Add(ourServer);
+    /// <summary>What the next turn-off reports.</summary>
+    public SystemProxyDisableOutcome DisableOutcome { get; set; } = SystemProxyDisableOutcome.Cleared;
+
+    public SystemProxyDisableOutcome Disable(string? ourServer = null)
+    {
+        DisabledWith.Add(ourServer);
+        return DisableOutcome;
+    }
 }
 
 internal sealed class FakeElevatedRunner(bool ok = true, string detail = "done") : IElevatedCommandRunner
@@ -2846,6 +2853,60 @@ public class GuardTests : IDisposable
 
         var message = await service.SetSystemProxyAsync(true, CancellationToken.None);
         Assert.Contains("warning: automatic proxy detection is set", message);
+    }
+
+    [Fact]
+    public void SysProxyDisableReportsWhatItDid()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            var store = new WinInetSystemProxyStore(keyPath);
+            Assert.Equal(SystemProxyDisableOutcome.NothingOurs, store.Disable("127.0.0.1:18081")); // no key at all
+
+            SeedUserProxy(keyPath, "192.0.2.1:8080", "*.example.com", proxyEnable: 1);
+            Assert.Equal(SystemProxyDisableOutcome.LeftForeign, store.Disable("127.0.0.1:18081"));
+
+            store.Enable("127.0.0.1:18081", "localhost");
+            Assert.Equal(SystemProxyDisableOutcome.Restored, store.Disable("127.0.0.1:18081"));
+            Assert.Equal(SystemProxyDisableOutcome.LeftForeign, store.Disable("127.0.0.1:18081")); // the owner's is back on
+
+            // a legacy leftover: our address without the ownership record, nothing saved
+            SeedUserProxy(keyPath, "127.0.0.1:18081", "localhost", proxyEnable: 1);
+            Assert.Equal(SystemProxyDisableOutcome.Cleared, store.Disable("127.0.0.1:18081"));
+            Assert.Equal(SystemProxyDisableOutcome.NothingOurs, store.Disable("127.0.0.1:18081"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public async Task SysProxyOffSaysWhatHappenedAndALegacyLeftoverIsOurs()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-sysproxy-off");
+        // our address on the switch, written by a build that predates the ownership record
+        var sysProxy = new FakeSystemProxyStore { Status = new SystemProxyStatus(true, "127.0.0.1:18082", "localhost") };
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), sysProxy, new FakeElevatedRunner(), out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(GuardState.On, snapshot[GuardKind.SystemProxy].State);
+        Assert.DoesNotContain("left alone", snapshot[GuardKind.SystemProxy].Detail);
+
+        sysProxy.Status = new SystemProxyStatus(true, "192.0.2.1:8080", null);
+        sysProxy.DisableOutcome = SystemProxyDisableOutcome.LeftForeign;
+        Assert.Equal(
+            "system proxy: 192.0.2.1:8080 is not this application's proxy - left as it is",
+            await service.SetSystemProxyAsync(false, CancellationToken.None));
+
+        sysProxy.DisableOutcome = SystemProxyDisableOutcome.Restored; // the owner's enabled proxy came back
+        Assert.Contains("the previous settings are back - 192.0.2.1:8080, enabled", await service.SetSystemProxyAsync(false, CancellationToken.None));
+
+        sysProxy.DisableOutcome = SystemProxyDisableOutcome.NothingOurs;
+        Assert.Contains("nothing to turn off", await service.SetSystemProxyAsync(false, CancellationToken.None));
     }
 
     [Fact]

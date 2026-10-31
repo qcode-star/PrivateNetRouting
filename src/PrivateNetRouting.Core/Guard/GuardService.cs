@@ -157,6 +157,13 @@ public sealed class GuardService(
         try
         {
             sysProxyStatus = systemProxy.Read();
+            if (!sysProxyStatus.Ours
+                && string.Equals(sysProxyStatus.Server, SystemProxyServer(config), StringComparison.OrdinalIgnoreCase))
+            {
+                // our own address without the ownership record (a build that predates it): the
+                // off of this installation clears it, so it is ours, not "left alone"
+                sysProxyStatus = sysProxyStatus with { Ours = true };
+            }
         }
         catch (Exception ex)
         {
@@ -615,13 +622,22 @@ public sealed class GuardService(
             else
             {
                 // the address this installation writes while on: the store uses it to tell its own
-                // leftover values from the user's
+                // leftover values from the user's (a build that predates the ownership record)
                 var before = systemProxy.Read();
-                systemProxy.Disable(SystemProxyServer(config));
-                log.Info(before is { Enabled: true, Ours: false }
-                    ? $"guard sysproxy off: {before.Server} is not this application's proxy - left alone"
-                    : "guard sysproxy off");
-                return "system proxy disabled (direct access restored)";
+                var message = systemProxy.Disable(SystemProxyServer(config)) switch
+                {
+                    SystemProxyDisableOutcome.Cleared => "system proxy disabled (direct access restored)",
+                    SystemProxyDisableOutcome.Restored => systemProxy.Read() is { } after
+                        ? after.Enabled
+                            ? $"system proxy: the previous settings are back - {after.Server ?? "<no server>"}, enabled"
+                            : "system proxy: the previous settings are back - disabled (direct access restored)"
+                        : "system proxy: the previous settings are back",
+                    SystemProxyDisableOutcome.LeftForeign =>
+                        $"system proxy: {before.Server} is not this application's proxy - left as it is",
+                    _ => "system proxy: nothing of this application's was on - nothing to turn off",
+                };
+                log.Info($"guard sysproxy off: {message}");
+                return message;
             }
         }, ct);
 

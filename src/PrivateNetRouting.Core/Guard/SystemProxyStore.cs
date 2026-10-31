@@ -25,7 +25,23 @@ public interface ISystemProxyStore
     /// address, or <paramref name="ourServer"/> as written by a build that predates the record) is
     /// restored from the save or cleared; a foreign one is left untouched — the switch is not ours.
     /// </summary>
-    void Disable(string? ourServer = null);
+    SystemProxyDisableOutcome Disable(string? ourServer = null);
+}
+
+/// <summary>What a turn-off actually did to the switch.</summary>
+public enum SystemProxyDisableOutcome
+{
+    /// <summary>Nothing of this installation was on the switch: no key, or the values were never ours.</summary>
+    NothingOurs,
+
+    /// <summary>A proxy of the owner or another tool is on the switch: left as it is (a stale save is dropped).</summary>
+    LeftForeign,
+
+    /// <summary>Our values left with the switch, nothing of the owner's to restore: direct access.</summary>
+    Cleared,
+
+    /// <summary>The owner's saved values and on/off state came back.</summary>
+    Restored,
 }
 
 public sealed class WinInetSystemProxyStore : ISystemProxyStore
@@ -108,12 +124,12 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
         NotifySettingsChanged();
     }
 
-    public void Disable(string? ourServer = null)
+    public SystemProxyDisableOutcome Disable(string? ourServer = null)
     {
         using var key = Registry.CurrentUser.OpenSubKey(_keyPath, writable: true);
         if (key is null)
         {
-            return; // no key — nothing this installation could have written
+            return SystemProxyDisableOutcome.NothingOurs; // no key — nothing this installation could have written
         }
 
         var currentServer = key.GetValue("ProxyServer") as string;
@@ -126,7 +142,9 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
             {
                 // a proxy this installation never wrote (the owner's, another tool's): the switch is
                 // not ours to turn off and its values stay as they are
-                return;
+                return CurrentEnable(key) && currentServer is not null
+                    ? SystemProxyDisableOutcome.LeftForeign
+                    : SystemProxyDisableOutcome.NothingOurs;
             }
 
             // nothing of the owner's to restore and the values on the switch are ours: they leave
@@ -136,7 +154,7 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
             key.DeleteValue(OursServerName, throwOnMissingValue: false);
             key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
             NotifySettingsChanged();
-            return;
+            return SystemProxyDisableOutcome.Cleared;
         }
 
         if (!ours)
@@ -144,7 +162,9 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
             // the switch no longer holds our values (the owner or another tool replaced them): the
             // stale save must not overwrite them on a later off, so it goes together with the record
             ConsumeSave(key);
-            return;
+            return CurrentEnable(key) && currentServer is not null
+                ? SystemProxyDisableOutcome.LeftForeign
+                : SystemProxyDisableOutcome.NothingOurs;
         }
 
         // the owner's values and on/off state come back, the save is consumed
@@ -170,6 +190,7 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
         key.DeleteValue(OursServerName, throwOnMissingValue: false);
         ConsumeSave(key);
         NotifySettingsChanged();
+        return SystemProxyDisableOutcome.Restored;
     }
 
     private static bool IsOurs(RegistryKey key, string? server) =>
