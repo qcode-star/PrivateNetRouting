@@ -385,7 +385,9 @@ public sealed class WslConfigGuard(
                 echo "FAILED: in-place write of $dest did not complete"
                 return 1
             fi
-            tmp="$dest.pnr-tmp"
+            # the pid in the name: a sync pass and a boot-script pass writing the same file at
+            # once must not tear each other's temp file
+            tmp="$dest.pnr-tmp.$$"
             cat "$new" > "$tmp" || { rm -f "$tmp"; echo "FAILED: cannot write $tmp"; return 1; }
             if [ -f "$dest" ]; then
                 chmod --reference="$dest" "$tmp" 2>/dev/null
@@ -1282,7 +1284,9 @@ public sealed class WslConfigGuard(
         env = data.setdefault('env', {})
         env['HTTPS_PROXY'] = proxy
         env['HTTP_PROXY'] = proxy
-        tmp = real + '.pnr-tmp'
+        # the pid in the name: a sync pass and a boot-script pass writing the same file at
+        # once must not tear each other's temp file
+        tmp = '%s.pnr-tmp.%d' % (real, os.getpid())
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         if os.path.exists(real):

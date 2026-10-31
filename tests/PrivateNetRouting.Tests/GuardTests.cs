@@ -1043,6 +1043,15 @@ public class GuardTests : IDisposable
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
 
     [Fact]
+    public void WslWritersUseUniqueTempNames()
+    {
+        // a sync pass and a boot-script pass writing one settings.json at once must not tear
+        // each other's temp file: every temp name carries the writer's pid
+        Assert.Contains("pnr-tmp.$$", WslConfigGuard.PnrBakFn, StringComparison.Ordinal);
+        Assert.Contains("pnr-tmp.%d", WslConfigGuard.BuildStartupScript("user", 18082), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AForcedOnWslLayerOnAMachineWithoutWslIsUnknownNotAFailure()
     {
         var runner = new FakeWslRunner
