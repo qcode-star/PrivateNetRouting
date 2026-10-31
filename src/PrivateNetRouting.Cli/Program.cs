@@ -273,6 +273,19 @@ internal static class Program
     private const string ChainLeftUpMessage =
         "the chain was raised, but nothing will listen on the proxy address once this command exits";
 
+    /// <summary>The re-arm spawn on a failure path: its own failure must not replace the one being reported.</summary>
+    private static async Task AwaitAutoStartQuietlyAsync(ProxyRuntime runtime)
+    {
+        try
+        {
+            await runtime.WatchdogControl.LastAutoStart;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"the idle stopper could not be re-armed: {ex.Message}");
+        }
+    }
+
     private static async Task<bool> HandOverProxyAsync(ProxyRuntime runtime, string? consequence)
     {
         try
@@ -982,11 +995,14 @@ internal static class Program
         }
         catch
         {
-            // the chain may have been raised before the failure — never leave it half-up
+            // the chain may have been raised before the failure — never leave it half-up, and let
+            // the stopper's re-arm spawn finish before this process exits
+            await AwaitAutoStartQuietlyAsync(runtime);
             await HandOverProxyAsync(runtime, ChainLeftUpMessage);
             throw;
         }
 
+        await runtime.WatchdogControl.LastAutoStart; // a raise re-arms the stopper — the spawn must survive this process
         // the update raises the chain on its own way to the package: this process holds the
         // in-process listener, and it would die with the command (the daemon and the keeper stay)
         var handedOver = await HandOverProxyAsync(runtime, ChainLeftUpMessage);
