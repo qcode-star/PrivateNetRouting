@@ -523,6 +523,7 @@ public class ElevatedHelperTests : IDisposable
     {
         var name = $"pnr-test-{Guid.NewGuid():N}";
         var socket = $@"\\.\pipe\{name}";
+        var pumpReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _ = Task.Run(async () =>
         {
             try
@@ -530,6 +531,7 @@ public class ElevatedHelperTests : IDisposable
                 while (true)
                 {
                     using var server = new NamedPipeServerStream(name, PipeDirection.In);
+                    pumpReady.TrySetResult();
                     await server.WaitForConnectionAsync();
                 }
             }
@@ -538,6 +540,7 @@ public class ElevatedHelperTests : IDisposable
                 // the test ended: the pump stops with it
             }
         });
+        await pumpReady.Task.WaitAsync(TimeSpan.FromSeconds(10)); // the pipe exists before the stop runs
         var resultFile = Path.Combine(PinnedDir, "elevated-stop-chain=0a1b2c3d.result");
         var code = await Task.Run(() => ElevatedChainCommands.Execute(
             ElevatedChainCommands.StopChain, resultFile, WriteTailscaleConfig(socket)));
