@@ -557,6 +557,29 @@ public class UpdaterTests : IDisposable
 
         Assert.All(_claude.Processes, p => Assert.Equal(0, p.Closes));
         Assert.Single(_appx.AddedFiles);
+        Assert.Equal([false], _appx.ForcedShutdowns); // the installer must not force it closed either
+    }
+
+    [Fact]
+    public async Task ADefaultInstallLetsTheInstallerCloseTheApplication()
+    {
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal([true], _appx.ForcedShutdowns);
+    }
+
+    [Fact]
+    public void AddPackageScriptCarriesTheForcedShutdownOnlyWhenAsked()
+    {
+        Assert.Equal(
+            "Add-AppxPackage -Path 'C:\\pkg\\it''s.msix' -ForceApplicationShutdown",
+            PowerShellAppxPackageSource.AddPackageScript(@"C:\pkg\it's.msix", forceApplicationShutdown: true));
+        Assert.Equal(
+            "Add-AppxPackage -Path 'C:\\pkg\\it''s.msix'",
+            PowerShellAppxPackageSource.AddPackageScript(@"C:\pkg\it's.msix", forceApplicationShutdown: false));
     }
 
     [Fact]
@@ -994,14 +1017,18 @@ public class UpdaterTests : IDisposable
 
         public List<string> AddedFiles { get; } = [];
 
+        /// <summary>The forceApplicationShutdown flag of every installation, in order.</summary>
+        public List<bool> ForcedShutdowns { get; } = [];
+
         public Exception? AddFailure { get; set; }
 
         public Task<InstalledPackage?> GetInstalledAsync(string packageName, CancellationToken ct) =>
             Task.FromResult(Installed);
 
-        public Task AddPackageAsync(string packageFile, CancellationToken ct)
+        public Task AddPackageAsync(string packageFile, bool forceApplicationShutdown, CancellationToken ct)
         {
             AddedFiles.Add(packageFile);
+            ForcedShutdowns.Add(forceApplicationShutdown);
             if (AddFailure is not null)
             {
                 return Task.FromException(AddFailure);

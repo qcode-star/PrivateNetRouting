@@ -304,8 +304,10 @@ public sealed class ClaudeUpdater(
             await CloseClaudeAsync(progress, ct);
         }
 
+        // KeepRunning keeps Claude open: the installer must not force it closed either (without
+        // the flag a copy whose files are in use fails the installation instead)
         progress?.Report(new UpdateProgress(UpdatePhase.Install, 0, 0, "Add-AppxPackage"));
-        await appx.AddPackageAsync(file, ct);
+        await appx.AddPackageAsync(file, forceApplicationShutdown: !options.KeepRunning, ct);
 
         // only a forced pass gets here with the installed version: a reinstall, not an update
         var reinstall = IsInstalledVersion(identity, before.Version);

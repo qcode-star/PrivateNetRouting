@@ -577,7 +577,7 @@ public class CodexTests : IDisposable
             return Task.FromResult(read == 0 ? Installed : AfterInstall ?? Installed);
         }
 
-        public Task AddPackageAsync(string packageFile, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPackageAsync(string packageFile, bool forceApplicationShutdown, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class FakeStoreSource : IStoreUpdateSource

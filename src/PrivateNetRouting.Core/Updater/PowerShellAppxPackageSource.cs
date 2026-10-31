@@ -17,12 +17,17 @@ public interface IAppxPackageSource
 {
     Task<InstalledPackage?> GetInstalledAsync(string packageName, CancellationToken ct);
 
-    Task AddPackageAsync(string packageFile, CancellationToken ct);
+    /// <summary>
+    /// Installs the package; <paramref name="forceApplicationShutdown"/> lets the installer close a
+    /// running copy of the application. Without it a running copy keeps its files in use and the
+    /// installation fails rather than closing it.
+    /// </summary>
+    Task AddPackageAsync(string packageFile, bool forceApplicationShutdown, CancellationToken ct);
 }
 
 /// <summary>
 /// Get-AppxPackage (version/Publisher of the installed package; with several, the highest is taken)
-/// and Add-AppxPackage -ForceApplicationShutdown.
+/// and Add-AppxPackage (with -ForceApplicationShutdown unless the running application must be kept).
 /// </summary>
 public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, FileLog log) : IAppxPackageSource
 {
@@ -43,20 +48,27 @@ public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, 
         return ParsePackageJson(output);
     }
 
-    public async Task AddPackageAsync(string packageFile, CancellationToken ct)
+    public async Task AddPackageAsync(string packageFile, bool forceApplicationShutdown, CancellationToken ct)
     {
-        var script = "Add-AppxPackage -Path '" + packageFile.Replace("'", "''") + "' -ForceApplicationShutdown";
-        var (code, output) = await powershell.RunScriptAsync(script, ct);
+        var (code, output) = await powershell.RunScriptAsync(AddPackageScript(packageFile, forceApplicationShutdown), ct);
         if (code != 0)
         {
+            var kept = forceApplicationShutdown
+                ? ""
+                : "The running application was kept (--keep-running): if its files are in use, close it or run without --keep-running.\n";
             throw new IOException(
                 $"Add-AppxPackage failed (exit {code}): {output}\n" +
+                kept +
                 $"If it complains about rights, run from an admin console:\n" +
-                $"  Add-AppxPackage -Path \"{packageFile}\" -ForceApplicationShutdown");
+                $"  Add-AppxPackage -Path \"{packageFile}\"{(forceApplicationShutdown ? " -ForceApplicationShutdown" : "")}");
         }
 
         log.Info($"updater: Add-AppxPackage ok: {packageFile}");
     }
+
+    internal static string AddPackageScript(string packageFile, bool forceApplicationShutdown) =>
+        "Add-AppxPackage -Path '" + packageFile.Replace("'", "''") + "'"
+        + (forceApplicationShutdown ? " -ForceApplicationShutdown" : "");
 
     /// <summary>JSON of a single package from ConvertTo-Json; empty output — no package.</summary>
     internal static InstalledPackage? ParsePackageJson(string json)
