@@ -215,8 +215,10 @@ public sealed class GuardService(
                 FirewallCurrent = firewallCurrent,
             };
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // whatever the reason (an unreadable hosts file, PowerShell that did not start, an
+            // unexpected cmdlet answer), the ban alone is unknown: the other layers are still read
             ban = UnknownBan(ex);
         }
 

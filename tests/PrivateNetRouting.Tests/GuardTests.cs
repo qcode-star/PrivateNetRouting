@@ -1006,6 +1006,41 @@ public class GuardTests : IDisposable
         Assert.Equal(2, array.FirewallRules);
     }
 
+    [Theory]
+    [InlineData("""{"ns":[],"fwCount":0}""")] // a field missing
+    [InlineData("""{"nrptCount":"one","ns":[],"fwCount":0}""")] // a field of the wrong kind
+    public void AnUnexpectedLayersAnswerIsInvalidData(string json) =>
+        Assert.Throws<InvalidDataException>(() => PowerShellBanSystemOps.ParseLayersState(json));
+
+    [Fact]
+    public async Task AnyFailureOfTheBanReadLeavesOnlyTheBanUnknown()
+    {
+        Exception[] failures =
+        [
+            new System.ComponentModel.Win32Exception("powershell did not start"),
+            new UnauthorizedAccessException("hosts is not readable"),
+            new KeyNotFoundException("nrptCount"),
+        ];
+        foreach (var failure in failures)
+        {
+            var config = new AppConfig();
+            config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-ban-read-failure");
+            var service = MakeService(
+                config,
+                new FakeEgressPolicyStore(),
+                new FakeBanSystemOps { StatusError = failure },
+                new FakeSystemProxyStore(),
+                new FakeElevatedRunner(),
+                out _);
+
+            var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+            Assert.Equal(GuardState.Unknown, snapshot.Ban.State);
+            Assert.Contains(failure.Message, snapshot[GuardKind.LocalBan].Detail);
+            Assert.Equal(GuardState.Off, snapshot.Policy.State); // the other layers are still read
+        }
+    }
+
     private sealed class StubPowerShell : IPowerShellExecutor
     {
         public Task<(int Code, string Output)> RunScriptAsync(string script, CancellationToken ct) => Task.FromResult((0, ""));

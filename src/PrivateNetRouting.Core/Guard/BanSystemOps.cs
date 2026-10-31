@@ -123,8 +123,9 @@ public sealed class PowerShellBanSystemOps(AppConfig config, IPowerShellExecutor
                 root.GetProperty("fwCount").GetInt32(),
                 ReadStringArray(root, "subnets"));
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
+            // malformed JSON, a missing field, or a field of the wrong kind
             throw new InvalidDataException($"unexpected NRPT/firewall status output: {json}", ex);
         }
     }
