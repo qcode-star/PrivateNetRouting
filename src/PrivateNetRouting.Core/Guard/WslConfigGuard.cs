@@ -302,13 +302,31 @@ public sealed class WslConfigGuard(
             // a layer that is not synced cannot be stale: its signals are ignored
             var expectedHost = ClaudeEnvValues.WslFixedHost(config);
             var portOk = !config.Wsl.SyncClaude || (read.ScriptPort == expectedPort && read.ScriptHost == expectedHost);
-            var proxyOk = !config.Wsl.SyncClaude || expectedProxy is null || read.SettingsProxy == expectedProxy;
             var envOk = !config.Wsl.SyncCodex
                 || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expectedHost);
             // the privacy/attribution keys of settings.json: the sync maintains them like the proxy env
             var keysOk = !config.Wsl.SyncClaude
                 || read.SettingsRoot is not { } settingsRoot
                 || ClaudeSettingsShape.DriftOf(settingsRoot).Count == 0;
+            if (config.Wsl.SyncClaude && expectedProxy is null)
+            {
+                // the expected proxy cannot be computed (the WSL NAT gateway is gone, or the
+                // endpoint is loopback-only): the proxy state is uncheckable — that is not "on",
+                // the distro is partial with the reason
+                var okWithoutProxy = portOk && envOk && keysOk;
+                return new WslDistroStatus(
+                    distro.Name,
+                    config.Wsl.SyncClaude,
+                    GuardState.Partial,
+                    read.ScriptPort,
+                    read.SettingsProxy,
+                    (okWithoutProxy ? "" : DescribeMismatch(read, expectedPort, expectedHost, expectedProxy, config.Wsl.SyncCodex) + "; ")
+                    + "the WSL gateway is unknown — the expected proxy cannot be checked",
+                    read.ProxyEnvPresent,
+                    read.ProxyEnvPort);
+            }
+
+            var proxyOk = !config.Wsl.SyncClaude || read.SettingsProxy == expectedProxy;
             var ok = portOk && proxyOk && envOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,

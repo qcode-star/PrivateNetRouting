@@ -1052,6 +1052,19 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task AnUnknownWslGatewayReportsTheDistroAsPartialNotOn()
+    {
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => WslProbeInSync("u1") };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, () => null);
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        var distro = Assert.Single(status.Distros);
+        Assert.Equal(GuardState.Partial, distro.State); // the proxy state is uncheckable, not "on"
+        Assert.Contains("the WSL gateway is unknown", distro.Reason);
+    }
+
+    [Fact]
     public async Task AForcedOnWslLayerOnAMachineWithoutWslIsUnknownNotAFailure()
     {
         var runner = new FakeWslRunner
