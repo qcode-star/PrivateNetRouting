@@ -2792,6 +2792,63 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void SysProxyReadSeesAPacScriptAndAutomaticDetection()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            var store = new WinInetSystemProxyStore(keyPath);
+            store.Enable("127.0.0.1:18081", "localhost");
+            Assert.Null(store.Read().Overridden);
+
+            using (var key = Registry.CurrentUser.CreateSubKey(keyPath, writable: true))
+            {
+                key.SetValue("AutoConfigURL", "http://pac.example/proxy.pac", RegistryValueKind.String);
+            }
+
+            using (var connections = Registry.CurrentUser.CreateSubKey(keyPath + @"\Connections", writable: true))
+            {
+                // version, counter, flags: direct (0x01) + auto-detect (0x08)
+                connections.SetValue("DefaultConnectionSettings", new byte[] { 0x46, 0, 0, 0, 1, 0, 0, 0, 0x09, 0, 0, 0 }, RegistryValueKind.Binary);
+            }
+
+            var status = store.Read();
+            Assert.True(status.PacScript);
+            Assert.True(status.AutoDetect);
+            Assert.Contains("PAC script", status.Overridden);
+
+            // the store reads them and never changes them
+            store.Disable();
+            using var after = Registry.CurrentUser.OpenSubKey(keyPath)!;
+            Assert.Equal("http://pac.example/proxy.pac", after.GetValue("AutoConfigURL"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public async Task OurSystemProxyOverriddenByAPacScriptIsPartialWithAWarning()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-sysproxy-pac");
+        var sysProxy = new FakeSystemProxyStore
+        {
+            Status = new SystemProxyStatus(true, "127.0.0.1:18082", "localhost") { Ours = true, AutoDetect = true },
+        };
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), sysProxy, new FakeElevatedRunner(), out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(GuardState.Partial, snapshot[GuardKind.SystemProxy].State);
+        Assert.Contains("automatic proxy detection takes priority", snapshot[GuardKind.SystemProxy].Detail);
+
+        var message = await service.SetSystemProxyAsync(true, CancellationToken.None);
+        Assert.Contains("warning: automatic proxy detection is set", message);
+    }
+
+    [Fact]
     public void SysProxyEnablePreservesTheUserSettingsAndDisableRestoresThem()
     {
         var keyPath = NewSysProxyKey();

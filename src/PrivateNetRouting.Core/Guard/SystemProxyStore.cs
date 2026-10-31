@@ -11,7 +11,8 @@ namespace PrivateNetRouting.Core.Guard;
 /// corporate domains from the top-level bypassDomains (both forms) and *.tld entries from the
 /// top-level directTlds. Enabling preserves whatever the owner had — ProxyServer, ProxyOverride and
 /// the on/off state — once, and records the address this installation wrote; disabling restores the
-/// owner's values and leaves a proxy it does not own alone.
+/// owner's values and leaves a proxy it does not own alone. A PAC script or automatic detection
+/// takes priority over the manual proxy in WinINET: they are read and reported, never changed.
 /// </summary>
 public interface ISystemProxyStore
 {
@@ -58,8 +59,24 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
             key.GetValue("ProxyOverride") as string)
         {
             Ours = IsOurs(key, server),
+            PacScript = key.GetValue("AutoConfigURL") is string pac && pac.Trim().Length > 0,
+            AutoDetect = ReadAutoDetect(),
         };
     }
+
+    /// <summary>
+    /// The "Automatically detect settings" switch lives in the flags of the binary
+    /// Connections\DefaultConnectionSettings blob (byte 8, bit 0x08 — PROXY_TYPE_AUTO_DETECT);
+    /// an absent or short blob means the switch was never set.
+    /// </summary>
+    private bool ReadAutoDetect()
+    {
+        using var connections = Registry.CurrentUser.OpenSubKey(_keyPath + @"\Connections");
+        return connections?.GetValue("DefaultConnectionSettings") is byte[] { Length: > 8 } blob
+            && (blob[8] & AutoDetectFlag) != 0;
+    }
+
+    private const byte AutoDetectFlag = 0x08;
 
     public void Enable(string server, string bypass)
     {

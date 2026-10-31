@@ -293,14 +293,19 @@ public sealed class GuardService(
                     ? GuardState.Unknown
                     : !sysProxy.Enabled
                         ? GuardState.Off
-                        : sysProxy.Ours ? GuardState.On : GuardState.Partial,
+                        : sysProxy.Ours && sysProxy.Overridden is null ? GuardState.On : GuardState.Partial,
                 sysProxy.Detail ?? (!sysProxy.Enabled
                     ? "disabled"
                     : sysProxy.Ours
-                        ? $"enabled: {sysProxy.Server}"
+                        ? sysProxy.Overridden is { } overridden
+                            ? $"enabled: {sysProxy.Server}, but {overridden} takes priority over it - {OverrideHint}"
+                            : $"enabled: {sysProxy.Server}"
                         : $"enabled by the owner or another tool: {sysProxy.Server} - not this application's proxy, off leaves it alone")),
         ];
     }
+
+    /// <summary>What the owner does about a PAC script or automatic detection (the app never touches them).</summary>
+    internal const string OverrideHint = "WinINET applications follow that instead; turn it off in the Windows proxy settings to route them through this proxy";
 
     private static string Word(bool? value) => value switch
     {
@@ -582,8 +587,12 @@ public sealed class GuardService(
         return result;
     }
 
-    /// <summary>WinINET system proxy (requires no rights); disabling restores direct access. Points at the applications proxy endpoint.</summary>
-    public Task SetSystemProxyAsync(bool enable, CancellationToken ct) =>
+    /// <summary>
+    /// WinINET system proxy (requires no rights); disabling restores direct access. Points at the
+    /// applications proxy endpoint. The result is a ready English line for the CLI: what was done,
+    /// with a warning when a PAC script or automatic detection overrides the manual proxy.
+    /// </summary>
+    public Task<string> SetSystemProxyAsync(bool enable, CancellationToken ct) =>
         Task.Run(() =>
         {
             if (enable)
@@ -592,6 +601,16 @@ public sealed class GuardService(
                 var bypass = SystemProxyBypass.Build(config.BypassDomains, config.DirectTlds);
                 systemProxy.Enable(server, bypass);
                 log.Info($"guard sysproxy on: {server} (bypass {config.BypassDomains.Count} domains + {config.DirectTlds.Count} TLDs)");
+                var message = $"system proxy enabled: {server} (bypass: corp domains + local ranges)";
+                if (systemProxy.Read().Overridden is { } overridden)
+                {
+                    // WinINET prefers these to the manual proxy: "enabled" alone would be a lie
+                    var warning = $"{overridden} is set and takes priority - {OverrideHint}";
+                    log.Warn($"guard sysproxy on: {warning}");
+                    message += $"\nwarning: {warning}";
+                }
+
+                return message;
             }
             else
             {
@@ -602,6 +621,7 @@ public sealed class GuardService(
                 log.Info(before is { Enabled: true, Ours: false }
                     ? $"guard sysproxy off: {before.Server} is not this application's proxy - left alone"
                     : "guard sysproxy off");
+                return "system proxy disabled (direct access restored)";
             }
         }, ct);
 

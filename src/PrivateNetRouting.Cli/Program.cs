@@ -1225,10 +1225,7 @@ internal static class Program
                     return 1;
                 }
 
-                await runtime.Guard.SetSystemProxyAsync(sysOn.Value, CancellationToken.None);
-                Console.WriteLine(sysOn.Value
-                    ? $"system proxy enabled: {AppProxyEndpoint.Address(config)} (bypass: corp domains + local ranges)"
-                    : "system proxy disabled (direct access restored)");
+                Console.WriteLine(await runtime.Guard.SetSystemProxyAsync(sysOn.Value, CancellationToken.None));
                 return 0;
 
             default:

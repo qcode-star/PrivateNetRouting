@@ -87,6 +87,21 @@ public sealed record ClaudeSettingsStatus(
 public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override, string? Detail = null)
 {
     public bool Ours { get; init; }
+
+    /// <summary>A PAC script is configured (AutoConfigURL): WinINET prefers it to the manual proxy.</summary>
+    public bool PacScript { get; init; }
+
+    /// <summary>Automatic proxy detection (WPAD) is on: WinINET prefers it to the manual proxy too.</summary>
+    public bool AutoDetect { get; init; }
+
+    /// <summary>What overrides the manual proxy, in words; null — nothing does.</summary>
+    public string? Overridden => (PacScript, AutoDetect) switch
+    {
+        (true, true) => "a PAC script (AutoConfigURL) and automatic proxy detection",
+        (true, false) => "a PAC script (AutoConfigURL)",
+        (false, true) => "automatic proxy detection",
+        _ => null,
+    };
 }
 
 /// <summary>
