@@ -360,10 +360,12 @@ public sealed class WatchdogSupervisor(
             }
         }
 
+        // the calling stopper is not waited for either: it is still alive, by design, until the
+        // stop returns
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.WorkerStopWaitSeconds);
         while (DateTime.UtcNow < deadline)
         {
-            if (FindStopperPids().Count == 0)
+            if (OtherStopperPids().Count == 0)
             {
                 return;
             }
@@ -371,6 +373,8 @@ public sealed class WatchdogSupervisor(
             await _delay(TimeSpan.FromMilliseconds(250), ct).ConfigureAwait(false);
         }
 
-        log.Warn($"watchdog: stoppers are still alive {config.WorkerStopWaitSeconds}s after the kill: {string.Join(", ", FindStopperPids())}");
+        log.Warn($"watchdog: stoppers are still alive {config.WorkerStopWaitSeconds}s after the kill: {string.Join(", ", OtherStopperPids())}");
+
+        List<int> OtherStopperPids() => FindStopperPids().Where(pid => pid != self).ToList();
     }
 }

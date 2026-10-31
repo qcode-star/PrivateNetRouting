@@ -300,17 +300,22 @@ public class WatchdogSupervisorTests : IDisposable
             new(11, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
         ];
         var killed = new List<int>();
-        var supervisor = Create(finder, kill: pid =>
-        {
-            killed.Add(pid);
-            finder.ByName["PrivateNetRouting.App.exe"] = finder.ByName["PrivateNetRouting.App.exe"]
-                .Where(p => p.Id != pid)
-                .ToList();
-        });
+        var waits = 0;
+        var supervisor = Create(
+            finder,
+            kill: pid =>
+            {
+                killed.Add(pid);
+                finder.ByName["PrivateNetRouting.App.exe"] = finder.ByName["PrivateNetRouting.App.exe"]
+                    .Where(p => p.Id != pid)
+                    .ToList();
+            },
+            delay: () => waits++);
 
         await supervisor.StopAsync(CancellationToken.None);
 
         Assert.Equal([11], killed); // the worker's own pid is not in the kill list
+        Assert.Equal(0, waits); // nor in the wait for the killed ones to disappear
         Assert.Contains(self, supervisor.FindStopperPids()); // it exits by itself right after
     }
 
@@ -379,7 +384,8 @@ public class WatchdogSupervisorTests : IDisposable
         FakeFinderByName finder,
         WatchdogConfig? config = null,
         Action<string>? spawn = null,
-        Action<int>? kill = null)
+        Action<int>? kill = null,
+        Action? delay = null)
     {
         // a personal log path per supervisor: several FileLog writers on one file are not allowed
         var log = new FileLog(Path.Combine(_logDir, $"{Guid.NewGuid():N}.log"));
@@ -395,7 +401,11 @@ public class WatchdogSupervisorTests : IDisposable
             },
             killProcess: kill ?? (_ => { }),
             currentExePath: () => @"C:\app\PrivateNetRouting.App.exe",
-            delay: (_, _) => Task.CompletedTask);
+            delay: (_, _) =>
+            {
+                delay?.Invoke();
+                return Task.CompletedTask;
+            });
     }
 
     public void Dispose()
