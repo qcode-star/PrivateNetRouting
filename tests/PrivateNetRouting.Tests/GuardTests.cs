@@ -1469,6 +1469,25 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task ADistroSettingsFileWithABomIsReadAndJudged()
+    {
+        // a settings.json saved with a UTF-8 BOM (an editor on the Windows side): cat keeps it
+        Assert.NotNull(WslConfigGuard.ParseRead("SETTINGS=present\n\uFEFF{\"env\":{}}\nSETTINGS=END\n").SettingsRoot);
+
+        var json = FullSettingsJson("http://192.0.2.1:18082");
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => WslProbeInSync("u1").Replace(json, "\uFEFF" + json),
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        Assert.Equal(GuardState.On, (await guard.ReadAsync(CancellationToken.None)).Distros[0].State);
+        Assert.False(Assert.Single((await guard.SyncAsync(CancellationToken.None)).Distros).Failed);
+    }
+
+    [Fact]
     public async Task WslStatusReportsSettingsKeysNotSet()
     {
         // the proxy env is right but the maintained privacy/attribution keys are missing

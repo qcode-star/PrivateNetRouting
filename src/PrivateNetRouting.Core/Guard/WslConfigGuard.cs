@@ -818,7 +818,9 @@ public sealed class WslConfigGuard(
                     settingsFilePresent = true;
                     // settings.json body — up to the SETTINGS=END line (or the end of the output)
                     var end = Array.IndexOf(lines, "SETTINGS=END", i + 1);
-                    var jsonText = string.Join('\n', lines[(i + 1)..(end > 0 ? end : lines.Length)]).Trim();
+                    // a UTF-8 BOM (an editor on the Windows side) survives cat and Trim, and the
+                    // JSON parser refuses it — the boot script reads the same file as utf-8-sig
+                    var jsonText = string.Join('\n', lines[(i + 1)..(end > 0 ? end : lines.Length)]).Trim().TrimStart('\uFEFF').Trim();
                     if (jsonText.Length > 0)
                     {
                         root = JsonNode.Parse(jsonText) as JsonObject;
