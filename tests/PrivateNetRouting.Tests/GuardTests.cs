@@ -1530,7 +1530,7 @@ public class GuardTests : IDisposable
         Assert.Contains("grep -qxF \"HTTP_PROXY=$HTTP_PROXY\"", script);
         Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
         Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
-        Assert.Contains("cat \"$_pnr_tmp\" > \"$_pnr_env\"", script);
+        Assert.Contains("mv -f \"$_pnr_tmp\" \"$_pnr_dst\"", script);
     }
 
     [Fact]
@@ -1544,6 +1544,21 @@ public class GuardTests : IDisposable
 
         var runner = WslConfigGuard.BuildBootRunner("/etc/wsl.d/start'up");
         Assert.Contains("SCRIPT_DIR='/etc/wsl.d/start'\\''up'", runner);
+    }
+
+    [Fact]
+    public void CodexEnvRewriteIgnoresCrlfAndReplacesTheFileInOneRename()
+    {
+        var script = WslConfigGuard.BuildCodexProxyEnvScript(18082, "localhost");
+
+        // a CRLF .env from the Windows side: the check ignores the CR and the rewrite drops it,
+        // so a login shell does not rewrite the file again and again
+        Assert.Contains("tr -d '\\r' < \"$_pnr_env\" | grep -qxF \"HTTP_PROXY=$HTTP_PROXY\"", script);
+        Assert.Contains("{ sub(/\\r$/, \"\") }", script);
+        // parallel shells: a rename next to the target, not an in-place truncate-and-write
+        Assert.Contains("mv -f \"$_pnr_tmp\" \"$_pnr_dst\"", script);
+        Assert.Contains("chmod --reference=\"$_pnr_dst\" \"$_pnr_tmp\"", script);
+        Assert.DoesNotContain('\r', script);
     }
 
     [Fact]

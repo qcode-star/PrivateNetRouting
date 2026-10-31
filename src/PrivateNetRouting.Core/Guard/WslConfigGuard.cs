@@ -927,10 +927,15 @@ public sealed class WslConfigGuard(
                 export ALL_PROXY="$HTTP_PROXY"
                 export NO_PROXY={{BashQuote(noProxy)}}
                 _pnr_env="$CODEX_HOME/.env"
-                if [ -f "$_pnr_env" ] && ! grep -qxF "HTTP_PROXY=$HTTP_PROXY" "$_pnr_env"; then
-                    _pnr_tmp=$(mktemp "${_pnr_env}.pnr-XXXXXX")
+                # a .env written on the Windows side may carry CRLF: the check ignores the CR, and
+                # the rewrite leaves LF lines (otherwise every login shell would rewrite it again)
+                if [ -f "$_pnr_env" ] && ! tr -d '\r' < "$_pnr_env" | grep -qxF "HTTP_PROXY=$HTTP_PROXY"; then
+                    _pnr_dst=$(readlink -f "$_pnr_env" 2>/dev/null)
+                    [ -n "$_pnr_dst" ] || _pnr_dst="$_pnr_env"
+                    _pnr_tmp=$(mktemp "${_pnr_dst}.pnr-XXXXXX")
                     awk -v _proxy="$HTTP_PROXY" -v _no_proxy="$NO_PROXY" '
                         BEGIN { _h=0; _s=0; _a=0; _n=0 }
+                        { sub(/\r$/, "") }
                         /^[ \t]*(export[ \t]+)?HTTP_PROXY[ \t]*=/  { print "HTTP_PROXY=" _proxy;  _h=1; next }
                         /^[ \t]*(export[ \t]+)?HTTPS_PROXY[ \t]*=/ { print "HTTPS_PROXY=" _proxy; _s=1; next }
                         /^[ \t]*(export[ \t]+)?ALL_PROXY[ \t]*=/   { print "ALL_PROXY=" _proxy;   _a=1; next }
@@ -941,10 +946,16 @@ public sealed class WslConfigGuard(
                             if (!_s) print "HTTPS_PROXY=" _proxy
                             if (!_a) print "ALL_PROXY=" _proxy
                             if (!_n) print "NO_PROXY=" _no_proxy
-                        }' "$_pnr_env" > "$_pnr_tmp" && cat "$_pnr_tmp" > "$_pnr_env"
+                        }' "$_pnr_dst" > "$_pnr_tmp" && [ -s "$_pnr_tmp" ] && {
+                        # two shells starting at once must not tear the file: the new content
+                        # replaces it in one rename (the mode kept); a rename the filesystem
+                        # refuses falls back to the in-place write
+                        chmod --reference="$_pnr_dst" "$_pnr_tmp" 2>/dev/null
+                        mv -f "$_pnr_tmp" "$_pnr_dst" 2>/dev/null || cat "$_pnr_tmp" > "$_pnr_dst"
+                    }
                     rm -f "$_pnr_tmp"
                 fi
-                unset _pnr_env _pnr_tmp _pnr_url_host
+                unset _pnr_env _pnr_dst _pnr_tmp _pnr_url_host
             fi
             unset _pnr_host_ip
         fi
