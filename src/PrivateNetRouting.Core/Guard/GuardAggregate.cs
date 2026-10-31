@@ -20,9 +20,17 @@ public static class GuardAggregate
         return a == GuardState.Unknown || b == GuardState.Unknown ? GuardState.Unknown : GuardState.Partial;
     }
 
-    /// <summary>Claude Code and Codex settings are one layer to the owner.</summary>
-    public static GuardState SettingsLayer(GuardSnapshot snapshot) =>
-        Merge(snapshot.Settings.State, snapshot.CodexSettings.State);
+    /// <summary>
+    /// Claude Code and Codex settings are one layer to the owner; an application off in the config
+    /// has no vote. Both off — nothing to judge: null (no vote).
+    /// </summary>
+    public static GuardState? SettingsLayer(GuardSnapshot snapshot) => (snapshot.ClaudeEnabled, snapshot.CodexEnabled) switch
+    {
+        (true, true) => Merge(snapshot.Settings.State, snapshot.CodexSettings.State),
+        (true, false) => snapshot.Settings.State,
+        (false, true) => snapshot.CodexSettings.State,
+        _ => null,
+    };
 
     /// <summary>The WSL layer's state over the distros that can be judged; null — nothing to judge (no vote).</summary>
     public static GuardState? WslLayer(WslConfigStatus wsl)
@@ -36,7 +44,11 @@ public static class GuardAggregate
     {
         yield return snapshot.Ban.State;
         yield return snapshot.Policy.State;
-        yield return SettingsLayer(snapshot);
+        if (SettingsLayer(snapshot) is { } settings)
+        {
+            yield return settings;
+        }
+
         if (WslLayer(snapshot.Wsl) is { } wsl)
         {
             yield return wsl;

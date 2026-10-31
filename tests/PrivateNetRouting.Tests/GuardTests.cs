@@ -2435,6 +2435,34 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsSyncAndStatusSkipAnApplicationOffInTheConfig()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-app-off");
+        config.Claude.SettingsPath = Path.Combine(_tempDir, $"claude-{Guid.NewGuid():N}.json");
+        config.Codex.Enabled = false;
+        config.Codex.SettingsPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.toml");
+        config.Codex.EnvPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.env");
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(), new FakeElevatedRunner(), out _);
+
+        var result = await service.SyncSettingsAsync(CancellationToken.None);
+
+        Assert.True(result.CodexSkipped);
+        Assert.False(File.Exists(config.Codex.SettingsPath)); // no files created for an app that is off
+        Assert.False(File.Exists(config.Codex.EnvPath));
+        Assert.True(result.Written); // Claude is still synced
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+        // the layer is judged by Claude alone: on, not the "partial" of a missing Codex half
+        Assert.False(snapshot.CodexEnabled);
+        Assert.Equal(GuardState.On, snapshot.Settings.State);
+        Assert.Equal(GuardState.On, GuardAggregate.SettingsLayer(snapshot));
+        Assert.Contains("codex.enabled=false", snapshot[GuardKind.CodexSettings].Detail);
+    }
+
+    [Fact]
     public async Task OneFailingLayerDoesNotTakeTheWholeSnapshotDown()
     {
         var config = new AppConfig();

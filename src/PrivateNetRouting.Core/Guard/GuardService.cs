@@ -34,7 +34,14 @@ public sealed record SettingsSyncResult(
     string? CodexEnvBackupPath,
     string CodexEnvPath,
     string? ClaudeError = null,
-    string? CodexError = null);
+    string? CodexError = null)
+{
+    /// <summary>claude.enabled=false: Claude Code settings.json was not touched.</summary>
+    public bool ClaudeSkipped { get; init; }
+
+    /// <summary>codex.enabled=false: config.toml and .env of Codex were not touched (nor created).</summary>
+    public bool CodexSkipped { get; init; }
+}
 
 /// <summary>
 /// The outcome of "enable all": every step ran, each one's failure is its own field (null — the
@@ -67,6 +74,12 @@ public sealed record GuardSnapshot(
     IReadOnlyList<GuardItemStatus> Items)
 {
     public GuardItemStatus this[GuardKind kind] => Items.First(item => item.Kind == kind);
+
+    /// <summary>claude.enabled: false — the Claude half of the settings layer is not judged.</summary>
+    public bool ClaudeEnabled { get; init; } = true;
+
+    /// <summary>codex.enabled: false — the Codex half of the settings layer is not judged.</summary>
+    public bool CodexEnabled { get; init; } = true;
 }
 
 /// <summary>
@@ -98,10 +111,17 @@ public sealed class GuardService(
         var expectedProxy = ClaudeEnvValues.WindowsProxyUrl(config);
         var expectedNoProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
 
+        // an application off in the config is neither synced nor judged: its half of the layer is
+        // reported as such instead of the state of files nobody maintains
         ClaudeSettingsStatus settingsStatus;
         try
         {
-            settingsStatus = settings.Read();
+            settingsStatus = config.Claude.Enabled
+                ? settings.Read()
+                : new ClaudeSettingsStatus(GuardState.Off, null, null, expectedProxy, expectedNoProxy, FileMissing: false)
+                {
+                    Detail = DisabledDetail("claude"),
+                };
         }
         catch (Exception ex)
         {
@@ -114,7 +134,9 @@ public sealed class GuardService(
         CodexSettingsStatus codexStatus;
         try
         {
-            codexStatus = codexSettings.Read();
+            codexStatus = config.Codex.Enabled
+                ? codexSettings.Read()
+                : new CodexSettingsStatus(GuardState.Off, null, FileMissing: false, EnvUpToDate: false) { Detail = DisabledDetail("codex") };
         }
         catch (Exception ex)
         {
@@ -148,8 +170,14 @@ public sealed class GuardService(
             codexStatus,
             wslStatus,
             sysProxyStatus,
-            BuildItems(ban, policyStatus, settingsStatus, codexStatus, wslStatus, sysProxyStatus));
+            BuildItems(ban, policyStatus, settingsStatus, codexStatus, wslStatus, sysProxyStatus))
+        {
+            ClaudeEnabled = config.Claude.Enabled,
+            CodexEnabled = config.Codex.Enabled,
+        };
     }
+
+    private static string DisabledDetail(string app) => $"{app}.enabled=false - not synced";
 
     /// <summary>
     /// Ban and policy only (registry, hosts, NRPT/firewall) — the fast core for the diagnostics
@@ -403,7 +431,10 @@ public sealed class GuardService(
             var codexSync = new CodexSettingsGuard.CodexSettingsSyncResult(false, null, false, null);
             try
             {
-                sync = settings.Sync();
+                if (config.Claude.Enabled)
+                {
+                    sync = settings.Sync();
+                }
             }
             catch (Exception ex)
             {
@@ -413,7 +444,12 @@ public sealed class GuardService(
 
             try
             {
-                codexSync = codexSettings.Sync();
+                // an application off in the config gets no files of its own: a Codex that is not
+                // even installed must not find a fresh config.toml and .env created for it
+                if (config.Codex.Enabled)
+                {
+                    codexSync = codexSettings.Sync();
+                }
             }
             catch (Exception ex)
             {
@@ -433,15 +469,27 @@ public sealed class GuardService(
                 codexSync.EnvBackupPath,
                 config.Codex.EnvPath,
                 claudeError,
-                codexError);
-            if (claudeError is null)
+                codexError)
+            {
+                ClaudeSkipped = !config.Claude.Enabled,
+                CodexSkipped = !config.Codex.Enabled,
+            };
+            if (outcome.ClaudeSkipped)
+            {
+                log.Info("guard settings sync: Claude settings.json skipped (claude.enabled=false)");
+            }
+            else if (claudeError is null)
             {
                 log.Info(outcome.Written
                     ? $"guard settings sync: Claude settings.json written — proxy {outcome.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {outcome.BackupPath ?? "none"})"
                     : $"guard settings sync: Claude settings.json already up to date (proxy {outcome.ProxyUrl})");
             }
 
-            if (codexError is null)
+            if (outcome.CodexSkipped)
+            {
+                log.Info("guard settings sync: the Codex layer skipped (codex.enabled=false)");
+            }
+            else if (codexError is null)
             {
                 log.Info(outcome.CodexWritten
                     ? $"guard settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"

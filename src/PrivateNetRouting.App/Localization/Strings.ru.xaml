@@ -222,6 +222,8 @@
     <s:String x:Key="Main.Guard.Settings.Codex.EnvStale">Codex: .env прокси устарел или отсутствует</s:String>
    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code и Codex обновлены: прокси {0} (бэкап: {1})</s:String>
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code и Codex уже актуальны (прокси {0})</s:String>
+    <s:String x:Key="Main.Guard.Settings.ClaudeOffInConfig">Claude: выключен в конфиге — не синхронизируется</s:String>
+    <s:String x:Key="Main.Guard.Settings.CodexOffInConfig">Codex: выключен в конфиге — не синхронизируется</s:String>
     <s:String x:Key="Main.Guard.Settings.FailedFmt">синхронизация настроек не удалась: {0}</s:String>
     <s:String x:Key="Main.Guard.Backup.None">без бэкапа (файл создан с нуля)</s:String>
     <s:String x:Key="Main.Guard.Wsl">Конфиг WSL</s:String>

@@ -1137,7 +1137,11 @@ internal static class Program
                 }
 
                 var settings = await runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-                if (settings.ClaudeError is not null)
+                if (settings.ClaudeSkipped)
+                {
+                    Console.WriteLine("settings.json: skipped (claude.enabled=false)");
+                }
+                else if (settings.ClaudeError is not null)
                 {
                     Console.Error.WriteLine($"settings.json: FAILED: {settings.ClaudeError}");
                 }
@@ -1148,7 +1152,11 @@ internal static class Program
                         : $"settings.json: already up to date (proxy {settings.ProxyUrl})");
                 }
 
-                if (settings.CodexError is not null)
+                if (settings.CodexSkipped)
+                {
+                    Console.WriteLine("the Codex layer: skipped (codex.enabled=false)");
+                }
+                else if (settings.CodexError is not null)
                 {
                     Console.Error.WriteLine($"the Codex layer: FAILED: {settings.CodexError}");
                 }

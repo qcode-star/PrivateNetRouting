@@ -210,8 +210,9 @@ Everything environment-specific (endpoint addresses, ports, bypass domain lists,
 lives in the application's user config and never reaches git. The repository holds only templates
 with placeholders in `config/*.example.json`. An installation that uses only one of the two apps
 turns the other off in the config (`claude.enabled` / `codex.enabled`): its launch/update buttons,
-its tray item and its startup update check disappear, and its `pnr` commands refuse with a note —
-the guards, the chain and the idle stopper keep working. The repository is public and anonymous: no
+its tray item and its startup update check disappear, its `pnr` commands refuse with a note, and
+the settings sync leaves its files alone (nothing is created for it) — the guards, the chain and the
+idle stopper keep working. The repository is public and anonymous: no
 real addresses, domains, names, or secrets (rule #2 in AGENTS.md).
 
 The WSL layer (the guard sync into the distros and the idle-stop WSL step) works only over the

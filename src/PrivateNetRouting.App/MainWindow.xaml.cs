@@ -641,7 +641,7 @@ public partial class MainWindow : Window
         SetGuardDots(
             snapshot.Ban.State,
             snapshot.Policy.State,
-            GuardAggregate.SettingsLayer(snapshot),
+            GuardAggregate.SettingsLayer(snapshot) ?? GuardState.Off, // both applications off in the config
             snapshot.Wsl.State);
 
         // a hosts block that lags behind the configured list carries a visible note at the end of the
@@ -672,7 +672,8 @@ public partial class MainWindow : Window
         };
 
         // one row, both applications: Claude Code env and the Codex layer (config.toml flag + .env)
-        var claude = snapshot.Settings.State switch
+        // an application off in the config is named as such, not judged by its files
+        var claude = !snapshot.ClaudeEnabled ? Loc.S("Main.Guard.Settings.ClaudeOffInConfig") : snapshot.Settings.State switch
         {
             GuardState.On => Loc.F("Main.Guard.Settings.OkFmt", snapshot.Settings.ExpectedProxy),
             GuardState.Off => Loc.S("Main.Guard.Settings.NoFile"),
@@ -691,7 +692,7 @@ public partial class MainWindow : Window
             }.Where(part => part is not null)),
             _ => snapshot.Settings.Detail ?? Loc.S("Main.Guard.Unknown"),
         };
-        var codex = snapshot.CodexSettings.State switch
+        var codex = !snapshot.CodexEnabled ? Loc.S("Main.Guard.Settings.CodexOffInConfig") : snapshot.CodexSettings.State switch
         {
             GuardState.On => Loc.S("Main.Guard.Settings.Codex.Ok"),
             GuardState.Off => Loc.S("Main.Guard.Settings.Codex.NoFile"),
