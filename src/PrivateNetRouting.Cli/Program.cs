@@ -811,6 +811,15 @@ internal static class Program
             return 1;
         }
 
+        // one stopper is enough — the same self-check the detached worker applies to itself
+        var refusal = WatchdogWorker.RefusalReason(
+            runtime.WatchdogControl.FindStopperPids(), Environment.ProcessId, state);
+        if (refusal is not null)
+        {
+            Console.WriteLine($"watchdog: {refusal}");
+            return 0;
+        }
+
         Console.WriteLine($"watchdog: checking Claude and Codex usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
         if (config.Wsl.Distros.Count == 0)
         {

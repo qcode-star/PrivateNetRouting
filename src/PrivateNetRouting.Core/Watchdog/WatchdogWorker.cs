@@ -19,7 +19,7 @@ public static class WatchdogWorker
     /// and one stopper is enough: when several are alive the lowest pid stays (two workers that
     /// started together both see each other, so the rule must pick the same survivor for both).
     /// </summary>
-    internal static string? RefusalReason(IReadOnlyList<int> stopperPids, int selfPid, ChainState chain)
+    public static string? RefusalReason(IReadOnlyList<int> stopperPids, int selfPid, ChainState chain)
     {
         if (stopperPids.Any(pid => pid != selfPid && pid < selfPid))
         {

@@ -33,7 +33,7 @@ public class WatchdogSupervisorTests : IDisposable
             new(23, "pnr.exe --proxy-worker"), // another worker, not a stopper
         ];
 
-        Assert.Equal([11, 21, 22], WatchdogSupervisor.FindStopperPids(finder));
+        Assert.Equal([11, 21, 22], WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
     }
 
     /// <summary>A command line that merely mentions "watchdog" is not a stopper.</summary>
@@ -57,7 +57,59 @@ public class WatchdogSupervisorTests : IDisposable
             new(43, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
         ];
 
-        Assert.Equal([43, 34, 35], WatchdogSupervisor.FindStopperPids(finder));
+        Assert.Equal([43, 34, 35], WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
+    }
+
+    /// <summary>Another installation's worker carries the same image name and marker — it is not ours to kill.</summary>
+    [Fact]
+    public void FindIgnoresAnotherInstallationsStopper()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["PrivateNetRouting.App.exe"] =
+        [
+            new(51, @"""C:\other-install\PrivateNetRouting.App.exe"" --watchdog-worker"),
+            new(52, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
+        ];
+
+        Assert.Equal([52], WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
+    }
+
+    [Fact]
+    public async Task StopRechecksTheIdentityBeforeTheKill()
+    {
+        var killed = new List<int>();
+        var log = new FileLog(Path.Combine(_logDir, $"{Guid.NewGuid():N}.log"));
+        _logs.Add(log);
+        var supervisor = new WatchdogSupervisor(
+            new WatchdogConfig { WorkerStopWaitSeconds = 0 },
+            new VanishingFinder(),
+            log,
+            spawnWorker: (_, _, _) => 0,
+            killProcess: killed.Add,
+            currentExePath: () => @"C:\app\PrivateNetRouting.App.exe",
+            delay: (_, _) => Task.CompletedTask);
+
+        await supervisor.StopAsync(CancellationToken.None);
+
+        Assert.Empty(killed); // the pid vanished before the kill — nobody is killed blindly
+    }
+
+    /// <summary>A stopper visible only on the first lookup: it is gone by the time the kill runs.</summary>
+    private sealed class VanishingFinder : IProcessFinder
+    {
+        private int _calls;
+
+        public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains)
+        {
+            _calls++;
+            return _calls == 1
+                ? [new FoundProcess(71, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker")]
+                : [];
+        }
+
+        public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) => [];
+
+        public FoundProcess? FindById(int processId) => null;
     }
 
     [Fact]
@@ -75,7 +127,7 @@ public class WatchdogSupervisorTests : IDisposable
         var finder = new FakeFinderByName();
         finder.ByName["pnr.exe"] = [new(23, "pnr.exe --proxy-worker")];
 
-        Assert.Empty(WatchdogSupervisor.FindStopperPids(finder));
+        Assert.Empty(WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
     }
 
     [Fact]

@@ -51,15 +51,34 @@ public sealed class WatchdogSupervisor(
     /// static helper — diagnostics reads the same truth. The WMI lookup is a substring prefilter;
     /// the command line is then split into arguments and must carry the marker as an argument of its
     /// own (the GUI exe takes it anywhere, pnr — as its first argument) or be `pnr watchdog` —
-    /// `pnr logs show watchdog` is not a stopper.
+    /// `pnr logs show watchdog` is not a stopper. The stopper's executable must also live in this
+    /// installation: another installation's worker carries the same image name and marker.
     /// </summary>
-    public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder) =>
+    public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder, string? ourDirectory = null) =>
         WorkerHostNames.SelectMany(name => finder.Find(name, WorkerMarker).Select(p => (Name: name, Process: p)))
             .Concat(finder.Find(CliProcessName, CliCommand).Select(p => (Name: CliProcessName, Process: p)))
             .Where(found => IsStopperCommandLine(found.Name, found.Process.CommandLine))
+            .Where(found => IsOurInstallation(found.Process.CommandLine, ourDirectory ?? Path.GetDirectoryName(Environment.ProcessPath)))
             .Select(found => found.Process.Id)
             .Distinct()
             .ToList();
+
+    /// <summary>
+    /// The stopper's executable lives in this installation (the same directory as this process's
+    /// exe). A command line without a directory (started through PATH) cannot be told apart — it
+    /// is accepted.
+    /// </summary>
+    internal static bool IsOurInstallation(string commandLine, string? ourDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(ourDirectory))
+        {
+            return true;
+        }
+
+        var directory = Path.GetDirectoryName(SplitArguments(commandLine)[0]);
+        return string.IsNullOrEmpty(directory)
+            || directory.Equals(ourDirectory, StringComparison.OrdinalIgnoreCase);
+    }
 
     internal static bool IsStopperCommandLine(string processName, string commandLine)
     {
@@ -164,7 +183,7 @@ public sealed class WatchdogSupervisor(
         }
     }
 
-    public IReadOnlyList<int> FindStopperPids() => FindStopperPids(processes);
+    public IReadOnlyList<int> FindStopperPids() => FindStopperPids(processes, Path.GetDirectoryName(_currentExePath()));
 
     public bool IsRunning() => FindStopperPids().Count > 0;
 
@@ -321,6 +340,15 @@ public sealed class WatchdogSupervisor(
 
         foreach (var pid in pids)
         {
+            // the pid may have exited (and been reused) between the find and the kill: the
+            // identity is re-checked right before the kill, a process that is no longer a stopper
+            // is left alone
+            if (FindStopperPids().All(found => found != pid))
+            {
+                log.Debug($"watchdog: stopper pid={pid} is already gone");
+                continue;
+            }
+
             try
             {
                 _killProcess(pid);
