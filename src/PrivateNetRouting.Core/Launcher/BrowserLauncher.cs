@@ -195,6 +195,7 @@ public sealed class BrowserLauncher(
             throw new InvalidOperationException("the browser profile is not created yet");
         }
 
+        EnsureProfileFolderIsOurs();
         var watch = Stopwatch.StartNew();
         WarnAboutChainEgressResolution();
         var reachable = await IsEgressReachableAsync(ct).ConfigureAwait(false);
@@ -284,6 +285,30 @@ public sealed class BrowserLauncher(
             log.Warn(
                 "browser: the egress is the chain's own SOCKS5 — it resolves names via the system resolver, " +
                 "so names blocked from direct access will not open through it (browser.egress=forward-proxy avoids that)");
+        }
+    }
+
+    /// <summary>
+    /// A Firefox launch rewrites user.js (and plants the marker), so the configured folder passes
+    /// the creation dialog's rule first: only an absent/empty folder or one this application wrote
+    /// is written into. A hand-edited config (or an older build's record) pointing at an everyday
+    /// profile, or at any other folder, is refused before the egress probe or a chain raise.
+    /// Chromium carries everything on the command line and writes nothing at launch.
+    /// </summary>
+    private void EnsureProfileFolderIsOurs()
+    {
+        if (config.Browser.Kind != BrowserKind.Firefox)
+        {
+            return;
+        }
+
+        var folder = BrowserProfileFiles.ClassifyFolder(config.Browser.ProfileDir);
+        if (folder is BrowserProfileFolderKind.BrowserUserData or BrowserProfileFolderKind.Foreign)
+        {
+            log.Warn($"browser: {config.Browser.ProfileDir} is not a profile this application created ({folder}) - launch refused, nothing written");
+            throw new InvalidOperationException(
+                $"the browser profile folder {config.Browser.ProfileDir} is not one this application created; " +
+                "create the profile again from the dialog (a new or empty folder)");
         }
     }
 

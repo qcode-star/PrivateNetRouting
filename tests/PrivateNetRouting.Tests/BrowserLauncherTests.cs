@@ -236,6 +236,32 @@ public class BrowserLauncherTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("prefs.js")] // an everyday Firefox profile
+    [InlineData("notes.txt")] // any other folder this application did not write
+    public async Task AFirefoxLaunchRefusesAFolderThisApplicationDidNotCreate(string existingFile)
+    {
+        Directory.CreateDirectory(_profileDir);
+        var ownUserJs = Path.Combine(_profileDir, "user.js");
+        await File.WriteAllTextAsync(Path.Combine(_profileDir, existingFile), "x");
+        await File.WriteAllTextAsync(ownUserJs, "// the owner's own user.js");
+        var listener = StartListener(out var port);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                Create(ConfiguredConfig(egressPort: port)).LaunchAsync(BrowserLauncherOptions.Default, null, CancellationToken.None));
+
+            Assert.Empty(_started);
+            Assert.Equal(0, _chain.EnsureCalls);
+            Assert.Equal("// the owner's own user.js", await File.ReadAllTextAsync(ownUserJs)); // not rewritten
+            Assert.False(File.Exists(Path.Combine(_profileDir, BrowserProfileFiles.MarkerFileName))); // no marker planted
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Fact]
     public async Task PrivateAndUrlOptionsOnlyComeFromTheCaller()
     {
