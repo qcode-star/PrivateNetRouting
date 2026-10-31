@@ -357,7 +357,16 @@ public sealed class ClaudeUpdater(
         log.Warn("updater: Claude did not close on its own — killing the process");
         foreach (var process in claudeProcesses.Find(config.Claude.ProcessName))
         {
-            process.Kill();
+            try
+            {
+                process.Kill();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or AggregateException)
+            {
+                // the process exited between the find and the kill — that was the goal anyway;
+                // the app is already closed, the install must not fail on it
+                log.Debug($"updater: a Claude process was already gone when the kill ran: {ex.Message}");
+            }
         }
 
         await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.KillSettleSeconds)), ct);

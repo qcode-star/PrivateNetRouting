@@ -192,7 +192,15 @@ public sealed class CodexUpdater(
         log.Warn("codex-updater: Codex did not close on its own — killing the process");
         foreach (var process in processes.Find(config.Codex.ProcessName))
         {
-            process.Kill();
+            try
+            {
+                process.Kill();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or AggregateException)
+            {
+                // the process exited between the find and the kill — that was the goal anyway
+                log.Debug($"codex-updater: a Codex process was already gone when the kill ran: {ex.Message}");
+            }
         }
 
         await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, config.KillSettleSeconds)), ct).ConfigureAwait(false);

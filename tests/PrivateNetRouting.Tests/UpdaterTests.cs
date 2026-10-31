@@ -396,6 +396,21 @@ public class UpdaterTests : IDisposable
     }
 
     [Fact]
+    public async Task AProcessGoneBeforeTheKillDoesNotFailTheInstall()
+    {
+        var process = new FakeClaudeProcess { KillThrows = true };
+        _claude.Processes = [process];
+        _claude.CloseAfterRequest = false; // the kill path runs
+        var updater = Create();
+        var package = await WritePackageAsync(MatchingPublisher);
+
+        await updater.InstallAsync(package, UpdateOptions.Default, null, CancellationToken.None);
+
+        Assert.Equal(1, process.KillAttempts); // the kill ran; its exit race was swallowed
+        Assert.Single(_appx.AddedFiles); // the install still went through
+    }
+
+    [Fact]
     public async Task KeepRunningSkipsClosingAndStillInstalls()
     {
         _claude.Processes = [new FakeClaudeProcess()];
@@ -886,13 +901,27 @@ public class UpdaterTests : IDisposable
 
         public int Kills { get; private set; }
 
+        public int KillAttempts { get; private set; }
+
+        /// <summary>The process exits between the find and the kill (the kill throws).</summary>
+        public bool KillThrows { get; set; }
+
         public bool CloseMainWindow()
         {
             Closes++;
             return true;
         }
 
-        public void Kill() => Kills++;
+        public void Kill()
+        {
+            KillAttempts++;
+            if (KillThrows)
+            {
+                throw new InvalidOperationException("process has already exited");
+            }
+
+            Kills++;
+        }
     }
 
     private sealed class FakeClaudeSource : IClaudeProcessSource
