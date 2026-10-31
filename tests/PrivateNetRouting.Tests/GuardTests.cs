@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using Microsoft.Win32;
 using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Guard;
@@ -87,7 +88,7 @@ internal sealed class FakeSystemProxyStore : ISystemProxyStore
 
     public (string? Server, string? Bypass)? EnabledWith { get; private set; }
 
-    public bool Disabled { get; private set; }
+    public List<string?> DisabledWith { get; } = [];
 
     public SystemProxyStatus Read()
     {
@@ -101,7 +102,7 @@ internal sealed class FakeSystemProxyStore : ISystemProxyStore
 
     public void Enable(string server, string bypass) => EnabledWith = (server, bypass);
 
-    public void Disable() => Disabled = true;
+    public void Disable(string? ourServer = null) => DisabledWith.Add(ourServer);
 }
 
 internal sealed class FakeElevatedRunner(bool ok = true, string detail = "done") : IElevatedCommandRunner
@@ -2547,7 +2548,134 @@ public class GuardTests : IDisposable
         Assert.Equal(("127.0.0.1:18082", SystemProxyBypass.Build([], config.DirectTlds)), sysProxy.EnabledWith);
 
         await service.SetSystemProxyAsync(false, CancellationToken.None);
-        Assert.True(sysProxy.Disabled);
+        Assert.Equal(["127.0.0.1:18082"], sysProxy.DisabledWith); // the address is passed as the ours-hint
+    }
+
+    // ----- WinINET system proxy store (a real HKCU test subkey, Q-03: preserve and restore) -----
+
+    private const string SysProxyTestKeyRoot = @"Software\PrivateNetRouting\Tests";
+
+    private static string NewSysProxyKey() => $@"{SysProxyTestKeyRoot}\sysproxy-{Guid.NewGuid():N}";
+
+    private static void SeedUserProxy(string keyPath, string server, string bypass)
+    {
+        using var seed = Registry.CurrentUser.CreateSubKey(keyPath, writable: true);
+        seed.SetValue("ProxyServer", server, RegistryValueKind.String);
+        seed.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
+        seed.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+    }
+
+    [Fact]
+    public void SysProxyEnablePreservesTheUserSettingsAndDisableRestoresThem()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com");
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost;<local>");
+            var on = store.Read();
+            Assert.True(on.Enabled);
+            Assert.Equal("http://127.0.0.1:18081", on.Server);
+
+            store.Disable("http://127.0.0.1:18081");
+            var off = store.Read();
+            Assert.False(off.Enabled);
+            Assert.Equal("http://192.0.2.1:8080", off.Server); // the user's own settings came back
+            Assert.Equal("*.example.com", off.Override);
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            Assert.Null(key!.GetValue("ProxyServer.pnr-saved")); // the save is consumed
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyDoubleDisableKeepsTheRestoredUserSettings()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com");
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Disable("http://127.0.0.1:18081");
+            store.Disable("http://127.0.0.1:18081"); // the second off finds no save and no match
+
+            var off = store.Read();
+            Assert.False(off.Enabled);
+            Assert.Equal("http://192.0.2.1:8080", off.Server); // not wiped by the second off
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyDisableWithoutASaveClearsOurValues()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            var store = new WinInetSystemProxyStore(keyPath); // the user had no proxy of their own
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Disable("http://127.0.0.1:18081");
+
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            Assert.Null(key!.GetValue("ProxyServer")); // ours leave with the switch
+            Assert.Null(key!.GetValue("ProxyOverride"));
+            Assert.Equal(0, key!.GetValue("ProxyEnable"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyReEnableKeepsTheOriginalSave()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com");
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Enable("http://127.0.0.1:18083", "localhost"); // an address change, not a fresh enable
+
+            store.Disable("http://127.0.0.1:18083");
+            Assert.Equal("http://192.0.2.1:8080", store.Read().Server); // the user's, not the first address
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyOffLeavesForeignValuesAlone()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.5:9999", "*.other.example");
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Disable("http://127.0.0.1:18081"); // the ours-hint does not match the values
+
+            Assert.Equal("http://192.0.2.5:9999", store.Read().Server); // not ours — untouched
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
     }
 
     // ----- elevated helper: order of ban layers -----

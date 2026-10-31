@@ -450,7 +450,10 @@ public sealed class GuardService(
             }
             else
             {
-                systemProxy.Disable();
+                // the address this installation writes while on: the store uses it to tell its own
+                // leftover values from the user's restored ones
+                var endpoint = AppProxyEndpoint.EndPoint(config);
+                systemProxy.Disable($"{endpoint.Address}:{endpoint.Port}");
                 log.Info("guard sysproxy off");
             }
         }, ct);
