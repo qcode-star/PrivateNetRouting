@@ -184,6 +184,10 @@
     <s:String x:Key="Main.Guard.All.EnabledFmt">Всё включено: бан применён (DNS: {0}, напрямую: {1}), политика задана, settings.json и WSL синхронизированы.</s:String>
     <s:String x:Key="Main.Guard.All.EnabledWslFailedFmt">Всё включено, кроме WSL: бан применён (DNS: {0}, напрямую: {1}), политика задана, settings.json синхронизирован; синхронизация WSL НЕ УДАЛАСЬ — {2}</s:String>
     <s:String x:Key="Main.Guard.All.EnabledNoWslFmt">Всё включено: бан применён (DNS: {0}, напрямую: {1}), политика задана, settings.json синхронизирован; WSL пропущен ({2}).</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledFailedFmt">«Включить всё» завершилось с ошибками (бан — DNS: {0}, напрямую: {1}): {2}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.BanPolicyFmt">бан и политика НЕ ПРИМЕНЕНЫ — {0}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.SettingsFmt">синхронизация настроек НЕ УДАЛАСЬ — {0}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.WslFmt">синхронизация WSL НЕ УДАЛАСЬ — {0}</s:String>
     <s:String x:Key="Main.Guard.All.DisabledFmt">Всё выключено: бан снят (DNS: {0}, напрямую: {1}), политика убрана.</s:String>
     <s:String x:Key="Main.Guard.Unknown">состояние неизвестно</s:String>
     <s:String x:Key="Main.Guard.State.On">вкл</s:String>

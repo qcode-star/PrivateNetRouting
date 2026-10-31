@@ -36,6 +36,27 @@ public sealed record SettingsSyncResult(
     string? ClaudeError = null,
     string? CodexError = null);
 
+/// <summary>
+/// The outcome of "enable all": every step ran, each one's failure is its own field (null — the
+/// step did not throw), and the live ban checks are always there.
+/// </summary>
+public sealed record GuardEnableAllResult(
+    string? ElevatedDetail,
+    string? ElevatedError,
+    SettingsSyncResult? Settings,
+    string? SettingsError,
+    WslSyncResult? Wsl,
+    string? WslError,
+    BanLiveChecks Live)
+{
+    /// <summary>The settings failures of both applications and of the step itself.</summary>
+    public IReadOnlyList<string> SettingsErrors =>
+        new[] { SettingsError, Settings?.ClaudeError, Settings?.CodexError }.OfType<string>().ToList();
+
+    /// <summary>The WSL step failed as a whole or for at least one distro.</summary>
+    public bool WslFailed => WslError is not null || Wsl?.Distros.Any(d => d.Failed) == true;
+}
+
 public sealed record GuardSnapshot(
     LocalBanStatus Ban,
     EgressPolicyStatus Policy,
@@ -306,6 +327,64 @@ public sealed class GuardService(
         log.Info($"guard all {(enable ? "on" : "off")}: {result.Detail}");
         var live = await LiveChecksAsync(ct);
         return new BanApplyResult(result.Detail, live);
+    }
+
+    /// <summary>
+    /// "Enable all", best-effort: ban and policy in one elevation, then the settings sync, then the
+    /// WSL sync — a failing step does not keep the next ones from running, and its error travels in
+    /// the result. The live ban checks run last whatever failed: the verdict on the direct path is
+    /// the one thing a failure elsewhere must not hide.
+    /// </summary>
+    public async Task<GuardEnableAllResult> EnableAllAsync(CancellationToken ct)
+    {
+        string? elevatedDetail = null;
+        string? elevatedError = null;
+        try
+        {
+            var result = await elevated.RunAsync(GuardElevatedCommands.AllOn, ct);
+            if (result.Ok)
+            {
+                elevatedDetail = result.Detail;
+                log.Info($"guard all on: {result.Detail}");
+            }
+            else
+            {
+                elevatedError = result.Detail;
+                log.Error($"guard all on: {result.Detail}");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            elevatedError = ex.Message;
+            log.Error($"guard all on: {ex.Message}");
+        }
+
+        SettingsSyncResult? settingsResult = null;
+        string? settingsError = null;
+        try
+        {
+            settingsResult = await SyncSettingsAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            settingsError = ex.Message;
+            log.Warn($"guard all on: settings sync failed: {ex.Message}");
+        }
+
+        WslSyncResult? wslResult = null;
+        string? wslError = null;
+        try
+        {
+            wslResult = await SyncWslAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            wslError = ex.Message;
+            log.Warn($"guard all on: WSL sync failed: {ex.Message}");
+        }
+
+        var live = await LiveChecksAsync(ct);
+        return new GuardEnableAllResult(elevatedDetail, elevatedError, settingsResult, settingsError, wslResult, wslError, live);
     }
 
     /// <summary>

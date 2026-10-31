@@ -184,6 +184,10 @@
     <s:String x:Key="Main.Guard.All.EnabledFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json and WSL synced.</s:String>
     <s:String x:Key="Main.Guard.All.EnabledWslFailedFmt">Guards on except WSL: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json synced; WSL sync FAILED — {2}</s:String>
     <s:String x:Key="Main.Guard.All.EnabledNoWslFmt">All guards on: ban applied (DNS: {0}, direct: {1}), egress policy set, settings.json synced; WSL skipped ({2}).</s:String>
+    <s:String x:Key="Main.Guard.All.EnabledFailedFmt">Enable all finished with errors (ban — DNS: {0}, direct: {1}): {2}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.BanPolicyFmt">ban and policy FAILED — {0}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.SettingsFmt">settings sync FAILED — {0}</s:String>
+    <s:String x:Key="Main.Guard.All.Part.WslFmt">WSL sync FAILED — {0}</s:String>
     <s:String x:Key="Main.Guard.All.DisabledFmt">Guards off: ban removed (DNS: {0}, direct: {1}), egress policy removed.</s:String>
     <s:String x:Key="Main.Guard.Unknown">state unknown</s:String>
     <s:String x:Key="Main.Guard.State.On">on</s:String>

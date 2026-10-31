@@ -2537,6 +2537,30 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task EnableAllRunsEveryStepPastFailuresAndKeepsTheLiveVerdict()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-enable-all");
+        config.Guard.BanProbes = ["probe.invalid"];
+        config.Claude.SettingsPath = Path.Combine(_tempDir, "settings-dir-all"); // a directory: the write throws
+        Directory.CreateDirectory(config.Claude.SettingsPath);
+        config.Codex.SettingsPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.toml");
+        config.Codex.EnvPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.env");
+        var healthCalls = 0;
+        var service = MakeService(config, new FakeEgressPolicyStore(), new FakeBanSystemOps(), new FakeSystemProxyStore(),
+            new FakeElevatedRunner(ok: false, detail: "UAC declined"), out _, _ => { healthCalls++; return Task.FromResult(false); });
+
+        var result = await service.EnableAllAsync(CancellationToken.None);
+
+        Assert.Equal("UAC declined", result.ElevatedError);
+        Assert.Single(result.SettingsErrors); // the Claude write failed...
+        Assert.True(result.Settings!.CodexWritten); // ...the Codex files were still written
+        Assert.NotNull(result.Wsl); // the WSL step ran after both failures
+        Assert.Equal(1, healthCalls); // and the live checks still ran last (rule #6)
+        Assert.True(result.Live.DnsBlocked);
+    }
+
+    [Fact]
     public async Task SystemProxyOnUsesListenerAddress()
     {
         var config = new AppConfig();

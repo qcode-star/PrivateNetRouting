@@ -774,38 +774,48 @@ public partial class MainWindow : Window
         var disable = _lastGuards is { } snapshot && GuardAggregate.AllOn(snapshot);
         await RunGuardAsync(async () =>
         {
-            var all = await _runtime.Guard.AllAsync(!disable, CancellationToken.None);
-            var dns = LiveWord(all.Live.DnsBlocked);
-            var direct = LiveWord(all.Live.DirectBlocked);
             if (disable)
             {
-                _viewModel.SetCheckResult("Main.Guard.All.DisabledFmt", dns, direct);
+                var off = await _runtime.Guard.AllAsync(enable: false, CancellationToken.None);
+                _viewModel.SetCheckResult("Main.Guard.All.DisabledFmt", LiveWord(off.Live.DnsBlocked), LiveWord(off.Live.DirectBlocked));
                 return;
             }
 
-            var settings = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-            var settingsErrors = new[] { settings.ClaudeError, settings.CodexError }
-                .Where(error => error is not null)
-                .Cast<string>()
-                .ToList();
-            if (settingsErrors.Count > 0)
+            // best-effort: every step runs, and the line always carries the live ban verdict
+            var all = await _runtime.Guard.EnableAllAsync(CancellationToken.None);
+            var dns = LiveWord(all.Live.DnsBlocked);
+            var direct = LiveWord(all.Live.DirectBlocked);
+            var wslFailures = all.WslError is not null
+                ? [all.WslError]
+                : all.Wsl?.Distros.Where(d => d.Failed).Select(LocalizeDistroFailure).ToList() ?? [];
+            if (all.ElevatedError is not null || all.SettingsErrors.Count > 0)
             {
-                // "enable all" is best-effort, but a failed settings sync is not reported as success
-                _viewModel.SetCheckResult("Main.Guard.Settings.FailedFmt", string.Join("; ", settingsErrors));
-                return;
-            }
+                var failures = new List<string>();
+                if (all.ElevatedError is not null)
+                {
+                    failures.Add(Loc.F("Main.Guard.All.Part.BanPolicyFmt", all.ElevatedError));
+                }
 
-            var wsl = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
-            var failed = wsl.Distros.Where(d => d.Failed).ToList();
-            if (wsl.LayerDisabled)
-            {
-                _viewModel.SetCheckResult("Main.Guard.All.EnabledNoWslFmt", dns, direct, LocalizeWslReason(wsl.Reason ?? ""));
+                if (all.SettingsErrors.Count > 0)
+                {
+                    failures.Add(Loc.F("Main.Guard.All.Part.SettingsFmt", string.Join("; ", all.SettingsErrors)));
+                }
+
+                if (wslFailures.Count > 0)
+                {
+                    failures.Add(Loc.F("Main.Guard.All.Part.WslFmt", string.Join("; ", wslFailures)));
+                }
+
+                _viewModel.SetCheckResult("Main.Guard.All.EnabledFailedFmt", dns, direct, string.Join(" | ", failures));
             }
-            else if (failed.Count > 0)
+            else if (wslFailures.Count > 0)
             {
                 // a distro that failed its sync is not "synced": the result line names it
-                _viewModel.SetCheckResult(
-                    "Main.Guard.All.EnabledWslFailedFmt", dns, direct, string.Join("; ", failed.Select(LocalizeDistroFailure)));
+                _viewModel.SetCheckResult("Main.Guard.All.EnabledWslFailedFmt", dns, direct, string.Join("; ", wslFailures));
+            }
+            else if (all.Wsl is { LayerDisabled: true } wsl)
+            {
+                _viewModel.SetCheckResult("Main.Guard.All.EnabledNoWslFmt", dns, direct, LocalizeWslReason(wsl.Reason ?? ""));
             }
             else
             {

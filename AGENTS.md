@@ -251,7 +251,9 @@ src/
                              # the "Guards" card (status and control of
                              # ban/policy/settings.json/WSL; collapsible to one row — aggregate
                              # status dot + word and a single combined action: "enable all"
-                             # = ban + policy + both syncs, "disable all" = ban + policy;
+                             # = ban + policy + both syncs, best-effort: a failing step
+                             # does not stop the rest, the result line names the failures
+                             # and keeps the live ban verdict; "disable all" = ban + policy;
                              # ban and policy go as one elevation (--elevated-guard-all-on/off),
                              # remembered in ui.guardsCardExpanded), the diagnostics window
                              # (DiagnosticsWindow: read-only state summary with highlighting,
