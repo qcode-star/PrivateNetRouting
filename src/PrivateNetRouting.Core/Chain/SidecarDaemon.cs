@@ -177,6 +177,16 @@ public sealed class SidecarDaemon(
     {
         if (NeedsElevation())
         {
+            // liveness is the pipe (an elevated daemon hides its command line from this reader):
+            // with no daemon answering there is nothing to stop, and a UAC prompt for an already
+            // stopped chain — declinable into a "failed" stop — helps nobody. A hung daemon that
+            // lost its pipe is left to the stale kill of the next start
+            if (!IsProcessAlive)
+            {
+                log.Info("daemon: the pipe does not answer - nothing to stop, the elevated stop is skipped");
+                return;
+            }
+
             var result = await elevated.RunAsync(ElevatedChainCommands.StopChain, ct);
             if (!result.Ok)
             {

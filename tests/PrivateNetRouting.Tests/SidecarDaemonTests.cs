@@ -193,6 +193,76 @@ public class DaemonStopTests : IDisposable
         Elevation = "never",
     };
 
+    /// <summary>
+    /// The elevated stop of an already stopped chain: no daemon answers on the pipe, so there is
+    /// nothing to stop and no UAC prompt (a declined one would fail a stop of a stopped chain).
+    /// </summary>
+    [Fact]
+    public async Task AnElevatedStopWithADeadPipeAsksNoElevation()
+    {
+        var config = Config();
+        config.Elevation = "always";
+        config.Socket = $@"\\.\pipe\pnr-test-{Guid.NewGuid():N}"; // nobody listens
+        var elevatedRuns = 0;
+        using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
+        var daemon = new SidecarDaemon(
+            config,
+            new FakePortProbe(),
+            new FakeFinderByName(),
+            log,
+            new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) =>
+            {
+                elevatedRuns++;
+                return 1; // a declined UAC
+            }),
+            new FakeVersionProbe());
+
+        await daemon.KillAsync(CancellationToken.None);
+
+        Assert.Equal(0, elevatedRuns);
+    }
+
+    [Fact]
+    public async Task AnElevatedStopWithALivePipeGoesThroughElevation()
+    {
+        var name = $"pnr-test-{Guid.NewGuid():N}";
+        var config = Config();
+        config.Elevation = "always";
+        config.Socket = $@"\\.\pipe\{name}";
+        var server = new NamedPipeServerStream(name, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances);
+        _ = Task.Run(server.WaitForConnection);
+        try
+        {
+            var elevatedRuns = 0;
+            using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
+            var daemon = new SidecarDaemon(
+                config,
+                new FakePortProbe(),
+                new FakeFinderByName(),
+                log,
+                new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) =>
+                {
+                    elevatedRuns++;
+                    return 0;
+                }),
+                new FakeVersionProbe());
+
+            await daemon.KillAsync(CancellationToken.None);
+
+            Assert.Equal(1, elevatedRuns);
+        }
+        finally
+        {
+            try
+            {
+                server.Dispose();
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     [Fact]
     public async Task AForeignListenerOnTheDaemonPortIsAWarnNotAStopFailure()
     {
