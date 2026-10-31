@@ -857,6 +857,33 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void CodexEnvRecognizesLowercaseSpellings()
+    {
+        var values = new Dictionary<string, string>
+        {
+            ["HTTP_PROXY"] = "http://127.0.0.1:18081",
+            ["HTTPS_PROXY"] = "http://127.0.0.1:18081",
+            ["ALL_PROXY"] = "http://127.0.0.1:18081",
+            ["NO_PROXY"] = "localhost,127.0.0.1",
+        };
+
+        // a lowercase line is rewritten in place to the canonical spelling — no duplicate appended
+        var merged = CodexEnvFile.Apply("http_proxy=http://old:1\nMY_VAR=keep\n", values);
+        Assert.Equal(
+            "HTTP_PROXY=http://127.0.0.1:18081\nMY_VAR=keep\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1\n",
+            merged);
+
+        // a lowercase file with the right values is already up to date (the export form too)
+        Assert.True(CodexEnvFile.UpToDate(
+            "http_proxy=http://127.0.0.1:18081\nhttps_proxy=http://127.0.0.1:18081\nall_proxy=http://127.0.0.1:18081\nno_proxy=localhost,127.0.0.1\n",
+            values));
+        Assert.True(CodexEnvFile.UpToDate(
+            "export http_proxy=http://127.0.0.1:18081\nexport https_proxy=http://127.0.0.1:18081\nexport all_proxy=http://127.0.0.1:18081\nexport no_proxy=localhost,127.0.0.1\n",
+            values));
+        Assert.False(CodexEnvFile.UpToDate("http_proxy=http://127.0.0.1:18081\n", values)); // incomplete stays not-up-to-date
+    }
+
+    [Fact]
     public void CodexEnvUpToDateAcceptsTheWslGatewayForm()
     {
         var values = new Dictionary<string, string>

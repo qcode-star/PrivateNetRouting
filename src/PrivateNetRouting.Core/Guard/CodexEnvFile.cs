@@ -19,7 +19,7 @@ public static class CodexEnvFile
     public static readonly IReadOnlyList<string> Keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
 
     /// <summary>The values the Windows side writes: the forward proxy address and the bypass list.</summary>
-    public static IReadOnlyDictionary<string, string> Values(AppConfig config) => new Dictionary<string, string>
+    public static IReadOnlyDictionary<string, string> Values(AppConfig config) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["HTTP_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
@@ -47,13 +47,21 @@ public static class CodexEnvFile
         for (var i = 0; i < lines.Count; i++)
         {
             var key = KeyOf(lines[i]);
-            if (key is null || !values.TryGetValue(key, out var value))
+            if (key is null)
             {
                 continue;
             }
 
-            lines[i] = $"{key}={value}";
-            seen.Add(key);
+            // any spelling of a maintained key (http_proxy, export HTTP_PROXY=…) is recognized and
+            // rewritten to the canonical form: the maintained file shape is uppercase
+            var canonical = Keys.FirstOrDefault(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (canonical is null || !values.TryGetValue(canonical, out var value))
+            {
+                continue;
+            }
+
+            lines[i] = $"{canonical}={value}";
+            seen.Add(canonical);
         }
 
         foreach (var (key, value) in values)
@@ -85,8 +93,9 @@ public static class CodexEnvFile
         var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in text.Split('\n'))
         {
-            var entry = EntryOf(line.TrimEnd('\r'));
-            if (entry is { } item && values.ContainsKey(item.Key) && !found.ContainsKey(item.Key))
+            var entry = EntryLineOf(line.TrimEnd('\r'));
+            if (entry is { } item && !found.ContainsKey(item.Key)
+                && Keys.Any(k => k.Equals(item.Key, StringComparison.OrdinalIgnoreCase)))
             {
                 found[item.Key] = item.Value;
             }
@@ -145,7 +154,10 @@ public static class CodexEnvFile
     }
 
     /// <summary>Key of a `KEY=value` or `export KEY=value` line; null — a comment or not a key line.</summary>
-    internal static string? KeyOf(string line)
+    internal static string? KeyOf(string line) => EntryLineOf(line)?.Key;
+
+    /// <summary>The `KEY=value` entry of a line, the `export ` prefix stripped; null — a comment or not a key line.</summary>
+    private static (string Key, string Value)? EntryLineOf(string line)
     {
         var trimmed = line.Trim();
         if (trimmed.StartsWith("export ", StringComparison.OrdinalIgnoreCase))
@@ -153,7 +165,7 @@ public static class CodexEnvFile
             trimmed = trimmed["export ".Length..].TrimStart();
         }
 
-        return EntryOf(trimmed)?.Key;
+        return EntryOf(trimmed);
     }
 
     private static (string Key, string Value)? EntryOf(string trimmed)
