@@ -336,6 +336,38 @@ public class UpdaterTests : IDisposable
         Assert.DoesNotContain(progress, p => p.Message == "installed 2.26454.2.0 -> 2.26454.2.0");
     }
 
+    /// <summary>
+    /// An address whose path names no version the parser knows leaves the offered version unknown:
+    /// the downloaded package is then what tells a reinstall from an update — the installed version
+    /// is up to date, Claude is not closed and nothing is installed.
+    /// </summary>
+    [Fact]
+    public async Task APackageOfTheInstalledVersionBehindAnUnknownAddressIsUpToDate()
+    {
+        _appx.Installed = new InstalledPackage("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var updater = Create(journalUrl: "https://downloads.claude.ai/releases/win32/arm64/2.26455.1/Claude-x.msix");
+
+        var result = await updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.UpToDate, result.Outcome);
+        Assert.Empty(_appx.AddedFiles);
+        Assert.Empty(Directory.EnumerateFiles(_config.Claude.Update.CacheDir, "*.msix")); // the useless download is not kept
+    }
+
+    [Fact]
+    public async Task InstallAsyncOfTheInstalledVersionReinstallsOnlyWithForce()
+    {
+        _appx.Installed = new InstalledPackage("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var package = await WritePackageAsync(MatchingPublisher); // identity 2.26455.1.0
+
+        var plain = await Create().InstallAsync(package, new UpdateOptions { KeepFile = true }, null, CancellationToken.None);
+        Assert.Equal(UpdateOutcome.UpToDate, plain.Outcome);
+        Assert.Empty(_appx.AddedFiles);
+
+        await Create().InstallAsync(package, new UpdateOptions { KeepFile = true, Force = true }, null, CancellationToken.None);
+        Assert.Single(_appx.AddedFiles);
+    }
+
     [Fact]
     public async Task InstallAsyncReportsWhetherTheVersionAdvanced()
     {

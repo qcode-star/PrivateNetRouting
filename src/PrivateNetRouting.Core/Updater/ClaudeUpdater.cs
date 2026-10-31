@@ -66,10 +66,15 @@ public sealed record UpdateRunResult(
 /// What an install pass left behind: the package seen afterwards and whether its version really
 /// advanced. The outcome is derived from the observation, not from "the command returned", so a
 /// silent AppX/Store failure is NoChange rather than a success with a run of identical versions.
+/// AlreadyInstalled — the package is the installed version and no reinstall was asked for
+/// (--force): nothing was closed or installed, the outcome is UpToDate.
 /// </summary>
-public sealed record UpdateInstallResult(InstalledPackage Package, bool VersionChanged)
+public sealed record UpdateInstallResult(InstalledPackage Package, bool VersionChanged, bool AlreadyInstalled = false)
 {
-    public UpdateOutcome Outcome => VersionChanged ? UpdateOutcome.Installed : UpdateOutcome.NoChange;
+    public UpdateOutcome Outcome =>
+        AlreadyInstalled ? UpdateOutcome.UpToDate
+        : VersionChanged ? UpdateOutcome.Installed
+        : UpdateOutcome.NoChange;
 }
 
 /// <summary>
@@ -270,13 +275,25 @@ public sealed class ClaudeUpdater(
     /// Step "Install" (including the two-phase run on an already downloaded file): repeated Publisher
     /// verification, closing Claude (unless KeepRunning), Add-AppxPackage, version verification,
     /// deleting the package from the cache (unless KeepFile). Returns the package after install and
-    /// whether its version advanced.
+    /// whether its version advanced. A package of the installed version is a reinstall only with
+    /// Force; otherwise nothing is closed or installed and the result is AlreadyInstalled.
     /// </summary>
     public async Task<UpdateInstallResult> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
-        await VerifyAsync(file, ct);
+        var identity = await VerifyAsync(file, ct);
         var before = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
+
+        if (IsInstalledVersion(identity, before.Version) && !options.Force)
+        {
+            log.Info($"updater: the package is the installed version {before.Version} — nothing to install");
+            if (!options.KeepFile)
+            {
+                DiscardDownloaded(file);
+            }
+
+            return new UpdateInstallResult(before, false, AlreadyInstalled: true);
+        }
 
         if (!options.KeepRunning)
         {
@@ -293,20 +310,41 @@ public sealed class ClaudeUpdater(
             log.Warn("updater: version did not change after install — check the AppX journal");
         }
 
-        if (!options.KeepFile && IsInCache(file))
+        if (!options.KeepFile)
         {
-            try
-            {
-                File.Delete(file);
-                log.Info($"updater: package removed from cache: {file}");
-            }
-            catch (IOException ex)
-            {
-                log.Warn($"updater: cannot remove the package from cache: {ex.Message}");
-            }
+            DiscardDownloaded(file);
         }
 
         return new UpdateInstallResult(after, changed);
+    }
+
+    /// <summary>
+    /// The package carries the installed version: an address whose path names no version (a manual
+    /// --url, a changed feed format) leaves the offered version unknown until the download, so the
+    /// verified manifest is what tells a reinstall from an update.
+    /// </summary>
+    public static bool IsInstalledVersion(MsixIdentity identity, string installedVersion) =>
+        PackageVersion.Compare(identity.Version, installedVersion) is { } order
+            ? order == 0
+            : string.Equals(identity.Version, installedVersion, StringComparison.Ordinal);
+
+    /// <summary>Deletes a package the updater downloaded itself; a file the user pointed at is never touched.</summary>
+    public void DiscardDownloaded(string file)
+    {
+        if (!IsInCache(file))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(file);
+            log.Info($"updater: package removed from cache: {file}");
+        }
+        catch (IOException ex)
+        {
+            log.Warn($"updater: cannot remove the package from cache: {ex.Message}");
+        }
     }
 
     /// <summary>Only a package the updater downloaded itself is ours to delete — never a file the user pointed at.</summary>
@@ -355,7 +393,20 @@ public sealed class ClaudeUpdater(
 
         await EnsureChainAsync(chainProgress, progress, ct);
         var file = await DownloadAsync(packageUrl, progress, ct);
-        await VerifyAsync(file, ct);
+        var identity = await VerifyAsync(file, ct);
+        if (IsInstalledVersion(identity, check.Installed.Version) && !options.Force)
+        {
+            // the address named no version (or one the parser does not know): the package itself
+            // says it is the installed release — Claude is not closed for a reinstall nobody asked for
+            if (!options.KeepFile)
+            {
+                DiscardDownloaded(file);
+            }
+
+            progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} is up to date (the package is the same version)"));
+            return new UpdateRunResult(UpdateOutcome.UpToDate, check.Installed, check.Installed, null, packageUrl);
+        }
+
         if (options.DownloadOnly)
         {
             progress?.Report(new UpdateProgress(UpdatePhase.Done, 0, 0, $"package ready: {file}"));

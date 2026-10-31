@@ -256,6 +256,18 @@ public partial class UpdateWindow : Window
 
             // Package verification: manifest and Publisher
             var identity = await _runtime.Updater.VerifyAsync(_packageFile, ct);
+            if (ClaudeUpdater.IsInstalledVersion(identity, check.Installed.Version))
+            {
+                // the address named no version the check could compare: the package itself is the
+                // installed release — nothing to close, nothing to install
+                _runtime.Updater.DiscardDownloaded(_packageFile);
+                SetStep(3, ChainStepStatus.Skipped);
+                SetDetailKey("Update.Check.UpToDateFmt", check.Installed.Version);
+                VersionStateResolved?.Invoke(new UpdateCheckResult(check.Installed, check.PackageUrl, check.Installed.Version, UpToDate: true));
+                Finish(success: true);
+                return;
+            }
+
             SetDetailKey("Update.Verify.OkFmt", identity.Version, identity.Publisher);
 
             // Pause before installation — only if Claude is running (it will be closed)

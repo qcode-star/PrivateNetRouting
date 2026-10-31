@@ -958,6 +958,12 @@ internal static class Program
         if (installFrom is not null)
         {
             var install = await runtime.Updater.InstallAsync(installFrom, options, progress, Interrupt.Token);
+            if (install.AlreadyInstalled)
+            {
+                Console.WriteLine($"up to date: the package is the installed version {install.Package.Version} — nothing to install (pass --force to reinstall it)");
+                return 0;
+            }
+
             if (!install.VersionChanged)
             {
                 Console.Error.WriteLine(
