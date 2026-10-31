@@ -966,10 +966,11 @@ internal static class Program
 
             if (!install.VersionChanged)
             {
-                Console.Error.WriteLine(
-                    $"installed: {install.Package.Version} — the version did not change after the install" +
-                    (options.Force ? "" : " (pass --force to accept it)"));
-                return options.Force ? 0 : 1;
+                // --force accepts the reinstall it asked for, never an update that did not land
+                (install.Reinstall ? Console.Out : Console.Error).WriteLine(install.Reinstall
+                    ? $"reinstalled: {install.Package.Version} — the same version, as asked by --force"
+                    : $"not installed: {install.Package.Version} — the installed version did not reach the package's after the install");
+                return install.Reinstall ? 0 : 1;
             }
 
             Console.WriteLine($"installed: {install.Package.Version}");
@@ -1028,11 +1029,12 @@ internal static class Program
                 return handedOver ? 0 : 1;
             case UpdateOutcome.NoChange:
                 // the run completed but the observation says the version is the same: a failure
-                // unless the owner asked for a reinstall on purpose
-                Console.Error.WriteLine(
-                    $"no change: {result.InstalledAfter?.Version} — the version did not change after the install" +
-                    (options.Force ? "" : " (pass --force to accept it)"));
-                return handedOver && options.Force ? 0 : 1;
+                // unless the owner asked for a reinstall on purpose (--force accepts the reinstall
+                // it asked for, never an update that did not land)
+                (result.Reinstall ? Console.Out : Console.Error).WriteLine(result.Reinstall
+                    ? $"reinstalled: {result.InstalledAfter?.Version} — the same version, as asked by --force"
+                    : $"no change: {result.InstalledAfter?.Version} — the installed version did not reach the package's after the install");
+                return handedOver && result.Reinstall ? 0 : 1;
             default:
                 return 1;
         }

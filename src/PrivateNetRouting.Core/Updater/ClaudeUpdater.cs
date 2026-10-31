@@ -60,16 +60,20 @@ public sealed record UpdateRunResult(
     InstalledPackage? Installed,
     InstalledPackage? InstalledAfter,
     string? PackageFile,
-    string? PackageUrl);
+    string? PackageUrl,
+    bool Reinstall = false);
 
 /// <summary>
 /// What an install pass left behind: the package seen afterwards and whether its version really
 /// advanced. The outcome is derived from the observation, not from "the command returned", so a
 /// silent AppX/Store failure is NoChange rather than a success with a run of identical versions.
+/// VersionChanged means the registration reached the package's version — not merely "moved".
 /// AlreadyInstalled — the package is the installed version and no reinstall was asked for
-/// (--force): nothing was closed or installed, the outcome is UpToDate.
+/// (--force): nothing was closed or installed, the outcome is UpToDate. Reinstall — the forced
+/// pass of a package of the installed version: its NoChange is the expected end, while a NoChange
+/// of a newer package stays a failed update even under --force.
 /// </summary>
-public sealed record UpdateInstallResult(InstalledPackage Package, bool VersionChanged, bool AlreadyInstalled = false)
+public sealed record UpdateInstallResult(InstalledPackage Package, bool VersionChanged, bool AlreadyInstalled = false, bool Reinstall = false)
 {
     public UpdateOutcome Outcome =>
         AlreadyInstalled ? UpdateOutcome.UpToDate
@@ -303,11 +307,13 @@ public sealed class ClaudeUpdater(
         progress?.Report(new UpdateProgress(UpdatePhase.Install, 0, 0, "Add-AppxPackage"));
         await appx.AddPackageAsync(file, ct);
 
+        // only a forced pass gets here with the installed version: a reinstall, not an update
+        var reinstall = IsInstalledVersion(identity, before.Version);
         var after = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct) ?? before;
-        var changed = !string.Equals(after.Version, before.Version, StringComparison.Ordinal);
-        if (!changed)
+        var changed = !reinstall && ReachedPackageVersion(after.Version, identity.Version);
+        if (!changed && !reinstall)
         {
-            log.Warn("updater: version did not change after install — check the AppX journal");
+            log.Warn($"updater: the installed version is {after.Version} after the install, not the package's {identity.Version} — check the AppX journal");
         }
 
         if (!options.KeepFile)
@@ -315,8 +321,14 @@ public sealed class ClaudeUpdater(
             DiscardDownloaded(file);
         }
 
-        return new UpdateInstallResult(after, changed);
+        return new UpdateInstallResult(after, changed, Reinstall: reinstall);
     }
+
+    /// <summary>The registration reached the package (or went past it — another update landed meanwhile).</summary>
+    private static bool ReachedPackageVersion(string after, string package) =>
+        PackageVersion.Compare(after, package) is { } order
+            ? order >= 0
+            : string.Equals(after, package, StringComparison.Ordinal);
 
     /// <summary>
     /// The package carries the installed version: an address whose path names no version (a manual
@@ -417,7 +429,7 @@ public sealed class ClaudeUpdater(
         progress?.Report(install.VersionChanged
             ? new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version} -> {install.Package.Version}")
             : new UpdateProgress(UpdatePhase.Done, 0, 0, $"installed {check.Installed.Version}: the version did not change"));
-        return new UpdateRunResult(install.Outcome, check.Installed, install.Package, file, packageUrl);
+        return new UpdateRunResult(install.Outcome, check.Installed, install.Package, file, packageUrl, install.Reinstall);
     }
 
     /// <summary>Closing Claude: a polite CloseMainWindow to the windows, a wait, killing the remnants.</summary>

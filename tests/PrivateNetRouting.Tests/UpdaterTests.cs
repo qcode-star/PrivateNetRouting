@@ -368,6 +368,36 @@ public class UpdaterTests : IDisposable
         Assert.Single(_appx.AddedFiles);
     }
 
+    /// <summary>
+    /// "Changed" is "reached the package's version": a registration that moved somewhere else (or
+    /// nowhere) after installing a newer package is a failed update, and --force does not turn it
+    /// into an accepted reinstall — only a package of the installed version is a reinstall.
+    /// </summary>
+    [Fact]
+    public async Task AForcedUpdateThatDoesNotReachThePackageIsNotAReinstall()
+    {
+        _appx.AfterInstall = new InstalledPackage("Claude", "2.26454.3.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var package = await WritePackageAsync(MatchingPublisher); // identity 2.26455.1.0
+
+        var moved = await Create().InstallAsync(package, new UpdateOptions { KeepFile = true, Force = true }, null, CancellationToken.None);
+
+        Assert.False(moved.VersionChanged);
+        Assert.Equal(UpdateOutcome.NoChange, moved.Outcome);
+        Assert.False(moved.Reinstall);
+    }
+
+    [Fact]
+    public async Task AForcedReinstallOfTheInstalledVersionIsMarkedAsSuch()
+    {
+        _appx.Installed = new InstalledPackage("Claude", "2.26455.1.0", MatchingPublisher, @"C:\WindowsApps\Claude", "Claude_abc123");
+        var package = await WritePackageAsync(MatchingPublisher); // identity 2.26455.1.0
+
+        var reinstall = await Create().InstallAsync(package, new UpdateOptions { KeepFile = true, Force = true }, null, CancellationToken.None);
+
+        Assert.Equal(UpdateOutcome.NoChange, reinstall.Outcome);
+        Assert.True(reinstall.Reinstall);
+    }
+
     [Fact]
     public async Task InstallAsyncReportsWhetherTheVersionAdvanced()
     {
