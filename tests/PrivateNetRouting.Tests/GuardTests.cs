@@ -1040,8 +1040,17 @@ public class GuardTests : IDisposable
     /// <summary>Canned probe answer of a distro whose layers match the config (port 18082).</summary>
     private static string WslProbeInSync(string user, string proxy = "http://192.0.2.1:18082") =>
         $"SCRIPT=present\nPORT=18082\nUSER_NAME='{user}'\n"
-        + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n"
+        + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n" + CodexNoProxyLine
+        + WslBootWired
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
+
+    /// <summary>The NO_PROXY export of the Codex snippet as the probe reads it back (no bypass domains configured).</summary>
+    private const string CodexNoProxyLine = "    export NO_PROXY=\"localhost,127.0.0.1,.local\"\n";
+
+    /// <summary>The boot layer as the sync leaves it: the marked runner, wsl.conf pointing at it.</summary>
+    private static readonly string WslBootWired =
+        "RUNNER=ours\nWSLCONF=present\n[boot]\ncommand=\""
+        + WslConfigGuard.BootRunnerPath(new WslConfig().StartupScriptPath) + "\"\nWSLCONF=END\n";
 
     [Fact]
     public void WslWritersUseUniqueTempNames()
@@ -1226,7 +1235,7 @@ public class GuardTests : IDisposable
 
         // the status reads the bare address back and finds the distro in sync
         runner.ProbeOutput = _ => "SCRIPT=present\nPORT=1080\nPNR_PROXY_HOST='2001:db8::1'\nUSER_NAME='u1'\n"
-            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=1080\nPNR_CODEX_PROXY_HOST='2001:db8::1'\n"
+            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=1080\nPNR_CODEX_PROXY_HOST='2001:db8::1'\n" + CodexNoProxyLine + WslBootWired
             + $"SETTINGS=present\n{FullSettingsJson("http://[2001:db8::1]:1080")}\nSETTINGS=END\n";
         var status = await guard.ReadAsync(CancellationToken.None);
         Assert.Equal(GuardState.On, status.Distros[0].State);
@@ -1264,7 +1273,7 @@ public class GuardTests : IDisposable
     {
         var config = WslSkippedShapeConfig("192.0.2.50:3128");
         var inSync = "SCRIPT=present\nPORT=3128\nPNR_PROXY_HOST='192.0.2.50'\nUSER_NAME='u1'\n"
-            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\nPNR_CODEX_PROXY_HOST='192.0.2.50'\n"
+            + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\nPNR_CODEX_PROXY_HOST='192.0.2.50'\n" + CodexNoProxyLine + WslBootWired
             + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.50:3128")}\nSETTINGS=END\n";
         // what the gateway-form scripts of an earlier sync look like: right port, no baked host
         var gatewayForm = "SCRIPT=present\nPORT=3128\nUSER_NAME='u1'\n"
@@ -1318,7 +1327,7 @@ public class GuardTests : IDisposable
         {
             Installed = ["d1"],
             Running = ["d1"],
-            ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\n"
+            ProbeOutput = _ => "SCRIPT=present\nPORT=18082\nUSER_NAME='u1'\nPROXYENV=missing\n" + WslBootWired
                 + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.1:18082")}\nSETTINGS=END\n",
         };
         var config = WslConfig("on", syncClaude: true, syncCodex: false, ("d1", "u1"));
@@ -1349,6 +1358,50 @@ public class GuardTests : IDisposable
         Assert.False((bool)root["includeCoAuthoredBy"]!);
         Assert.Equal("", (string?)root["attribution"]!["commit"]);
         Assert.Equal("", (string?)root["attribution"]!["pr"]);
+    }
+
+    [Fact]
+    public async Task WslStatusComparesEveryMaintainedValueWithTheConfig()
+    {
+        var probe = WslProbeInSync("u1");
+        var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"], ProbeOutput = _ => probe };
+        var config = WslConfig("on", ("d1", "u1"));
+        var guard = new WslConfigGuard(config, runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+        Assert.Equal(GuardState.On, (await guard.ReadAsync(CancellationToken.None)).Distros[0].State);
+
+        async Task<WslDistroStatus> ReadWith(string changed)
+        {
+            probe = changed;
+            return (await guard.ReadAsync(CancellationToken.None)).Distros[0];
+        }
+
+        // a bypass domain added to the config since the sync: both NO_PROXY copies are stale
+        config.BypassDomains = ["corp.example"];
+        var stale = await ReadWith(WslProbeInSync("u1"));
+        Assert.Equal(GuardState.Partial, stale.State);
+        Assert.Contains("settings NO_PROXY differs", stale.Reason);
+        config.BypassDomains = [];
+
+        // the Codex snippet's NO_PROXY alone
+        stale = await ReadWith(WslProbeInSync("u1").Replace(CodexNoProxyLine, "    export NO_PROXY=\"localhost\"\n"));
+        Assert.Equal(GuardState.Partial, stale.State);
+        Assert.Contains("codex proxy env NO_PROXY", stale.Reason);
+
+        // HTTP_PROXY of settings.json lagging behind HTTPS_PROXY
+        var json = FullSettingsJson("http://192.0.2.1:18082");
+        stale = await ReadWith(WslProbeInSync("u1").Replace(json, json.Replace("\"HTTP_PROXY\":\"http://192.0.2.1:18082\"", "\"HTTP_PROXY\":\"http://192.0.2.9:1\"")));
+        Assert.Equal(GuardState.Partial, stale.State);
+        Assert.Contains("settings HTTP_PROXY=http://192.0.2.9:1", stale.Reason);
+
+        // the startup script serves another user
+        stale = await ReadWith(WslProbeInSync("u1").Replace("USER_NAME='u1'", "USER_NAME='other'"));
+        Assert.Equal(GuardState.Partial, stale.State);
+        Assert.Contains("script USER_NAME=other", stale.Reason);
+
+        // the [boot] command was removed: the startup script never runs
+        stale = await ReadWith(WslProbeInSync("u1").Replace(WslBootWired, "RUNNER=ours\nWSLCONF=missing\n"));
+        Assert.Equal(GuardState.Partial, stale.State);
+        Assert.Contains("[boot] command", stale.Reason);
     }
 
     [Fact]

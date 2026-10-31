@@ -300,14 +300,27 @@ public sealed class WslConfigGuard(
             }
 
             // a layer that is not synced cannot be stale: its signals are ignored
-            var expectedHost = ClaudeEnvValues.WslFixedHost(config);
-            var portOk = !config.Wsl.SyncClaude || (read.ScriptPort == expectedPort && read.ScriptHost == expectedHost);
+            var expected = new WslExpected(
+                expectedPort,
+                ClaudeEnvValues.WslFixedHost(config),
+                expectedProxy,
+                ClaudeEnvValues.BuildNoProxy(config.BypassDomains),
+                distro.User,
+                BootRunnerPath(config.Wsl.StartupScriptPath),
+                config.Wsl.SyncClaude,
+                config.Wsl.SyncCodex);
+            var portOk = !config.Wsl.SyncClaude || (read.ScriptPort == expectedPort && read.ScriptHost == expected.Host);
             var envOk = !config.Wsl.SyncCodex
-                || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expectedHost);
-            // the privacy/attribution keys of settings.json: the sync maintains them like the proxy env
+                || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expected.Host
+                    && read.ProxyEnvNoProxy == expected.NoProxy);
+            // the rest of what the Claude pass maintains: the privacy/attribution keys and NO_PROXY of
+            // settings.json, the user the startup script serves, and the boot wiring that runs it —
+            // a missing [boot] command leaves the script dead even though the file is there
             var keysOk = !config.Wsl.SyncClaude
-                || read.SettingsRoot is not { } settingsRoot
-                || ClaudeSettingsShape.DriftOf(settingsRoot).Count == 0;
+                || (SettingsEnv(read, "NO_PROXY") == expected.NoProxy
+                    && read.ScriptUser == expected.User
+                    && BootWired(read, expected.RunnerPath)
+                    && (read.SettingsRoot is not { } settingsRoot || ClaudeSettingsShape.DriftOf(settingsRoot).Count == 0));
             if (config.Wsl.SyncClaude && expectedProxy is null)
             {
                 // the expected proxy cannot be computed (the WSL NAT gateway is gone, or the
@@ -320,13 +333,14 @@ public sealed class WslConfigGuard(
                     GuardState.Partial,
                     read.ScriptPort,
                     read.SettingsProxy,
-                    (okWithoutProxy ? "" : DescribeMismatch(read, expectedPort, expectedHost, expectedProxy, config.Wsl.SyncCodex) + "; ")
+                    (okWithoutProxy ? "" : DescribeMismatch(read, expected) + "; ")
                     + "the WSL gateway is unknown — the expected proxy cannot be checked",
                     read.ProxyEnvPresent,
                     read.ProxyEnvPort);
             }
 
-            var proxyOk = !config.Wsl.SyncClaude || read.SettingsProxy == expectedProxy;
+            var proxyOk = !config.Wsl.SyncClaude
+                || (read.SettingsProxy == expectedProxy && SettingsEnv(read, "HTTP_PROXY") == expectedProxy);
             var ok = portOk && proxyOk && envOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,
@@ -334,7 +348,7 @@ public sealed class WslConfigGuard(
                 ok ? GuardState.On : GuardState.Partial,
                 read.ScriptPort,
                 read.SettingsProxy,
-                ok ? "" : DescribeMismatch(read, expectedPort, expectedHost, expectedProxy, config.Wsl.SyncCodex),
+                ok ? "" : DescribeMismatch(read, expected),
                 read.ProxyEnvPresent,
                 read.ProxyEnvPort);
         }
@@ -654,7 +668,27 @@ public sealed class WslConfigGuard(
         WslBootRunnerState BootRunner = WslBootRunnerState.Missing,
         string? ScriptHost = null,
         string? ProxyEnvHost = null,
-        bool SettingsNotObject = false);
+        bool SettingsNotObject = false,
+        string? ProxyEnvNoProxy = null);
+
+    /// <summary>What a distro in sync carries, from the config.</summary>
+    private sealed record WslExpected(
+        int Port,
+        string? Host,
+        string? Proxy,
+        string NoProxy,
+        string User,
+        string RunnerPath,
+        bool ClaudeExpected,
+        bool ProxyEnvExpected);
+
+    /// <summary>A string value of the "env" object of the distro settings.json; null — absent.</summary>
+    private static string? SettingsEnv(WslRead read, string name) =>
+        (read.SettingsRoot?["env"] as JsonObject)?[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    /// <summary>The [boot] command of wsl.conf runs our marked runner (the state the sync leaves).</summary>
+    private static bool BootWired(WslRead read, string runnerPath) =>
+        PlanBootLayer(runnerPath, ExtractBootCommand(read.WslConfText), read.BootRunner) == WslBootPlan.AlreadyOurs;
 
     /// <summary>One trip into the distro for all state (root: sees both /etc and home).</summary>
     private async Task<WslRead> ReadInsideAsync(WslDistroConfig distro, CancellationToken ct)
@@ -688,6 +722,7 @@ public sealed class WslConfigGuard(
                 echo PROXYENV=present
                 grep -E '^PNR_CODEX_PROXY_PORT=' {BashQuote(envPath)} 2>/dev/null || true
                 grep -E '^PNR_CODEX_PROXY_HOST=' {BashQuote(envPath)} 2>/dev/null || true
+                grep -E '^[[:space:]]*export NO_PROXY=' {BashQuote(envPath)} 2>/dev/null | head -n 1 || true
             else
                 echo PROXYENV=missing
             fi
@@ -733,7 +768,7 @@ public sealed class WslConfigGuard(
     {
         bool scriptPresent = false, settingsFilePresent = false, proxyEnvPresent = false;
         int? port = null, proxyEnvPort = null;
-        string? user = null, proxy = null, wslConf = null, scriptHost = null, proxyEnvHost = null;
+        string? user = null, proxy = null, wslConf = null, scriptHost = null, proxyEnvHost = null, proxyEnvNoProxy = null;
         var bootRunner = WslBootRunnerState.Missing;
         JsonObject? root = null;
         var settingsNotObject = false;
@@ -810,6 +845,10 @@ public sealed class WslConfigGuard(
                     {
                         proxyEnvHost = line["PNR_CODEX_PROXY_HOST=".Length..].Trim().Trim('\'', '"');
                     }
+                    else if (line.TrimStart().StartsWith("export NO_PROXY=", StringComparison.Ordinal))
+                    {
+                        proxyEnvNoProxy = UnquoteShellWord(line.TrimStart()["export NO_PROXY=".Length..].Trim());
+                    }
                     else if (line.StartsWith("PNR_PROXY_HOST=", StringComparison.Ordinal))
                     {
                         scriptHost = line["PNR_PROXY_HOST=".Length..].Trim().Trim('\'', '"');
@@ -824,7 +863,18 @@ public sealed class WslConfigGuard(
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost, settingsNotObject);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost, settingsNotObject, proxyEnvNoProxy);
+    }
+
+    /// <summary>One shell word back to its text: '…' (an embedded quote written as '\'') or "…".</summary>
+    internal static string UnquoteShellWord(string word)
+    {
+        if (word.Length >= 2 && word[0] == '\'' && word[^1] == '\'')
+        {
+            return word[1..^1].Replace("'\\''", "'");
+        }
+
+        return word.Length >= 2 && word[0] == '"' && word[^1] == '"' ? word[1..^1] : word;
     }
 
     /// <summary>
@@ -1337,8 +1387,9 @@ public sealed class WslConfigGuard(
         return distros.All(d => d.State == GuardState.Off) ? GuardState.Off : GuardState.Partial;
     }
 
-    private static string DescribeMismatch(WslRead read, int expectedPort, string? expectedHost, string? expectedProxy, bool proxyEnvExpected)
+    private static string DescribeMismatch(WslRead read, WslExpected expected)
     {
+        var (expectedPort, expectedHost, expectedProxy, proxyEnvExpected) = (expected.Port, expected.Host, expected.Proxy, expected.ProxyEnvExpected);
         var parts = new List<string>();
         if (read.ScriptPort != expectedPort)
         {
@@ -1360,6 +1411,30 @@ public sealed class WslConfigGuard(
             parts.Add("settings.json has no HTTPS_PROXY");
         }
 
+        if (expected.ClaudeExpected)
+        {
+            var httpProxy = SettingsEnv(read, "HTTP_PROXY");
+            if (expectedProxy is not null && httpProxy != expectedProxy)
+            {
+                parts.Add($"settings HTTP_PROXY={httpProxy ?? "<none>"} (expected {expectedProxy})");
+            }
+
+            if (read.SettingsPresent && SettingsEnv(read, "NO_PROXY") != expected.NoProxy)
+            {
+                parts.Add("settings NO_PROXY differs from the config");
+            }
+
+            if (read.ScriptUser != expected.User)
+            {
+                parts.Add($"script USER_NAME={read.ScriptUser ?? "<none>"} (expected {expected.User})");
+            }
+
+            if (!BootWired(read, expected.RunnerPath))
+            {
+                parts.Add("the [boot] command of /etc/wsl.conf does not run the startup runner");
+            }
+        }
+
         if (read.SettingsRoot is { } settingsRoot && ClaudeSettingsShape.DriftOf(settingsRoot) is { Count: > 0 } drift)
         {
             parts.Add("settings.json keys not set: " + string.Join(", ", drift));
@@ -1376,6 +1451,10 @@ public sealed class WslConfigGuard(
         else if (proxyEnvExpected && read.ProxyEnvHost != expectedHost)
         {
             parts.Add($"codex proxy env host={read.ProxyEnvHost ?? "<gateway>"} (expected {expectedHost ?? "<gateway>"})");
+        }
+        else if (proxyEnvExpected && read.ProxyEnvNoProxy != expected.NoProxy)
+        {
+            parts.Add("codex proxy env NO_PROXY differs from the config");
         }
 
         return string.Join("; ", parts);
