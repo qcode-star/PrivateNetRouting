@@ -117,6 +117,9 @@ public class FragmentDownloaderTests : IDisposable
         var target = Path.Combine(_root, "app.msix");
         var partsDir = target + ".parts";
         Directory.CreateDirectory(partsDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(partsDir, FragmentDownloader.ResumeManifestName),
+            FragmentDownloader.ResumeManifest("https://pkg.example.com/app.msix", RecordingHandler.ContentLength, 10));
         await File.WriteAllBytesAsync(Path.Combine(partsDir, "part0000"), RecordingHandler.Payload[0..10]);
         await File.WriteAllBytesAsync(Path.Combine(partsDir, "part0003"), RecordingHandler.Payload[30..40]);
 
@@ -129,6 +132,40 @@ public class FragmentDownloaderTests : IDisposable
             .OrderBy(from => from)
             .ToList();
         Assert.Equal([10L, 20L, 40L, 50L, 60L, 70L, 80L, 90L], ranges); // fragments 0 and 3 are already complete
+    }
+
+    /// <summary>
+    /// Parts cut with another chunk size (updater.chunkBytes changed between the runs) have the
+    /// expected sizes of other ranges: trusting their length would assemble a broken package. Parts
+    /// of another manifest, or of none, are discarded and the download starts over.
+    /// </summary>
+    [Theory]
+    [InlineData("chunk")]
+    [InlineData("url")]
+    [InlineData("none")]
+    public async Task PartsOfAnotherCutAreDiscardedBeforeTheDownload(string mismatch)
+    {
+        var target = Path.Combine(_root, "app.msix");
+        var partsDir = target + ".parts";
+        Directory.CreateDirectory(partsDir);
+        var manifest = mismatch switch
+        {
+            "chunk" => FragmentDownloader.ResumeManifest("https://pkg.example.com/app.msix", RecordingHandler.ContentLength, 20),
+            "url" => FragmentDownloader.ResumeManifest("https://pkg.example.com/other.msix", RecordingHandler.ContentLength, 10),
+            _ => null,
+        };
+        if (manifest is not null)
+        {
+            await File.WriteAllTextAsync(Path.Combine(partsDir, FragmentDownloader.ResumeManifestName), manifest);
+        }
+
+        // a part of a 20-byte cut is 10 bytes too when it is the tail; here: bytes 20..29 as "part0001"
+        await File.WriteAllBytesAsync(Path.Combine(partsDir, "part0001"), RecordingHandler.Payload[20..30]);
+
+        await _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None);
+
+        Assert.Equal(RecordingHandler.Payload, await File.ReadAllBytesAsync(target));
+        Assert.Equal(10, _handler.Requests.Count(r => r.Method == "GET")); // every fragment anew
     }
 
     [Fact]

@@ -224,16 +224,34 @@ public sealed class ClaudeUpdater(
         return file;
     }
 
-    /// <summary>Step "Package verification": the manifest is present, the identity matches the installed package and this machine.</summary>
-    public async Task<MsixIdentity> VerifyAsync(string file, CancellationToken ct)
+    /// <summary>
+    /// Step "Package verification": the manifest is present, the identity matches the installed
+    /// package and this machine. A package of the cache that fails it is removed (unless
+    /// <paramref name="keepFile"/>): the next run downloads it anew instead of failing on the same
+    /// file again; a file the user pointed at is never touched.
+    /// </summary>
+    public async Task<MsixIdentity> VerifyAsync(string file, CancellationToken ct, bool keepFile = false)
+    {
+        try
+        {
+            return await VerifyPackageAsync(file, ct);
+        }
+        catch (PackageVerificationException) when (!keepFile)
+        {
+            DiscardDownloaded(file);
+            throw;
+        }
+    }
+
+    private async Task<MsixIdentity> VerifyPackageAsync(string file, CancellationToken ct)
     {
         var identity = MsixPackage.TryReadIdentity(file)
-            ?? throw new IOException("no AppxManifest.xml in the package — this is not a standalone MSIX; it cannot be installed manually");
+            ?? throw new PackageVerificationException("no AppxManifest.xml in the package — this is not a standalone MSIX; it cannot be installed manually");
         var installed = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
         if (!string.Equals(identity.Name, installed.Name, StringComparison.OrdinalIgnoreCase))
         {
-            throw new IOException(
+            throw new PackageVerificationException(
                 "package name mismatch — the package is not the installed application:\n" +
                 $"  package:    {identity.Name}\n" +
                 $"  installed:  {installed.Name}");
@@ -241,7 +259,7 @@ public sealed class ClaudeUpdater(
 
         if (!string.Equals(identity.Publisher, installed.Publisher, StringComparison.OrdinalIgnoreCase))
         {
-            throw new IOException(
+            throw new PackageVerificationException(
                 "publisher mismatch — the package will not install over the existing one:\n" +
                 $"  package:    {identity.Publisher}\n" +
                 $"  installed:  {installed.Publisher}");
@@ -257,7 +275,7 @@ public sealed class ClaudeUpdater(
         if (!string.Equals(identity.Architecture, machineArch, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(identity.Architecture, "neutral", StringComparison.OrdinalIgnoreCase))
         {
-            throw new IOException(
+            throw new PackageVerificationException(
                 $"architecture mismatch — the package is built for another machine:\n" +
                 $"  package:    {identity.Architecture}\n" +
                 $"  machine:    {machineArch}");
@@ -267,7 +285,7 @@ public sealed class ClaudeUpdater(
         // Claude is closed, not after
         if (PackageVersion.Compare(identity.Version, installed.Version) is < 0)
         {
-            throw new IOException(
+            throw new PackageVerificationException(
                 $"the package is older than the installed one ({identity.Version} < {installed.Version}) — it cannot be installed over it");
         }
 
@@ -284,7 +302,7 @@ public sealed class ClaudeUpdater(
     /// </summary>
     public async Task<UpdateInstallResult> InstallAsync(string file, UpdateOptions options, IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
-        var identity = await VerifyAsync(file, ct);
+        var identity = await VerifyAsync(file, ct, options.KeepFile);
         var before = await appx.GetInstalledAsync(config.Claude.Update.PackageName, ct)
             ?? throw new IOException("Claude Desktop is not installed as an MSIX package");
 
@@ -307,7 +325,17 @@ public sealed class ClaudeUpdater(
         // KeepRunning keeps Claude open: the installer must not force it closed either (without
         // the flag a copy whose files are in use fails the installation instead)
         progress?.Report(new UpdateProgress(UpdatePhase.Install, 0, 0, "Add-AppxPackage"));
-        await appx.AddPackageAsync(file, forceApplicationShutdown: !options.KeepRunning, ct);
+        try
+        {
+            await appx.AddPackageAsync(file, forceApplicationShutdown: !options.KeepRunning, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && !options.KeepFile && IsInCache(file))
+        {
+            // a package the installer refused would fail every retry the same way: the next run
+            // downloads it anew
+            DiscardDownloaded(file);
+            throw new IOException($"{ex.Message}\nThe downloaded package was removed from the cache (--keep-file keeps it).", ex);
+        }
 
         // only a forced pass gets here with the installed version: a reinstall, not an update
         var reinstall = IsInstalledVersion(identity, before.Version);
@@ -407,7 +435,7 @@ public sealed class ClaudeUpdater(
 
         await EnsureChainAsync(chainProgress, progress, ct);
         var file = await DownloadAsync(packageUrl, progress, ct);
-        var identity = await VerifyAsync(file, ct);
+        var identity = await VerifyAsync(file, ct, options.KeepFile);
         if (IsInstalledVersion(identity, check.Installed.Version) && !options.Force)
         {
             // the address named no version (or one the parser does not know): the package itself
@@ -491,3 +519,6 @@ public sealed class ClaudeUpdater(
         }
     }
 }
+
+/// <summary>The package itself failed the verification (no manifest, another name, publisher or architecture, an older version).</summary>
+public sealed class PackageVerificationException(string message) : IOException(message);

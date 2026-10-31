@@ -336,7 +336,9 @@ public partial class UpdateWindow : Window
         {
             MarkCurrentStepFailed();
             SetDetailDirect(ex.Message);
-            if (_phase == UpdatePhase.Install && _packageFile is not null)
+            // a refused package of the cache is removed (the next run downloads it anew): the
+            // manual-install hint only makes sense while the file is still there
+            if (_phase == UpdatePhase.Install && _packageFile is not null && File.Exists(_packageFile))
             {
                 SetHintKey("Update.Install.RightsHintFmt", _packageFile);
             }

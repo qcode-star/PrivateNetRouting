@@ -124,7 +124,7 @@ public class UpdaterTests : IDisposable
         var package = await WritePackageAsync(MatchingPublisher); // identity 2.26455.1.0
         var updater = Create();
 
-        var error = await Assert.ThrowsAsync<IOException>(() => updater.VerifyAsync(package, CancellationToken.None));
+        var error = await Assert.ThrowsAsync<PackageVerificationException>(() => updater.VerifyAsync(package, CancellationToken.None));
 
         Assert.Contains("older than the installed", error.Message);
     }
@@ -454,7 +454,7 @@ public class UpdaterTests : IDisposable
         _downloader.Publisher = "CN=Someone Else";
         var updater = Create();
 
-        var error = await Assert.ThrowsAsync<IOException>(() =>
+        var error = await Assert.ThrowsAsync<PackageVerificationException>(() =>
             updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
 
         Assert.Contains("publisher mismatch", error.Message);
@@ -514,7 +514,7 @@ public class UpdaterTests : IDisposable
         var package = await WritePackageAsync(MatchingPublisher, name: "SomethingElse");
         var updater = Create();
 
-        var error = await Assert.ThrowsAsync<IOException>(() =>
+        var error = await Assert.ThrowsAsync<PackageVerificationException>(() =>
             updater.VerifyAsync(package, CancellationToken.None));
 
         Assert.Contains("package name mismatch", error.Message);
@@ -528,7 +528,7 @@ public class UpdaterTests : IDisposable
         var package = await WritePackageAsync(MatchingPublisher, architecture: machine);
         var updater = Create();
 
-        var error = await Assert.ThrowsAsync<IOException>(() =>
+        var error = await Assert.ThrowsAsync<PackageVerificationException>(() =>
             updater.VerifyAsync(package, CancellationToken.None));
 
         Assert.Contains("architecture mismatch", error.Message);
@@ -592,6 +592,55 @@ public class UpdaterTests : IDisposable
 
         Assert.Equal(1, _claude.FindCalls); // a single "is it running" poll, and nothing after
         Assert.Empty(_claude.Processes);
+    }
+
+    /// <summary>
+    /// A downloaded package that fails the verification would fail every retry the same way (the
+    /// full target is reused): it is removed from the cache, unless --keep-file asked to keep it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ACachedPackageThatFailsTheVerificationIsRemovedUnlessKept(bool keepFile)
+    {
+        _downloader.Publisher = "CN=Someone Else";
+        var updater = Create();
+
+        await Assert.ThrowsAsync<PackageVerificationException>(() =>
+            updater.RunAsync(new UpdateOptions { KeepFile = keepFile }, null, null, CancellationToken.None));
+
+        Assert.Equal(keepFile, Directory.EnumerateFiles(_config.Claude.Update.CacheDir, "*.msix").Any());
+        Assert.Empty(_appx.AddedFiles);
+    }
+
+    [Fact]
+    public async Task AFileOutsideTheCacheIsNeverRemovedOnAFailedVerification()
+    {
+        var package = await WritePackageAsync("CN=Someone Else"); // a file the user pointed at
+        var updater = Create();
+
+        await Assert.ThrowsAsync<PackageVerificationException>(() => updater.VerifyAsync(package, CancellationToken.None));
+
+        Assert.True(File.Exists(package));
+    }
+
+    [Fact]
+    public async Task ACachedPackageTheInstallerRefusedIsRemovedUnlessKept()
+    {
+        _appx.AddFailure = new IOException("deployment blocked (0x80073CF9)");
+        var updater = Create();
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.RunAsync(UpdateOptions.Default, null, null, CancellationToken.None));
+
+        Assert.Contains("deployment blocked", error.Message);
+        Assert.Contains("removed from the cache", error.Message);
+        Assert.Empty(Directory.EnumerateFiles(_config.Claude.Update.CacheDir, "*.msix"));
+
+        var kept = Create();
+        await Assert.ThrowsAsync<IOException>(() =>
+            kept.RunAsync(new UpdateOptions { KeepFile = true }, null, null, CancellationToken.None));
+        Assert.Single(Directory.EnumerateFiles(_config.Claude.Update.CacheDir, "*.msix"));
     }
 
     [Fact]
@@ -670,7 +719,7 @@ public class UpdaterTests : IDisposable
 
         var updater = Create();
 
-        var error = await Assert.ThrowsAsync<IOException>(() => updater.VerifyAsync(plain, CancellationToken.None));
+        var error = await Assert.ThrowsAsync<PackageVerificationException>(() => updater.VerifyAsync(plain, CancellationToken.None));
 
         Assert.Contains("no AppxManifest.xml", error.Message);
     }

@@ -16,7 +16,8 @@ public interface IMsixDownloader
     /// <summary>
     /// Chunked download: parts of updater.chunkBytes across updater.parallelChunks threads,
     /// a finished part is a file of the expected size (the download resumes from where it stopped after any
-    /// failure). The progress counts the bytes received so far, including the parts still in flight —
+    /// failure — only parts of the same address, length and chunk size, recorded in a manifest next
+    /// to them; any other parts are discarded and the download starts over). The progress counts the bytes received so far, including the parts still in flight —
     /// it moves as the data arrives, not in jumps of a whole part. On cancellation throws
     /// OperationCanceledException; incomplete parts remain on disk.
     /// </summary>
@@ -115,7 +116,7 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         }
 
         var partsDir = targetFile + ".parts";
-        Directory.CreateDirectory(partsDir);
+        PrepareResume(partsDir, url, expectedLength);
         var chunks = new List<Chunk>();
         for (long start = 0, n = 0; start < expectedLength; start += config.ChunkBytes, n++)
         {
@@ -195,6 +196,48 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         }
 
         log.Info($"updater: package assembled: {targetFile} ({ByteSize.Format(expectedLength)})");
+    }
+
+    /// <summary>The resume manifest inside the parts directory: what the parts were cut from.</summary>
+    internal const string ResumeManifestName = "resume.manifest";
+
+    internal static string ResumeManifest(string url, long length, long chunkBytes) =>
+        string.Create(CultureInfo.InvariantCulture, $"url={url}\nlength={length}\nchunkBytes={chunkBytes}\n");
+
+    /// <summary>
+    /// A part is only as good as the cut it belongs to: parts of another address, another length
+    /// or another chunk size (updater.chunkBytes changed between the runs) have the expected
+    /// sizes of other ranges and would assemble a broken package. Parts without a manifest, or
+    /// with a different one, are discarded before the download starts over.
+    /// </summary>
+    private void PrepareResume(string partsDir, string url, long expectedLength)
+    {
+        var manifestPath = Path.Combine(partsDir, ResumeManifestName);
+        var manifest = ResumeManifest(url, expectedLength, config.ChunkBytes);
+        if (Directory.Exists(partsDir))
+        {
+            string? recorded = null;
+            try
+            {
+                recorded = File.Exists(manifestPath) ? File.ReadAllText(manifestPath) : null;
+            }
+            catch (IOException)
+            {
+            }
+
+            if (recorded == manifest)
+            {
+                return;
+            }
+
+            log.Info(recorded is null
+                ? "updater: the downloaded parts carry no resume manifest - starting the download over"
+                : "updater: the downloaded parts belong to another address, length or chunk size - starting the download over");
+            Directory.Delete(partsDir, recursive: true);
+        }
+
+        Directory.CreateDirectory(partsDir);
+        File.WriteAllText(manifestPath, manifest);
     }
 
     /// <summary>
