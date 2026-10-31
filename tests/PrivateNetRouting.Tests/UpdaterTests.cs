@@ -686,6 +686,37 @@ public class UpdaterTests : IDisposable
         Assert.Empty(_downloader.Downloads);
     }
 
+    /// <summary>
+    /// The assembly writes the package while every part is still on disk: room for one copy of
+    /// the package is not enough, the download needs two (minus the parts already downloaded).
+    /// </summary>
+    [Fact]
+    public async Task DownloadCountsTheAssemblyCopyInTheDiskSpace()
+    {
+        const long headroom = 300L * 1024 * 1024;
+        var updater = Create(freeSpace: _ => 1_000 + headroom + 500); // the fake package is 1000 bytes
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            updater.DownloadAsync(JournalUrl.ToString(), null, CancellationToken.None));
+
+        Assert.Contains("not enough disk space", error.Message);
+        Assert.Empty(_downloader.Downloads);
+    }
+
+    [Fact]
+    public void TheDiskSpaceOfAResumeCountsOnlyTheRestOfTheParts()
+    {
+        var file = Path.Combine(_root, "space.msix");
+        Assert.Equal(2_000, ClaudeUpdater.DownloadSpaceNeeded(file, 1_000));
+
+        Directory.CreateDirectory(file + ".parts");
+        File.WriteAllBytes(Path.Combine(file + ".parts", "part0000"), new byte[400]);
+        Assert.Equal(1_600, ClaudeUpdater.DownloadSpaceNeeded(file, 1_000));
+
+        File.WriteAllBytes(file, new byte[1_000]); // complete: reused as is
+        Assert.Equal(0, ClaudeUpdater.DownloadSpaceNeeded(file, 1_000));
+    }
+
     [Fact]
     public async Task DownloadKeepsActivityMarkerFresh()
     {

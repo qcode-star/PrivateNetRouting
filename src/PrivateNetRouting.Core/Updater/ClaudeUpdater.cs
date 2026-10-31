@@ -211,9 +211,10 @@ public sealed class ClaudeUpdater(
 
         activityMarker.Touch();
         var free = _freeSpace(config.Claude.Update.CacheDir);
-        if (free >= 0 && free < total + InstallHeadroomBytes)
+        var needed = DownloadSpaceNeeded(file, total) + InstallHeadroomBytes;
+        if (free >= 0 && free < needed)
         {
-            throw new IOException($"not enough disk space: need {ByteSize.Format(total + InstallHeadroomBytes)}, available {ByteSize.Format(free)}");
+            throw new IOException($"not enough disk space: need {ByteSize.Format(needed)}, available {ByteSize.Format(free)}");
         }
 
         await downloader.DownloadAsync(url, file, total, new Progress<(long DoneBytes, long TotalBytes)>(value =>
@@ -222,6 +223,27 @@ public sealed class ClaudeUpdater(
             progress?.Report(new UpdateProgress(UpdatePhase.Download, value.TotalBytes, value.DoneBytes, ""));
         }), ct);
         return file;
+    }
+
+    /// <summary>
+    /// The disk the download still takes: the parts not downloaded yet, plus a second copy of the
+    /// package — the assembly writes the target while every part is still on disk. Parts already
+    /// there are on the disk (not in the free space): a resume needs only the rest of them, and
+    /// parts of another cut that the downloader discards free as much as they held. A complete
+    /// target is reused as is and takes nothing more.
+    /// </summary>
+    internal static long DownloadSpaceNeeded(string file, long total)
+    {
+        if (File.Exists(file) && new FileInfo(file).Length == total)
+        {
+            return 0;
+        }
+
+        var partsDir = file + ".parts";
+        var downloaded = Directory.Exists(partsDir)
+            ? Directory.EnumerateFiles(partsDir, "part*").Sum(part => new FileInfo(part).Length)
+            : 0;
+        return Math.Max(0, total - downloaded) + total;
     }
 
     /// <summary>
