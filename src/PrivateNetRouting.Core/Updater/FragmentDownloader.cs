@@ -28,10 +28,13 @@ public interface IMsixDownloader
 /// chain hits the DoH+sidecar latency, several threads yield a few MB/s. A fragment with
 /// retries, then a size check and concatenation.
 /// </summary>
-public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig config, FileLog log, TimeSpan? progressInterval = null) : IMsixDownloader
+public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig config, FileLog log, TimeSpan? progressInterval = null, TimeSpan? downloadLockWait = null) : IMsixDownloader
 {
     /// <summary>How often an in-flight part reports its bytes; without a limit the reports would flood the UI.</summary>
     private readonly TimeSpan _progressInterval = progressInterval ?? TimeSpan.FromMilliseconds(250);
+
+    /// <summary>How long a second downloader of the same target waits for the per-target lock.</summary>
+    private readonly TimeSpan _downloadLockWait = downloadLockWait ?? TimeSpan.FromSeconds(15);
 
     private const int CopyBufferSize = 81920;
 
@@ -76,6 +79,28 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
     }
 
     public async Task DownloadAsync(string url, string targetFile, long expectedLength, IProgress<(long, long)>? progress, CancellationToken ct)
+    {
+        // the GUI and `pnr update` must not feed one .parts directory at once
+        using var downloadLock = await AcquireDownloadLockAsync(targetFile, _downloadLockWait, ct).ConfigureAwait(false);
+        try
+        {
+            await DownloadLockedAsync(url, targetFile, expectedLength, progress, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            downloadLock.Dispose();
+            try
+            {
+                File.Delete(targetFile + ".lock");
+            }
+            catch (IOException)
+            {
+                // the next acquirer has the lock open already — the stale name is harmless
+            }
+        }
+    }
+
+    private async Task DownloadLockedAsync(string url, string targetFile, long expectedLength, IProgress<(long, long)>? progress, CancellationToken ct)
     {
         if (expectedLength <= 0)
         {
@@ -172,6 +197,34 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
         log.Info($"updater: package assembled: {targetFile} ({ByteSize.Format(expectedLength)})");
     }
 
+    /// <summary>
+    /// A per-target lock file (held open with FileShare.None) serialises concurrent downloads —
+    /// the GUI and `pnr update` share the cache path. A named mutex would not do here: its
+    /// ownership is bound to the acquiring thread, and the pool can retire that thread while the
+    /// async download still runs — the next acquirer is told "abandoned" and walks in. A lock
+    /// file has no thread affinity, and a dead holder's handle the OS closes itself.
+    /// </summary>
+    private static async Task<FileStream> AcquireDownloadLockAsync(string targetFile, TimeSpan wait, CancellationToken ct)
+    {
+        var path = targetFile + ".lock";
+        var deadline = DateTime.UtcNow + wait;
+        while (true)
+        {
+            try
+            {
+                return File.Open(path, FileMode.OpenOrCreate, FileAccess.Read, FileShare.None);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                throw new IOException($"another download into {targetFile} is holding the lock (waited {wait.TotalSeconds}s)");
+            }
+        }
+    }
+
     private async Task DownloadChunkAsync(Chunk chunk, string url, Action report, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
@@ -189,12 +242,20 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
                     throw new IOException($"range request returned {(int)response.StatusCode} instead of 206");
                 }
 
+                // a 206 for a DIFFERENT range than requested would land in the wrong part of the
+                // package: the answer must name exactly the bytes that were asked for
+                var served = response.Content.Headers.ContentRange;
+                if (served is not { HasRange: true } || served.From != chunk.Start || served.To != chunk.End)
+                {
+                    throw new IOException($"range response ({served}) does not match the requested {chunk.Start}-{chunk.End}");
+                }
+
                 using var output = File.Create(chunk.File);
                 await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
                 var buffer = new byte[CopyBufferSize];
                 long written = 0;
                 var nextReport = Environment.TickCount64;
-                while (true)
+                while (written < chunk.Size)
                 {
                     var read = await body.ReadAsync(buffer, timeout.Token);
                     if (read == 0)
@@ -202,9 +263,13 @@ public sealed class FragmentDownloader(HttpClient http, ClaudeUpdateConfig confi
                         break;
                     }
 
-                    await output.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
-                    written += read;
-                    chunk.AddWritten(read);
+                    // the range was checked, but a broken server may still send more bytes than it
+                    // named: read no further than the fragment — an oversized part would never
+                    // pass the size check anyway
+                    var take = (int)Math.Min(read, chunk.Size - written);
+                    await output.WriteAsync(buffer.AsMemory(0, take), timeout.Token);
+                    written += take;
+                    chunk.AddWritten(take);
                     if (Environment.TickCount64 >= nextReport)
                     {
                         nextReport = Environment.TickCount64 + (long)_progressInterval.TotalMilliseconds;

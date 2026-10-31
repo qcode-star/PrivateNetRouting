@@ -181,6 +181,80 @@ public class FragmentDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task A206ForADifferentRangeIsRejected()
+    {
+        // a lying Content-Range would land the bytes in the wrong part of the package: every
+        // fragment fails (the detail is in the log), the download reports incomplete fragments
+        _handler.LieAboutRange = true;
+        var target = Path.Combine(_root, "app.msix");
+
+        var error = await Assert.ThrowsAsync<IOException>(() =>
+            _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None));
+
+        Assert.Contains("incomplete fragments", error.Message);
+    }
+
+    [Fact]
+    public async Task ABiggerThanPromisedBodyIsCappedAtTheFragment()
+    {
+        _handler.Overshoot = true;
+        var target = Path.Combine(_root, "app.msix");
+
+        await _downloader.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None);
+
+        Assert.Equal(RecordingHandler.Payload, await File.ReadAllBytesAsync(target));
+    }
+
+    [Fact]
+    public async Task ASecondDownloadOfTheSameTargetIsRefusedWhileOneRuns()
+    {
+        _handler.StallFrom = 50;
+        var target = Path.Combine(_root, "app.msix");
+        var slow = new FragmentDownloader(_http, new ClaudeUpdateConfig
+        {
+            ChunkBytes = 10,
+            ParallelChunks = 1,
+            ChunkRetries = 0,
+            RetryDelaySeconds = 0,
+            ChunkTimeoutSeconds = 30,
+        }, _log);
+        var impatient = new FragmentDownloader(_http, new ClaudeUpdateConfig
+        {
+            ChunkBytes = 10,
+            ParallelChunks = 1,
+            ChunkRetries = 0,
+            RetryDelaySeconds = 0,
+            ChunkTimeoutSeconds = 30,
+        }, _log, downloadLockWait: TimeSpan.FromMilliseconds(200));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var first = slow.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, cts.Token);
+        // the second may start only when the first demonstrably holds the lock (it is stalled
+        // inside its fragment): a wall-clock delay would race the parallel test load
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!_handler.Requests.Any(r => r.Method == "GET" && r.From == 50))
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("the first download never reached its stalled fragment");
+            }
+
+            await Task.Delay(20);
+        }
+
+        var second = impatient.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<IOException>(() => second);
+        Assert.Contains("holding the lock", error.Message);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first); // it still ends cancelled
+
+        // the lock frees on the holder's exit: the next download of the same target proceeds
+        _handler.StallFrom = null;
+        await slow.DownloadAsync("https://pkg.example.com/app.msix", target, RecordingHandler.ContentLength, null, CancellationToken.None);
+        Assert.Equal(RecordingHandler.Payload, await File.ReadAllBytesAsync(target));
+    }
+
+    [Fact]
     public async Task CancellationKeepsDownloadedParts()
     {
         _handler.StallFrom = 50; // one fragment hangs until cancellation
@@ -277,6 +351,12 @@ public class FragmentDownloaderTests : IDisposable
         /// <summary>Answer 200 with the whole body to Range requests (server ignores Range).</summary>
         public bool FullBodyForRanges { get; set; }
 
+        /// <summary>Answer 206 but name a shifted range in Content-Range (a lying server).</summary>
+        public bool LieAboutRange { get; set; }
+
+        /// <summary>Send more body bytes than the named range covers (a broken server).</summary>
+        public bool Overshoot { get; set; }
+
         /// <summary>The range starting at this offset hangs until cancellation.</summary>
         public long? StallFrom { get; set; }
 
@@ -315,7 +395,16 @@ public class FragmentDownloaderTests : IDisposable
                 }
                 else
                 {
-                    response = Response(HttpStatusCode.PartialContent, Payload[(int)from..(int)(to + 1)], piece: PieceSize);
+                    var body = Payload[(int)from..(int)(to + 1)];
+                    if (Overshoot)
+                    {
+                        body = [.. body, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE]; // more than the range names
+                    }
+
+                    response = Response(HttpStatusCode.PartialContent, body, piece: PieceSize);
+                    response.Content.Headers.ContentRange = LieAboutRange
+                        ? new System.Net.Http.Headers.ContentRangeHeaderValue(from + 5, to + 5)
+                        : new System.Net.Http.Headers.ContentRangeHeaderValue(from, to);
                 }
             }
 
