@@ -173,7 +173,7 @@ Architecture notes:
   before every line; rotation is by size — at start and before the next record into an overgrown
   file (a chain held by another process postpones the rotation until the owner's RotateNow or the
   next start), manually — from diagnostics (the live log of the process — in place, a free file —
-  by shifting, a held one — honestly "locked"); a shift stages the current file under a name
+  by shifting, a held one — honestly "locked"); the shifts of all processes are serialized by a `<log>.rotation-lock` file (a held one postpones the rotation like a held log, and a size rotation re-checks the size under it — a log another process has just rotated is left alone); a shift stages the current file under a name
   unique per rotation (`<log>.rotating-<pid>-<random>`), and a staging file left by a crashed or
   failed rotation is never overwritten: the next rotation (or the next start) appends it to the
   end of `.1`, so no record is lost.

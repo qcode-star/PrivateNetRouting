@@ -305,6 +305,59 @@ public class LogStoreTests : IDisposable
         Assert.DoesNotContain("the other writer follows the new file", ReadShared(path + ".1"));
     }
 
+    /// <summary>
+    /// Two processes that found the same overgrown file used to shift the chain one after the
+    /// other: the second shift pushed the generation the first had just made out past keep. A
+    /// size rotation re-checks the file under the rotation lock and leaves a rotated one alone.
+    /// </summary>
+    [Fact]
+    public void ASizeRotationOfAnAlreadyRotatedLogShiftsNothing()
+    {
+        var path = Path.Combine(_tempDir, "proxy.log");
+        File.WriteAllText(path + ".1", "older generation\n");
+        File.WriteAllText(path, new string('a', 60));
+
+        LogRotation.Shift(path, keep: 2, minBytes: 50); // the first process
+        File.WriteAllText(path, "fresh records\n"); // its writers carry on in a new, small file
+        LogRotation.Shift(path, keep: 2, minBytes: 50); // the second one, late with the same verdict
+
+        Assert.Contains(new string('a', 60), ReadShared(path + ".1"));
+        Assert.Contains("older generation", ReadShared(path + ".2")); // not pushed out past keep
+        Assert.Contains("fresh records", ReadShared(path));
+    }
+
+    /// <summary>Another process's rotation in flight (its lock held) postpones this one; nothing moves meanwhile.</summary>
+    [Fact]
+    public void ARotationOfAnotherProcessInFlightPostponesTheSizeRotation()
+    {
+        var path = Path.Combine(_tempDir, "chain.log");
+        using var writer = new FileLog(path, LogLevel.Info, maxBytes: 50, keep: 2, rotationRetryInterval: TimeSpan.Zero);
+        var rotating = new FileStream(path + ".rotation-lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+
+        writer.Info(new string('c', 60));
+        writer.Info("still the same file");
+        Assert.False(File.Exists(path + ".1"));
+        Assert.False(writer.RotateNow());
+
+        rotating.Dispose();
+        writer.Info("after the other rotation");
+
+        Assert.True(File.Exists(path + ".1"));
+        Assert.Contains("after the other rotation", ReadShared(path));
+    }
+
+    [Fact]
+    public void ManualRotationWithoutACurrentFileKeepsTheAgeChain()
+    {
+        var path = Path.Combine(_tempDir, "quiet.log");
+        File.WriteAllText(path + ".1", "older generation\n");
+
+        LogRotation.Shift(path, keep: 2);
+
+        Assert.Contains("older generation", ReadShared(path + ".1"));
+        Assert.False(File.Exists(path + ".2"));
+    }
+
     [Fact]
     public void FileLogRetriesAPostponedRotationOnALaterRecord()
     {

@@ -16,15 +16,46 @@ internal static class LogRotation
     /// </summary>
     private const string StagingSuffix = ".rotating";
 
+    /// <summary>The cross-process rotation lock next to a log: &lt;log&gt;.rotation-lock.</summary>
+    internal const string LockSuffix = ".rotation-lock";
+
     /// <summary>Serializes the shifts of this process (all FileLog instances and LogStore).</summary>
     private static readonly object Gate = new();
 
-    public static void Shift(string path, int keep)
+    /// <summary>
+    /// Shifts the age chain: current → .1 → … → dropped past <paramref name="keep"/>. The shifts
+    /// of all processes are serialized by a lock file next to the log: two processes that found
+    /// the same overgrown file used to shift the chain one after the other, and the second shift
+    /// pushed the generation the first had just made out past keep. A held lock is another
+    /// process's rotation in flight — this one fails like a held file and is retried later. A
+    /// size rotation passes <paramref name="minBytes"/>: under the lock the file is checked again,
+    /// and one that another process has rotated meanwhile is left alone. With no current file the
+    /// chain is not shifted at all (only the orphans of a crashed rotation are folded in).
+    /// </summary>
+    public static void Shift(string path, int keep, long minBytes = 0)
     {
         var full = Path.GetFullPath(path);
         lock (Gate)
         {
+            using var crossProcess = AcquireRotationLock(full);
+            if (minBytes > 0 && (!File.Exists(full) || new FileInfo(full).Length < minBytes))
+            {
+                return; // rotated by another process while this one waited for its turn
+            }
+
             ShiftLocked(full, keep);
+        }
+    }
+
+    private static FileStream AcquireRotationLock(string full)
+    {
+        try
+        {
+            return new FileStream(full + LockSuffix, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        }
+        catch (IOException ex) when ((ex.HResult & 0xFFFF) is 32 or 33)
+        {
+            throw new IOException($"another process is rotating {Path.GetFileName(full)}", ex);
         }
     }
 
@@ -42,6 +73,11 @@ internal static class LogRotation
         try
         {
             FoldOrphans(full, staged);
+            if (staged is null)
+            {
+                return; // nothing to rotate: shifting the age files would only push a generation out
+            }
+
             for (var i = keep - 1; i > 0; i--)
             {
                 var older = $"{full}.{i}";
@@ -51,10 +87,7 @@ internal static class LogRotation
                 }
             }
 
-            if (staged is not null)
-            {
-                File.Move(staged, $"{full}.1", overwrite: true);
-            }
+            File.Move(staged, $"{full}.1", overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -191,7 +224,7 @@ internal static class LogRotation
             var full = Path.GetFullPath(path);
             if (File.Exists(full) && new FileInfo(full).Length >= maxBytes)
             {
-                Shift(full, keep);
+                Shift(full, keep, maxBytes);
             }
             else if (FindOrphans(full).Count > 0)
             {
@@ -338,14 +371,15 @@ public sealed class FileLog : IDisposable
             return;
         }
 
-        ShiftChain();
+        ShiftChain(_maxBytes);
     }
 
-    private bool ShiftChain()
+    /// <summary>Shifts the chain; a size rotation passes the threshold, so a file another process has just rotated is left alone.</summary>
+    private bool ShiftChain(long minBytes = 0)
     {
         try
         {
-            LogRotation.Shift(FilePath, _keep);
+            LogRotation.Shift(FilePath, _keep, minBytes);
             _nextRotationAttempt = DateTime.MinValue;
             return true;
         }
