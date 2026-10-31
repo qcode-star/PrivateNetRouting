@@ -275,7 +275,7 @@ public class GuardTests : IDisposable
         var afterApply = File.ReadAllBytes(path);
         Assert.Contains((byte)0xE9, afterApply);
         Assert.Equal(
-            "# caf\u00e9\r\n\r\n# >>> b\r\n# c\r\n0.0.0.0 claude.ai\r\n# <<< b\r\n",
+            "# caf\u00e9\r\n\r\n# >>> b\r\n# c\r\n0.0.0.0 claude.ai\r\n# <<< b\r\n\r\n",
             Encoding.Latin1.GetString(afterApply));
 
         HostsFileBlock.Remove(path, "# >>> b", "# <<< b");

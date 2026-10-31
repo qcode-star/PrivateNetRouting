@@ -71,7 +71,8 @@ public static class HostsFileBlock
     /// <summary>Writes (or updates) the block; if already current, the file is left untouched.</summary>
     public static void Apply(string path, string begin, string end, string comment, IReadOnlyList<string> domains)
     {
-        var lines = File.ReadAllLines(path);
+        var (encoding, bom) = DetectEncoding(File.ReadAllBytes(path));
+        var lines = File.ReadAllLines(path, encoding);
         ThrowIfUnterminated(lines, begin, end);
         var (kept, current) = Split(lines, begin, end);
         var desired = BuildLines(begin, end, domains, comment);
@@ -80,13 +81,14 @@ public static class HostsFileBlock
             return;
         }
 
-        WriteAll(path, [.. kept, "", .. desired, ""]);
+        WriteAll(path, [.. kept, "", .. desired, ""], encoding, bom);
     }
 
     /// <summary>Removes the block; if absent, the file is left untouched (but trailing blank lines are not trimmed).</summary>
     public static void Remove(string path, string begin, string end)
     {
-        var lines = File.ReadAllLines(path);
+        var (encoding, bom) = DetectEncoding(File.ReadAllBytes(path));
+        var lines = File.ReadAllLines(path, encoding);
         ThrowIfUnterminated(lines, begin, end);
         var (kept, current) = Split(lines, begin, end);
         if (current.Count == 0)
@@ -94,7 +96,7 @@ public static class HostsFileBlock
             return;
         }
 
-        WriteAll(path, kept);
+        WriteAll(path, kept, encoding, bom);
     }
 
     /// <summary>Whether a begin marker is followed by no end marker (a hand-edited or changed-marker file).</summary>
@@ -182,15 +184,15 @@ public static class HostsFileBlock
 
     /// <summary>
     /// Atomic, encoding-preserving rewrite: the file's encoding is detected from its bytes (a
-    /// UTF-8 BOM, valid UTF-8, or Latin-1 which maps every byte 1:1), so a foreign line with
-    /// non-ASCII text survives byte for byte (the managed block itself is ASCII-only); the new
+    /// UTF-8 BOM, valid UTF-8, or Latin-1 which maps every byte 1:1) and both the read and the
+    /// write go through it, so a foreign line with non-ASCII text survives byte for byte (the
+    /// managed block itself is ASCII-only); a UTF-8 BOM the file had is written back. The new
     /// content goes to a temp file next to hosts and is File.Replace'd over the original, which
     /// keeps the destination's ACL; a sharing violation (Docker, VS and friends hold hosts) is
     /// retried briefly. CRLF line endings — hosts dislikes anything else.
     /// </summary>
-    private static void WriteAll(string path, List<string> lines)
+    private static void WriteAll(string path, List<string> lines, Encoding encoding, bool bom)
     {
-        var (encoding, bom) = DetectEncoding(File.ReadAllBytes(path));
         var content = string.Join("\r\n", lines) + "\r\n";
         var payload = (bom ? encoding.GetPreamble() : []).Concat(encoding.GetBytes(content)).ToArray();
         var temp = Path.Combine(Path.GetDirectoryName(path)!, $".pnr-hosts-{Guid.NewGuid():N}.tmp");
@@ -213,14 +215,18 @@ public static class HostsFileBlock
         }
     }
 
-    /// <summary>The file's encoding: UTF-8 (BOM honored) when the bytes are valid UTF-8, Latin-1 otherwise.</summary>
+    /// <summary>
+    /// The file's encoding: UTF-8 (emitting the BOM when the file had one — the preamble is
+    /// only produced by an encoding instance built for it) when the bytes are valid UTF-8,
+    /// Latin-1 otherwise.
+    /// </summary>
     private static (Encoding Encoding, bool Bom) DetectEncoding(byte[] bytes)
     {
         var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
         try
         {
             new UTF8Encoding(false, true).GetString(bytes);
-            return (new UTF8Encoding(false), bom);
+            return (new UTF8Encoding(bom), bom);
         }
         catch (DecoderFallbackException)
         {
