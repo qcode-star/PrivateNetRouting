@@ -230,8 +230,14 @@ public sealed class GuardService(
             new(GuardKind.SystemProxy,
                 sysProxy.Detail is not null
                     ? GuardState.Unknown
-                    : sysProxy.Enabled ? GuardState.On : GuardState.Off,
-                sysProxy.Detail ?? (sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled")),
+                    : !sysProxy.Enabled
+                        ? GuardState.Off
+                        : sysProxy.Ours ? GuardState.On : GuardState.Partial,
+                sysProxy.Detail ?? (!sysProxy.Enabled
+                    ? "disabled"
+                    : sysProxy.Ours
+                        ? $"enabled: {sysProxy.Server}"
+                        : $"enabled by the owner or another tool: {sysProxy.Server} - not this application's proxy, off leaves it alone")),
         ];
     }
 
@@ -451,10 +457,13 @@ public sealed class GuardService(
             else
             {
                 // the address this installation writes while on: the store uses it to tell its own
-                // leftover values from the user's restored ones
+                // leftover values from the user's
                 var endpoint = AppProxyEndpoint.EndPoint(config);
+                var before = systemProxy.Read();
                 systemProxy.Disable($"{endpoint.Address}:{endpoint.Port}");
-                log.Info("guard sysproxy off");
+                log.Info(before is { Enabled: true, Ours: false }
+                    ? $"guard sysproxy off: {before.Server} is not this application's proxy - left alone"
+                    : "guard sysproxy off");
             }
         }, ct);
 

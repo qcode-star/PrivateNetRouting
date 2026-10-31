@@ -997,7 +997,7 @@ internal static class Program
                     Console.WriteLine($"{Name(item.Kind),-15} {State(item.State)}  {item.Detail}");
                 }
 
-                Console.WriteLine($"{"sysproxy",-15} {State(snapshot.SystemProxy.Enabled ? GuardState.On : GuardState.Off)}  {snapshot[GuardKind.SystemProxy].Detail}");
+                Console.WriteLine($"{"sysproxy",-15} {State(snapshot[GuardKind.SystemProxy].State)}  {snapshot[GuardKind.SystemProxy].Detail}");
                 if (!live)
                 {
                     return 0;

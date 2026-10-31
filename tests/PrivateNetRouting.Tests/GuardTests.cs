@@ -2350,7 +2350,7 @@ public class GuardTests : IDisposable
             config,
             new FakeEgressPolicyStore { Values = new EgressPolicyValues(true, "http://127.0.0.1:18082", 0) },
             banOps,
-            new FakeSystemProxyStore { Status = new SystemProxyStatus(true, "127.0.0.1:18082", "localhost") },
+            new FakeSystemProxyStore { Status = new SystemProxyStatus(true, "127.0.0.1:18082", "localhost") { Ours = true } },
             new FakeElevatedRunner(),
             out _);
 
@@ -2557,12 +2557,12 @@ public class GuardTests : IDisposable
 
     private static string NewSysProxyKey() => $@"{SysProxyTestKeyRoot}\sysproxy-{Guid.NewGuid():N}";
 
-    private static void SeedUserProxy(string keyPath, string server, string bypass)
+    private static void SeedUserProxy(string keyPath, string server, string bypass, int proxyEnable = 0)
     {
         using var seed = Registry.CurrentUser.CreateSubKey(keyPath, writable: true);
         seed.SetValue("ProxyServer", server, RegistryValueKind.String);
         seed.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
-        seed.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+        seed.SetValue("ProxyEnable", proxyEnable, RegistryValueKind.DWord);
     }
 
     [Fact]
@@ -2660,22 +2660,164 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
-    public void SysProxyOffLeavesForeignValuesAlone()
+    public void SysProxyReEnableAfterTheOwnerReplacedOurServerSavesTheirNewValue()
     {
         var keyPath = NewSysProxyKey();
         try
         {
-            SeedUserProxy(keyPath, "http://192.0.2.5:9999", "*.other.example");
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com", proxyEnable: 1);
             var store = new WinInetSystemProxyStore(keyPath);
 
-            store.Disable("http://127.0.0.1:18081"); // the ours-hint does not match the values
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            using (var replaced = Registry.CurrentUser.OpenSubKey(keyPath, writable: true))
+            {
+                // a crash leaves our values behind and the owner replaces them with their own
+                replaced!.SetValue("ProxyServer", "http://192.0.2.7:7777", RegistryValueKind.String);
+            }
 
-            Assert.Equal("http://192.0.2.5:9999", store.Read().Server); // not ours — untouched
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            store.Disable("http://127.0.0.1:18081");
+
+            var off = store.Read();
+            Assert.True(off.Enabled);
+            Assert.Equal("http://192.0.2.7:7777", off.Server); // the owner's latest choice, not the stale save
         }
         finally
         {
             Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
         }
+    }
+
+    [Fact]
+    public void SysProxyOffLeavesAForeignEnabledProxyUntouched()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.5:9999", "*.other.example", proxyEnable: 1);
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Disable("http://127.0.0.1:18081"); // the ours-hint does not match the values
+            store.Disable("http://127.0.0.1:18081"); // a repeated off changes nothing either
+
+            using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+            {
+                Assert.Equal(1, key!.GetValue("ProxyEnable")); // the owner's switch stays on
+                Assert.Equal("http://192.0.2.5:9999", key.GetValue("ProxyServer"));
+                Assert.Equal("*.other.example", key.GetValue("ProxyOverride"));
+                Assert.Null(key.GetValue("ProxyServer.pnr-ours"));
+                Assert.Null(key.GetValue("ProxyServer.pnr-saved"));
+                Assert.Null(key.GetValue("ProxyOverride.pnr-saved"));
+                Assert.Null(key.GetValue("ProxyEnable.pnr-saved"));
+            }
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyOnRestoresTheOwnersEnabledProxyCompletely()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com", proxyEnable: 1);
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            var on = store.Read();
+            Assert.True(on.Enabled);
+            Assert.True(on.Ours); // the enabled server is the address this installation wrote
+            Assert.Equal("http://127.0.0.1:18081", on.Server);
+
+            store.Disable("http://127.0.0.1:18081");
+            var off = store.Read();
+            Assert.True(off.Enabled); // the owner's switch was on and comes back on
+            Assert.False(off.Ours);
+            Assert.Equal("http://192.0.2.1:8080", off.Server);
+            Assert.Equal("*.example.com", off.Override);
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            Assert.Null(key!.GetValue("ProxyServer.pnr-ours")); // the save and the record are consumed
+            Assert.Null(key.GetValue("ProxyServer.pnr-saved"));
+            Assert.Null(key.GetValue("ProxyEnable.pnr-saved"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyReadTellsItsOwnProxyFromAForeignOne()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.5:9999", "*.other.example", proxyEnable: 1);
+            var store = new WinInetSystemProxyStore(keyPath);
+            Assert.False(store.Read().Ours); // someone else's enabled proxy is not ours
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            Assert.True(store.Read().Ours);
+
+            // a crash between enable and off leaves exactly this state: the record makes it ours
+            store.Disable("http://127.0.0.1:18081");
+            Assert.Equal("http://192.0.2.5:9999", store.Read().Server);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public void SysProxyOffConsumesAStaleSaveWhenTheOwnerReplacedOurServer()
+    {
+        var keyPath = NewSysProxyKey();
+        try
+        {
+            SeedUserProxy(keyPath, "http://192.0.2.1:8080", "*.example.com");
+            var store = new WinInetSystemProxyStore(keyPath);
+
+            store.Enable("http://127.0.0.1:18081", "localhost");
+            using (var replaced = Registry.CurrentUser.OpenSubKey(keyPath, writable: true))
+            {
+                replaced!.SetValue("ProxyServer", "http://192.0.2.7:7777", RegistryValueKind.String);
+                replaced.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
+            }
+
+            store.Disable("http://127.0.0.1:18081"); // our recorded address is no longer on the switch
+
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            Assert.Equal("http://192.0.2.7:7777", key!.GetValue("ProxyServer")); // the owner's choice survives
+            Assert.Equal(1, key.GetValue("ProxyEnable"));
+            Assert.Null(key.GetValue("ProxyServer.pnr-saved")); // the stale save is not kept for a later off
+            Assert.Null(key.GetValue("ProxyServer.pnr-ours"));
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+        }
+    }
+
+    [Fact]
+    public async Task SystemProxyStatusMarksAForeignEnabledProxyAsPartial()
+    {
+        var config = new AppConfig();
+        var service = MakeService(
+            config,
+            new FakeEgressPolicyStore(),
+            new FakeBanSystemOps(),
+            new FakeSystemProxyStore { Status = new SystemProxyStatus(true, "http://192.0.2.5:9999", "*.other.example") },
+            new FakeElevatedRunner(),
+            out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Partial, snapshot[GuardKind.SystemProxy].State);
+        Assert.Contains("not this application's proxy", snapshot[GuardKind.SystemProxy].Detail);
     }
 
     // ----- elevated helper: order of ban layers -----

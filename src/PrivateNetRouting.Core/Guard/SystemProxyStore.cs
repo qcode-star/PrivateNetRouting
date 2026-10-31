@@ -9,8 +9,9 @@ namespace PrivateNetRouting.Core.Guard;
 /// Requires no administrator rights; the address is the address of the application's forward proxy,
 /// exceptions are local addresses, private ranges (masks like 10.*, WinINET does not understand CIDR),
 /// corporate domains from the top-level bypassDomains (both forms) and *.tld entries from the
-/// top-level directTlds. Enabling preserves the user's own ProxyServer/ProxyOverride once (the
-/// first enable while the switch is off), disabling restores them.
+/// top-level directTlds. Enabling preserves whatever the owner had — ProxyServer, ProxyOverride and
+/// the on/off state — once, and records the address this installation wrote; disabling restores the
+/// owner's values and leaves a proxy it does not own alone.
 /// </summary>
 public interface ISystemProxyStore
 {
@@ -19,9 +20,9 @@ public interface ISystemProxyStore
     void Enable(string server, string bypass);
 
     /// <summary>
-    /// Turns the switch off. <paramref name="ourServer"/> is the address this installation writes
-    /// while on: when the current ProxyServer matches it, the values are ours and leave with the
-    /// switch; anything else (the user's own, restored earlier) is left alone.
+    /// Turns the switch off. A current ProxyServer that is ours (the recorded <c>ProxyServer.pnr-ours</c>
+    /// address, or <paramref name="ourServer"/> as written by a build that predates the record) is
+    /// restored from the save or cleared; a foreign one is left untouched — the switch is not ours.
     /// </summary>
     void Disable(string? ourServer = null);
 }
@@ -29,8 +30,13 @@ public interface ISystemProxyStore
 public sealed class WinInetSystemProxyStore : ISystemProxyStore
 {
     private const string DefaultKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+    /// <summary>The address this installation wrote while on: the switch is ours only when it matches.</summary>
+    private const string OursServerName = "ProxyServer.pnr-ours";
+
     private const string SavedServerName = "ProxyServer.pnr-saved";
     private const string SavedOverrideName = "ProxyOverride.pnr-saved";
+    private const string SavedEnableName = "ProxyEnable.pnr-saved";
 
     /// <summary>A test run exercises the same logic on its own subkey instead of the live one.</summary>
     private readonly string _keyPath;
@@ -45,78 +51,133 @@ public sealed class WinInetSystemProxyStore : ISystemProxyStore
             return new SystemProxyStatus(false, null, null);
         }
 
+        var server = key.GetValue("ProxyServer") as string;
         return new SystemProxyStatus(
             key.GetValue("ProxyEnable") as int? == 1,
-            key.GetValue("ProxyServer") as string,
-            key.GetValue("ProxyOverride") as string);
+            server,
+            key.GetValue("ProxyOverride") as string)
+        {
+            Ours = IsOurs(key, server),
+        };
     }
 
     public void Enable(string server, string bypass)
     {
         using var key = Registry.CurrentUser.CreateSubKey(_keyPath, writable: true);
-        // the user's own settings are preserved once: the first enable while the switch is off
-        // saves them; a re-enable (an address change) or a leftover save of a crashed cycle does
-        // not overwrite it
-        var hasSave = key.GetValue(SavedServerName) is not null || key.GetValue(SavedOverrideName) is not null;
-        if (key.GetValue("ProxyEnable") as int? != 1 && !hasSave)
+        // whatever the owner has is preserved once: a re-enable of our own switch (an address
+        // change) keeps the save, while a switch the owner replaced after a crashed cycle is saved
+        // afresh, so the value they chose now is the one that comes back
+        var currentServer = key.GetValue("ProxyServer") as string;
+        var saveHoldsCurrent = HasSave(key)
+            && string.Equals(currentServer, key.GetValue(SavedServerName) as string, StringComparison.OrdinalIgnoreCase);
+        if (!IsOurs(key, currentServer) && !saveHoldsCurrent)
         {
-            SaveIfPresent(key, "ProxyServer", SavedServerName);
-            SaveIfPresent(key, "ProxyOverride", SavedOverrideName);
+            SaveCurrent(key, "ProxyServer", SavedServerName);
+            SaveCurrent(key, "ProxyOverride", SavedOverrideName);
+            key.SetValue(SavedEnableName, CurrentEnable(key) ? 1 : 0, RegistryValueKind.DWord);
         }
 
         key.SetValue("ProxyServer", server, RegistryValueKind.String);
         key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
+        key.SetValue(OursServerName, server, RegistryValueKind.String);
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
         NotifySettingsChanged();
     }
 
     public void Disable(string? ourServer = null)
     {
-        using var key = Registry.CurrentUser.CreateSubKey(_keyPath, writable: true);
-        var savedServer = key.GetValue(SavedServerName) as string;
-        var savedOverride = key.GetValue(SavedOverrideName) as string;
-        if (savedServer is not null || savedOverride is not null)
+        using var key = Registry.CurrentUser.OpenSubKey(_keyPath, writable: true);
+        if (key is null)
         {
-            // the user's own settings come back, the save is consumed
-            if (savedServer is not null)
-            {
-                key.SetValue("ProxyServer", savedServer, RegistryValueKind.String);
-            }
-            else
-            {
-                key.DeleteValue("ProxyServer", throwOnMissingValue: false);
-            }
-
-            if (savedOverride is not null)
-            {
-                key.SetValue("ProxyOverride", savedOverride, RegistryValueKind.String);
-            }
-            else
-            {
-                key.DeleteValue("ProxyOverride", throwOnMissingValue: false);
-            }
-
-            key.DeleteValue(SavedServerName, throwOnMissingValue: false);
-            key.DeleteValue(SavedOverrideName, throwOnMissingValue: false);
+            return; // no key — nothing this installation could have written
         }
-        else if (ourServer is not null
-            && string.Equals(key.GetValue("ProxyServer") as string, ourServer, StringComparison.OrdinalIgnoreCase))
+
+        var currentServer = key.GetValue("ProxyServer") as string;
+        var ours = IsOurs(key, currentServer)
+            || (ourServer is not null && string.Equals(currentServer, ourServer, StringComparison.OrdinalIgnoreCase));
+
+        if (!HasSave(key))
         {
-            // nothing of the user's to restore and the values on the switch are ours: they leave
-            // with it (a second off, or an enable that had nothing to save)
+            if (!ours)
+            {
+                // a proxy this installation never wrote (the owner's, another tool's): the switch is
+                // not ours to turn off and its values stay as they are
+                return;
+            }
+
+            // nothing of the owner's to restore and the values on the switch are ours: they leave
+            // with it
             key.DeleteValue("ProxyServer", throwOnMissingValue: false);
+            key.DeleteValue("ProxyOverride", throwOnMissingValue: false);
+            key.DeleteValue(OursServerName, throwOnMissingValue: false);
+            key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+            NotifySettingsChanged();
+            return;
+        }
+
+        if (!ours)
+        {
+            // the switch no longer holds our values (the owner or another tool replaced them): the
+            // stale save must not overwrite them on a later off, so it goes together with the record
+            ConsumeSave(key);
+            return;
+        }
+
+        // the owner's values and on/off state come back, the save is consumed
+        if (key.GetValue(SavedServerName) as string is { } savedServer)
+        {
+            key.SetValue("ProxyServer", savedServer, RegistryValueKind.String);
+        }
+        else
+        {
+            key.DeleteValue("ProxyServer", throwOnMissingValue: false);
+        }
+
+        if (key.GetValue(SavedOverrideName) as string is { } savedOverride)
+        {
+            key.SetValue("ProxyOverride", savedOverride, RegistryValueKind.String);
+        }
+        else
+        {
             key.DeleteValue("ProxyOverride", throwOnMissingValue: false);
         }
 
-        key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+        key.SetValue("ProxyEnable", key.GetValue(SavedEnableName) as int? == 1 ? 1 : 0, RegistryValueKind.DWord);
+        key.DeleteValue(OursServerName, throwOnMissingValue: false);
+        ConsumeSave(key);
         NotifySettingsChanged();
     }
 
-    private static void SaveIfPresent(RegistryKey key, string name, string savedName)
+    private static bool IsOurs(RegistryKey key, string? server) =>
+        server is not null
+        && key.GetValue(OursServerName) is string ours
+        && string.Equals(server, ours, StringComparison.OrdinalIgnoreCase);
+
+    private static bool CurrentEnable(RegistryKey key) => key.GetValue("ProxyEnable") as int? == 1;
+
+    private static bool HasSave(RegistryKey key) =>
+        key.GetValue(SavedServerName) is not null
+        || key.GetValue(SavedOverrideName) is not null
+        || key.GetValue(SavedEnableName) is not null;
+
+    private static void ConsumeSave(RegistryKey key)
+    {
+        key.DeleteValue(SavedServerName, throwOnMissingValue: false);
+        key.DeleteValue(SavedOverrideName, throwOnMissingValue: false);
+        key.DeleteValue(SavedEnableName, throwOnMissingValue: false);
+        key.DeleteValue(OursServerName, throwOnMissingValue: false);
+    }
+
+    /// <summary>The current value becomes the saved one; an absent current value clears the save.</summary>
+    private static void SaveCurrent(RegistryKey key, string name, string savedName)
     {
         if (key.GetValue(name) is string value && value.Length > 0)
         {
             key.SetValue(savedName, value, RegistryValueKind.String);
+        }
+        else
+        {
+            key.DeleteValue(savedName, throwOnMissingValue: false);
         }
     }
 

@@ -70,7 +70,15 @@ public sealed record ClaudeSettingsStatus(
     string? Detail = null,
     IReadOnlyList<string>? Drift = null);
 
-public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override, string? Detail = null);
+/// <summary>
+/// The WinINET switch: Enabled is the system proxy being on at all, Ours — that the enabled server
+/// is the address this installation wrote. A proxy enabled by the owner or another tool is Enabled
+/// with Ours false: turning the switch off leaves it alone.
+/// </summary>
+public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override, string? Detail = null)
+{
+    public bool Ours { get; init; }
+}
 
 /// <summary>
 /// Status of the Codex settings layer: the flag is read from config.toml, the proxy env from the
