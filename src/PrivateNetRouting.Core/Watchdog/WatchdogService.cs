@@ -111,6 +111,15 @@ public sealed class WatchdogService(
             {
                 log.Warn($"watchdog: WSL host stop failed: {ex.Message}");
             }
+
+            // the WSL pass takes up to minutes: a client started meanwhile (a shortcut click finds
+            // the chain live and raises nothing) must not lose its chain to a verdict taken before
+            var resumed = usage.GetInUseReason(idleWindow);
+            if (resumed is not null)
+            {
+                log.Info($"watchdog: in use again before the chain stop — {resumed}");
+                return new TickOutcome(false, resumed);
+            }
         }
 
         try

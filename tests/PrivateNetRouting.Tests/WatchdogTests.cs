@@ -38,7 +38,7 @@ public class WatchdogTests : IDisposable
 
         await watchdog.RunAsync(null, CancellationToken.None);
 
-        Assert.Equal(["delay", "usage.check", "wsl.stop:pnr-test", "chain.stop"], events);
+        Assert.Equal(["delay", "usage.check", "wsl.stop:pnr-test", "usage.check", "chain.stop"], events);
     }
 
     [Fact]
@@ -51,8 +51,22 @@ public class WatchdogTests : IDisposable
 
         await watchdog.RunAsync(null, CancellationToken.None);
 
-        Assert.Equal(2, usage.Checks);
-        Assert.Equal(["delay", "usage.check", "delay", "usage.check", "wsl.stop:pnr-test", "chain.stop"], events);
+        Assert.Equal(3, usage.Checks);
+        Assert.Equal(["delay", "usage.check", "delay", "usage.check", "wsl.stop:pnr-test", "usage.check", "chain.stop"], events);
+    }
+
+    [Fact]
+    public async Task ActivityRegainedDuringTheWslPassKeepsTheChain()
+    {
+        var events = new List<string>();
+        // idle, then busy again after the WSL pass (a shortcut click meanwhile), then idle twice
+        var usage = new SequenceUsage([null, "claude processes: 1", null, null]);
+        var watchdog = Create(usage: usage, wsl: new FakeWsl(events), chain: new FakeChain(events));
+
+        await watchdog.RunAsync(null, CancellationToken.None);
+
+        // the first pass stops nothing beyond WSL: the chain goes only on the next idle tick
+        Assert.Equal(["wsl.stop:pnr-test", "wsl.stop:pnr-test", "chain.stop"], events);
     }
 
     [Fact]
