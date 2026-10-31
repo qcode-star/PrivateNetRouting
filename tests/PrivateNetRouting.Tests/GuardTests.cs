@@ -2495,8 +2495,12 @@ public class AtomicFileTests : IDisposable
         Assert.Equal("{\"a\":1}", File.ReadAllText(path, new UTF8Encoding(false)));
 
         // a file without a BOM stays without one
-        AtomicFile.Write(path, "{\"a\":2}");
-        Assert.NotEqual(0xEF, File.ReadAllBytes(path)[0]);
+        var noBom = Path.Combine(_dir, "no-bom.json");
+        File.WriteAllText(noBom, "{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        AtomicFile.Write(noBom, "{\"a\":2}");
+
+        Assert.NotEqual(0xEF, File.ReadAllBytes(noBom)[0]);
     }
 
     [Fact]
