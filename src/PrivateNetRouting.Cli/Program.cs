@@ -917,6 +917,14 @@ internal static class Program
             return 1;
         }
 
+        if (options.DownloadOnly && installFrom is not null)
+        {
+            // the two flags contradict each other: one says "do not install", the other names a
+            // package to install — installing would close Claude against an explicit instruction
+            Console.Error.WriteLine("--download-only cannot be combined with --install-from");
+            return 1;
+        }
+
         var config = AppConfigStore.LoadOrCreate();
         if (!config.Claude.Enabled)
         {
@@ -1366,7 +1374,8 @@ internal static class Program
                                  update Claude Desktop (MSIX) through the proxy chain:
                                  versions are checked first (no UAC when up to date),
                                  then chain if needed, fragment download, publisher
-                                 check and Add-AppxPackage
+                                 check and Add-AppxPackage; --install-from installs a
+                                 downloaded file and excludes --check/--download-only
             pnr watchdog         idle auto-stop supervisor: check Claude and Codex usage
                                  every watchdog.checkSeconds, on idle stop the WSL host
                                  and the chain (Ctrl+C to stop; starts nothing by itself)
