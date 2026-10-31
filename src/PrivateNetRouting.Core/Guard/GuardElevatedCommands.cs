@@ -111,16 +111,22 @@ public static class GuardElevatedCommands
             ops.ApplyFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
             FlushTolerantly(ops, log);
             var probes = guard.BanProbes.Count > 0 ? guard.BanProbes : ["www.anthropic.com"];
-            var blocked = probes.ToDictionary(probe => probe, ProbeBlocked);
-            if (blocked.Any(pair => !pair.Value))
+            var blocked = probes.ToDictionary(probe => probe, probe => ProbeBlocked(probe));
+            if (blocked.Any(pair => pair.Value == false))
             {
-                var offenders = string.Join(", ", blocked.Where(pair => !pair.Value).Select(pair => pair.Key));
+                var offenders = string.Join(", ", blocked.Where(pair => pair.Value == false).Select(pair => pair.Key));
                 log.Warn($"elevated ban: probes still resolve ({offenders}) — subtrees are not closed");
+            }
+
+            if (blocked.Any(pair => pair.Value is null))
+            {
+                var unknown = string.Join(", ", blocked.Where(pair => pair.Value is null).Select(pair => pair.Key));
+                log.Warn($"elevated ban: the resolver gave no answer for {unknown} — the block is not established");
             }
 
             return $"hosts {config.BanHosts.Count} names, NRPT rule on {config.BanTrees.Count * 2} namespaces, "
                 + $"firewall {config.FirewallSubnets.Count} subnets; probes "
-                + string.Join(", ", blocked.Select(pair => $"{pair.Key} {(pair.Value ? "does not resolve" : "STILL RESOLVES")}"));
+                + string.Join(", ", blocked.Select(pair => $"{pair.Key} {ProbeVerdict(pair.Value)}"));
         }
         else
         {
@@ -216,17 +222,36 @@ public static class GuardElevatedCommands
         return "egressProxyUrl and disableWslSessions removed";
     }
 
-    /// <summary>Whether the probe name resolves right now (system resolver: hosts + NRPT); timeout is 5 s.</summary>
-    internal static bool ProbeBlocked(string probeName)
+    private static string ProbeVerdict(bool? blocked) => blocked switch
     {
+        true => "does not resolve",
+        false => "STILL RESOLVES",
+        null => "not established (the resolver gave no answer)",
+    };
+
+    /// <summary>
+    /// Whether the probe name is blocked right now (system resolver: hosts + NRPT): true — the
+    /// name does not resolve, false — it resolves, null — not established: the resolver timed out
+    /// (5 s) or failed otherwise, which proves nothing about the block (as GuardService's live probe).
+    /// </summary>
+    internal static bool? ProbeBlocked(string probeName) =>
+        ProbeBlocked(probeName, name => Dns.GetHostAddresses(name), TimeSpan.FromSeconds(5));
+
+    internal static bool? ProbeBlocked(string probeName, Func<string, IPAddress[]> resolve, TimeSpan timeout)
+    {
+        var resolved = Task.Run(() => resolve(probeName));
         try
         {
-            var resolved = Task.Run(() => Dns.GetHostAddresses(probeName));
-            return !resolved.Wait(TimeSpan.FromSeconds(5)) || resolved.Result.Length == 0;
+            if (!resolved.Wait(timeout))
+            {
+                return null;
+            }
+
+            return resolved.Result.Length == 0;
         }
-        catch (AggregateException ex) when (ex.InnerException is SocketException)
+        catch (AggregateException ex) when (ex.InnerException is SocketException socket)
         {
-            return true;
+            return socket.SocketErrorCode is SocketError.HostNotFound or SocketError.NoData ? true : null;
         }
     }
 }

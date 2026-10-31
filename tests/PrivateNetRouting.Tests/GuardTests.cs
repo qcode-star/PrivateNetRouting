@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Win32;
@@ -3349,6 +3350,23 @@ public class GuardTests : IDisposable
         Assert.Equal(["nrpt-off", "fw-off", "flush"], allOps.Calls);
         Assert.True(policy.Removed);
         Assert.Contains("the NRPT rule was NOT removed", all.Message);
+    }
+
+    [Fact]
+    public void ElevatedProbeTimeoutIsNotEstablishedRatherThanBlocked()
+    {
+        using var release = new ManualResetEventSlim();
+        Assert.Null(GuardElevatedCommands.ProbeBlocked("probe.invalid", _ =>
+        {
+            release.Wait(TimeSpan.FromSeconds(5));
+            return [];
+        }, TimeSpan.FromMilliseconds(50)));
+        release.Set();
+
+        Assert.True(GuardElevatedCommands.ProbeBlocked("probe.invalid", _ => throw new SocketException((int)SocketError.HostNotFound), TimeSpan.FromSeconds(5)));
+        Assert.Null(GuardElevatedCommands.ProbeBlocked("probe.invalid", _ => throw new SocketException((int)SocketError.TryAgain), TimeSpan.FromSeconds(5)));
+        Assert.False(GuardElevatedCommands.ProbeBlocked("probe.invalid", _ => [IPAddress.Parse("192.0.2.1")], TimeSpan.FromSeconds(5)));
+        Assert.True(GuardElevatedCommands.ProbeBlocked("probe.invalid", _ => [], TimeSpan.FromSeconds(5)));
     }
 
     /// <summary>The combined action: ban layers first, then the policy — one helper run, one UAC.</summary>
