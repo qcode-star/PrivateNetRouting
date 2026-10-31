@@ -564,28 +564,43 @@ public sealed class ChainSupervisor(
         {
             if (stopNode)
             {
-                Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
-                try
+                // liveness is the daemon's pipe: a down against a dead daemon exits non-zero and
+                // would turn an already-stopped chain into a failure
+                if (!daemon.IsProcessAlive)
                 {
-                    var down = await cli.DownAsync(CancellationToken.None);
-                    if (down.Ok)
-                    {
-                        Report(progress, "Node", ChainStepStatus.Done, "down");
-                    }
-                    else
-                    {
-                        // a failed down is a stop failure like a failed kill: the node is not down
-                        // while the caller is told it went down; the daemon kill still runs
-                        Report(progress, "Node", ChainStepStatus.Failed, $"exit {down.ExitCode}");
-                        log.Warn($"chain: down failed (exit {down.ExitCode}): {down.Output}");
-                        failures.Add(("node", new IOException($"tailscale down failed (exit {down.ExitCode}): {down.Output}")));
-                    }
+                    Report(progress, "Node", ChainStepStatus.Skipped, "the daemon is not running");
                 }
-                catch (Exception ex)
+                else
                 {
-                    Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
-                    log.Warn($"chain: down failed: {ex.Message}");
-                    failures.Add(("node", ex));
+                    Report(progress, "Node", ChainStepStatus.Active, "tailscale down");
+                    try
+                    {
+                        var down = await cli.DownAsync(CancellationToken.None);
+                        if (down.Ok)
+                        {
+                            Report(progress, "Node", ChainStepStatus.Done, "down");
+                        }
+                        else if (!daemon.IsProcessAlive)
+                        {
+                            // the daemon went away while the down ran: nothing is left to down
+                            Report(progress, "Node", ChainStepStatus.Skipped, "the daemon is gone");
+                            log.Info($"chain: down reported exit {down.ExitCode}, the daemon is gone - nothing to down");
+                        }
+                        else
+                        {
+                            // a failed down is a stop failure like a failed kill: the node is not down
+                            // while the caller is told it went down; the daemon kill still runs
+                            Report(progress, "Node", ChainStepStatus.Failed, $"exit {down.ExitCode}");
+                            log.Warn($"chain: down failed (exit {down.ExitCode}): {down.Output}");
+                            failures.Add(("node", new IOException($"tailscale down failed (exit {down.ExitCode}): {down.Output}")));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Report(progress, "Node", ChainStepStatus.Failed, ex.Message);
+                        log.Warn($"chain: down failed: {ex.Message}");
+                        failures.Add(("node", ex));
+                    }
                 }
             }
 
@@ -620,6 +635,24 @@ public sealed class ChainSupervisor(
             }
         }
 
+        // a rollback leaves the links that were up before the bring-up; it ends the whole chain
+        // only when nothing of ours is running any more — the same end state a full stop must reach
+        var wholeChain = NothingOfOursRunning();
+        log.Info(failures.Count == 0
+            ? wholeChain
+                ? "chain: stopped"
+                : "chain: stopped the links this operation raised, the links that were up before are left running"
+            : "chain: stop finished with failures");
+
+        // the idle stopper exists only over a live chain: the stop is its end too. Its own token
+        // is not trusted here — a cancelled chain stop must still take the stoppers down. The hook
+        // follows the end state, not the absence of step failures: a failed step that left nothing
+        // of ours running must not leave a stopper over a chain that is down.
+        if (wholeChain && chainStopped is not null)
+        {
+            await chainStopped(CancellationToken.None);
+        }
+
         if (failures.Count > 0)
         {
             foreach (var (component, error) in failures.Skip(1))
@@ -628,18 +661,6 @@ public sealed class ChainSupervisor(
             }
 
             throw new ChainException(failures[0].Component, failures[0].Error);
-        }
-
-        // a rollback leaves the links that were up before the bring-up; it ends the whole chain
-        // only when nothing of ours is running any more
-        var wholeChain = raised is null || NothingOfOursRunning();
-        log.Info(wholeChain ? "chain: stopped" : "chain: stopped the links this operation raised, the links that were up before are left running");
-
-        // the idle stopper exists only over a live chain: the stop is its end too. Its own token
-        // is not trusted here — a cancelled chain stop must still take the stoppers down
-        if (wholeChain && chainStopped is not null)
-        {
-            await chainStopped(CancellationToken.None);
         }
     }
 

@@ -498,13 +498,35 @@ public class ChainSupervisorTests : IDisposable
     [Fact]
     public async Task StopRunsInReverseOrder()
     {
-        var supervisor = Create();
+        var supervisor = Create(daemon: new FakeDaemon(_calls) { IsProcessAlive = true });
 
         await supervisor.StopAsync(null, CancellationToken.None);
 
         Assert.Equal(
             ["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"],
             _calls);
+    }
+
+    /// <summary>
+    /// A chain that is already down: the daemon's pipe does not answer, so there is no node to
+    /// take down. The stop is a success (the CLI exits 0) and the chain-stopped hook still runs.
+    /// </summary>
+    [Fact]
+    public async Task StopOfAnAlreadyStoppedChainSucceedsAndFiresTheHook()
+    {
+        var hookRan = false;
+        var daemon = new FakeDaemon(_calls); // not alive, nothing listening
+        var supervisor = Create(daemon: daemon, chainStopped: _ =>
+        {
+            hookRan = true;
+            return Task.CompletedTask;
+        });
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.DoesNotContain("cli.down", _calls); // no down against a dead daemon
+        Assert.Equal(["proxy.stop", "daemon.kill", "keeper.kill"], _calls);
+        Assert.True(hookRan);
     }
 
     [Fact]
@@ -635,7 +657,7 @@ public class ChainSupervisorTests : IDisposable
     [Fact]
     public async Task CompletedStopFiresTheChainStoppedHook()
     {
-        var daemon = new FakeDaemon(_calls);
+        var daemon = new FakeDaemon(_calls) { IsProcessAlive = true };
         var keeper = new FakeKeeper(_calls);
         var cli = new FakeCli(_calls);
         var tokens = new List<CancellationToken>();
@@ -673,7 +695,7 @@ public class ChainSupervisorTests : IDisposable
     public async Task FailedStopDoesNotFireTheChainStoppedHook()
     {
         var stopped = false;
-        var daemon = new FakeDaemon(_calls) { KillThrows = new IOException("access denied") };
+        var daemon = new FakeDaemon(_calls) { IsProcessAlive = true, KillThrows = new IOException("access denied") };
         var supervisor = Create(daemon: daemon, chainStopped: _ =>
         {
             stopped = true;
@@ -690,7 +712,7 @@ public class ChainSupervisorTests : IDisposable
     [Fact]
     public async Task FailedDaemonKillStillStopsTheKeeper()
     {
-        var daemon = new FakeDaemon(_calls) { KillThrows = new IOException("access denied") };
+        var daemon = new FakeDaemon(_calls) { IsProcessAlive = true, KillThrows = new IOException("access denied") };
         var supervisor = Create(daemon: daemon);
 
         var error = await Assert.ThrowsAsync<ChainException>(() =>
@@ -719,17 +741,24 @@ public class ChainSupervisorTests : IDisposable
         Assert.False(hookRan);
     }
 
-    /// <summary>A failed `tailscale down` is reported: the stop runs to the end and then fails naming the node.</summary>
+    /// <summary>
+    /// A failed `tailscale down` is a real failure: it is raised naming the node after every link
+    /// was stopped. The end state is still "nothing of ours running", so the chain-stopped hook
+    /// runs first — a stopper must not outlive the chain it watches.
+    /// </summary>
     [Fact]
     public async Task AFailedDownFailsTheStopAfterRunningToTheEnd()
     {
         var cli = new FakeCli(_calls) { DownExitCode = 1 };
         var hookRan = false;
-        var supervisor = Create(cli: cli, chainStopped: _ =>
-        {
-            hookRan = true;
-            return Task.CompletedTask;
-        });
+        var supervisor = Create(
+            daemon: new FakeDaemon(_calls) { IsProcessAlive = true },
+            cli: cli,
+            chainStopped: _ =>
+            {
+                hookRan = true;
+                return Task.CompletedTask;
+            });
 
         var error = await Assert.ThrowsAsync<ChainException>(() =>
             supervisor.StopAsync(null, CancellationToken.None));
@@ -737,7 +766,7 @@ public class ChainSupervisorTests : IDisposable
         Assert.Contains("node", error.Message);
         Assert.Contains("exit 1", error.Message);
         Assert.Equal(["proxy.stop", "cli.down", "daemon.kill", "keeper.kill"], _calls);
-        Assert.False(hookRan);
+        Assert.True(hookRan);
     }
 
     /// <summary>
@@ -747,7 +776,7 @@ public class ChainSupervisorTests : IDisposable
     [Fact]
     public async Task AForeignListenerOnTheDaemonPortDoesNotFailTheStop()
     {
-        var daemon = new FakeDaemon(_calls) { PortStaysForeignAfterKill = true };
+        var daemon = new FakeDaemon(_calls) { IsProcessAlive = true, PortStaysForeignAfterKill = true };
         var keeper = new FakeKeeper(_calls);
         var hookRan = false;
         var supervisor = Create(daemon: daemon, keeper: keeper, chainStopped: _ =>
@@ -1250,6 +1279,7 @@ public class ChainSupervisorTests : IDisposable
             calls.Add("keeper.kill");
             if (RefusesToDie)
             {
+                IsRunning = true; // the keeper survived the kill
                 throw new IOException("keeper: watch-ipn is still running after the kill");
             }
 
