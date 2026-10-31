@@ -27,7 +27,8 @@ public class ChainSupervisorTests : IDisposable
         Func<CancellationToken, Task<bool>>? upstream = null,
         Func<CancellationToken, Task<string?>>? systemControlUrl = null,
         string? loginServer = null,
-        bool proxyDisabled = false)
+        bool proxyDisabled = false,
+        TimeSpan? crossProcessLockWait = null)
     {
         var log = new FileLog(_logPath);
         _logs.Add(log);
@@ -48,7 +49,41 @@ public class ChainSupervisorTests : IDisposable
             chainStopped,
             upstream,
             systemControlUrl,
-            proxyDisabled);
+            proxyDisabled,
+            crossProcessLockWait);
+    }
+
+    /// <summary>
+    /// The cross-process operation lock: an operation of another process (a held lock file) makes
+    /// the waiter wait, and the operation proceeds as soon as the holder lets go.
+    /// </summary>
+    [Fact]
+    public async Task OperationWaitsForTheCrossProcessLockAndProceedsOnRelease()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        using var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create(crossProcessLockWait: TimeSpan.FromSeconds(10));
+
+        var operation = supervisor.StopAsync(null, CancellationToken.None);
+        await Task.Delay(300);
+        Assert.False(operation.IsCompleted); // the foreign lock is held: the waiter waits
+
+        holder.Dispose(); // the other process finished its operation
+        await operation;
+        Assert.Contains("keeper.kill", _calls); // the stop ran to its steps, not just failed open
+    }
+
+    /// <summary>A lock held past the deadline is logged and ignored — it must never wedge the chain card.</summary>
+    [Fact]
+    public async Task AStuckCrossProcessLockIsLoggedAndIgnored()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        using var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create(crossProcessLockWait: TimeSpan.FromMilliseconds(150));
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Contains("keeper.kill", _calls); // fail-open: the stop ran its steps
     }
 
     [Fact]

@@ -158,7 +158,8 @@ public sealed class ChainSupervisor(
     Func<CancellationToken, Task>? chainStopped = null,
     Func<CancellationToken, Task<bool>>? upstreamCheck = null,
     Func<CancellationToken, Task<string?>>? systemControlUrl = null,
-    bool proxyDisabled = false) : IChainSupervisor
+    bool proxyDisabled = false,
+    TimeSpan? crossProcessLockWait = null) : IChainSupervisor
 {
     /// <summary>The external-upstream modes (socks5, http): no daemon/keeper/node links exist there.</summary>
     private readonly bool _external = config.EffectiveMode is ChainMode.Socks5 or ChainMode.Http;
@@ -254,6 +255,7 @@ public sealed class ChainSupervisor(
         await _operation.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            using var crossProcess = await AcquireOperationLockAsync(ct).ConfigureAwait(false);
             await EnsureRunningCoreAsync(progress, raised, ct).ConfigureAwait(false);
         }
         finally
@@ -275,11 +277,61 @@ public sealed class ChainSupervisor(
         await _operation.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
+            using var crossProcess = await AcquireOperationLockAsync(CancellationToken.None).ConfigureAwait(false);
             await StopCoreAsync(progress, ct, raised).ConfigureAwait(false);
         }
         finally
         {
             _operation.Release();
+        }
+    }
+
+    /// <summary>How long an operation waits for another process's chain operation (a bring-up may
+    /// hold the lock through a tailscale login wait — minutes).</summary>
+    private readonly TimeSpan _crossProcessLockWait = crossProcessLockWait ?? TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The cross-process half of the operation exclusion (the GUI and `pnr chain up` have separate
+    /// semaphores): a lock file next to the chain log — a directory both share — is held for the
+    /// whole operation. A bring-up may legitimately hold it for minutes, so the waiter waits
+    /// generously; a lock still held after that is logged and ignored — the operations are
+    /// idempotent, and a wedged lock must never keep the chain card from acting (the same
+    /// fails-open rule the watchdog spawn lock follows). The OS closes a dead holder's handle, so
+    /// the lock never outlives its process.
+    /// </summary>
+    private async Task<IDisposable> AcquireOperationLockAsync(CancellationToken waitToken)
+    {
+        var path = Path.Combine(
+            Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
+            "chain-operation.lock");
+        var deadline = DateTime.UtcNow + _crossProcessLockWait;
+        while (true)
+        {
+            FileStream? stream = null;
+            try
+            {
+                return stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                stream?.Dispose();
+                if (DateTime.UtcNow >= deadline)
+                {
+                    log.Warn($"chain: the operation lock {path} is still held after {_crossProcessLockWait.TotalMinutes:0} min, running without it: {ex.Message}");
+                    return NoOperationLock.Instance;
+                }
+            }
+
+            await Task.Delay(50, waitToken).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class NoOperationLock : IDisposable
+    {
+        public static readonly NoOperationLock Instance = new();
+
+        public void Dispose()
+        {
         }
     }
 
