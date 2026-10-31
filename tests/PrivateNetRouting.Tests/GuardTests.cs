@@ -134,10 +134,18 @@ internal sealed class FakeWslRunner : IWslProcessRunner
     /// <summary>stdin of the reading probes (state read), by distro.</summary>
     public List<(string Distro, string Script)> Probes { get; } = [];
 
+    /// <summary>Thrown by the distro listing instead of returning names (wsl.exe missing).</summary>
+    public Exception? ListError { get; set; }
+
     public Task<string> RunAsync(IReadOnlyList<string> arguments, string? standardInput, Encoding outputEncoding, CancellationToken ct)
     {
         if (arguments.Contains("--list"))
         {
+            if (ListError is not null)
+            {
+                throw ListError;
+            }
+
             var names = arguments.Contains("--running") ? Running : Installed;
             return Task.FromResult(string.Join("\r\n", names.Select(n => n + "\0")));
         }
@@ -1006,6 +1014,37 @@ public class GuardTests : IDisposable
         $"SCRIPT=present\nPORT=18082\nUSER_NAME='{user}'\n"
         + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n"
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
+
+    [Fact]
+    public async Task AForcedOnWslLayerOnAMachineWithoutWslIsUnknownNotAFailure()
+    {
+        var runner = new FakeWslRunner
+        {
+            ListError = new System.ComponentModel.Win32Exception(2, "The system cannot find the file specified"),
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, () => IPAddress.Parse("192.0.2.1"));
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Unknown, status.State);
+        Assert.Contains("wsl is not available", status.Reason);
+    }
+
+    [Fact]
+    public async Task AWslSyncOnAMachineWithoutWslIsSkippedWithAReason()
+    {
+        var runner = new FakeWslRunner
+        {
+            ListError = new System.ComponentModel.Win32Exception(2, "The system cannot find the file specified"),
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        Assert.True(result.LayerDisabled);
+        Assert.Contains("wsl is not available", result.Reason);
+        Assert.Empty(result.Distros);
+    }
 
     [Fact]
     public async Task WslLayerModes()

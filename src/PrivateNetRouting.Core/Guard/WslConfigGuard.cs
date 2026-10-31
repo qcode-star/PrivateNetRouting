@@ -127,8 +127,19 @@ public sealed class WslConfigGuard(
 
         var expectedPort = ClaudeEnvValues.Port(config);
         var expectedProxy = ClaudeEnvValues.WslProxyUrl(_gateway(), config);
-        var running = await ListDistrosAsync("--running", ct);
-        var installed = await ListDistrosAsync("--quiet", ct);
+        IReadOnlyList<string> running;
+        IReadOnlyList<string> installed;
+        try
+        {
+            running = await ListDistrosAsync("--running", ct);
+            installed = await ListDistrosAsync("--quiet", ct);
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            // a forced-on layer on a machine without WSL reports unknown with the reason instead
+            // of breaking the whole guard status
+            return new WslConfigStatus(GuardState.Unknown, [], expectedPort, expectedProxy, $"wsl is not available: {ex.Message}");
+        }
 
         var distros = new List<WslDistroStatus>();
         foreach (var distro in ConfiguredDistros())
@@ -168,8 +179,19 @@ public sealed class WslConfigGuard(
             return new WslSyncResult(true, reason, []);
         }
 
-        var running = await ListDistrosAsync("--running", ct);
-        var installed = await ListDistrosAsync("--quiet", ct);
+        IReadOnlyList<string> running;
+        IReadOnlyList<string> installed;
+        try
+        {
+            running = await ListDistrosAsync("--running", ct);
+            installed = await ListDistrosAsync("--quiet", ct);
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            // a forced-on sync on a machine without WSL is skipped with the reason, nothing touched
+            return new WslSyncResult(true, $"wsl is not available: {ex.Message}", []);
+        }
+
         var gateway = _gateway();
         var results = new List<WslDistroSyncResult>();
         foreach (var distro in ConfiguredDistros())
@@ -298,7 +320,7 @@ public sealed class WslConfigGuard(
                 read.ProxyEnvPresent,
                 read.ProxyEnvPort);
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException or System.ComponentModel.Win32Exception)
         {
             return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, $"failed to read: {ex.Message}");
         }
