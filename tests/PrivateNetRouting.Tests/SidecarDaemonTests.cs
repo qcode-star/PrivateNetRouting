@@ -142,8 +142,9 @@ public class TailscaleCommandLineTests
 
         var line = SidecarDaemon.BuildStartCommandLine(config, devMode: true);
 
-        Assert.Contains(@"--statedir=""C:\Program Data\pnr sidecar""", line);
-        Assert.Contains(@"--socket=""\\.\pipe\pnr-sidecar""", line);
+        // every argument is one quoted token: cmd never re-interprets anything inside it
+        Assert.Contains(@"""--statedir=C:\Program Data\pnr sidecar""", line);
+        Assert.Contains(@"""--socket=\\.\pipe\pnr-sidecar""", line);
         Assert.DoesNotContain("\"\"", line);
     }
 
@@ -152,7 +153,7 @@ public class TailscaleCommandLineTests
     {
         var line = SidecarKeeper.BuildStartCommandLine(ValidConfig());
 
-        Assert.Contains(@"--socket=""\\.\pipe\pnr-sidecar""", line);
+        Assert.Contains(@"""--socket=\\.\pipe\pnr-sidecar""", line);
         Assert.EndsWith("debug watch-ipn", line);
     }
 }
