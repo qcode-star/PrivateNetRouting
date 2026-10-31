@@ -32,7 +32,9 @@ public sealed record SettingsSyncResult(
     string CodexPath,
     bool CodexEnvWritten,
     string? CodexEnvBackupPath,
-    string CodexEnvPath);
+    string CodexEnvPath,
+    string? ClaudeError = null,
+    string? CodexError = null);
 
 public sealed record GuardSnapshot(
     LocalBanStatus Ban,
@@ -304,12 +306,36 @@ public sealed class GuardService(
     /// Both applications at once: env in Claude Code settings.json and the Codex layer — the
     /// system-proxy flag in config.toml plus the proxy env in .env (the guard card's single sync
     /// action). Each file is written only on an actual change; the log carries one line per file.
+    /// One failing application does not prevent the other's write: each sync is isolated and its
+    /// failure travels in the result (the WSL sync reports per distro the same way).
     /// </summary>
     public Task<SettingsSyncResult> SyncSettingsAsync(CancellationToken ct) =>
         Task.Run(() =>
         {
-            var sync = settings.Sync();
-            var codexSync = codexSettings.Sync();
+            string? claudeError = null;
+            string? codexError = null;
+            var sync = new ClaudeSettingsGuard.ClaudeSettingsSyncResult(false, null);
+            var codexSync = new CodexSettingsGuard.CodexSettingsSyncResult(false, null, false, null);
+            try
+            {
+                sync = settings.Sync();
+            }
+            catch (Exception ex)
+            {
+                claudeError = ex.Message;
+                log.Warn($"guard settings sync: Claude settings.json failed: {ex.Message}");
+            }
+
+            try
+            {
+                codexSync = codexSettings.Sync();
+            }
+            catch (Exception ex)
+            {
+                codexError = ex.Message;
+                log.Warn($"guard settings sync: the Codex layer failed: {ex.Message}");
+            }
+
             var outcome = new SettingsSyncResult(
                 sync.Written,
                 sync.BackupPath,
@@ -320,16 +346,26 @@ public sealed class GuardService(
                 config.Codex.SettingsPath,
                 codexSync.EnvWritten,
                 codexSync.EnvBackupPath,
-                config.Codex.EnvPath);
-            log.Info(outcome.Written
-                ? $"guard settings sync: Claude settings.json written — proxy {outcome.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {outcome.BackupPath ?? "none"})"
-                : $"guard settings sync: Claude settings.json already up to date (proxy {outcome.ProxyUrl})");
-            log.Info(outcome.CodexWritten
-                ? $"guard codex settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
-                : "guard codex settings sync: respect_system_proxy=true already in place");
-            log.Info(outcome.CodexEnvWritten
-                ? $"guard codex settings sync: proxy env written to .env (backup: {outcome.CodexEnvBackupPath ?? "none"}) — the file the embedded CLI core loads itself"
-                : "guard codex settings sync: .env proxy env already in place");
+                config.Codex.EnvPath,
+                claudeError,
+                codexError);
+            if (claudeError is null)
+            {
+                log.Info(outcome.Written
+                    ? $"guard settings sync: Claude settings.json written — proxy {outcome.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {outcome.BackupPath ?? "none"})"
+                    : $"guard settings sync: Claude settings.json already up to date (proxy {outcome.ProxyUrl})");
+            }
+
+            if (codexError is null)
+            {
+                log.Info(outcome.CodexWritten
+                    ? $"guard settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
+                    : "guard settings sync: respect_system_proxy=true already in place");
+                log.Info(outcome.CodexEnvWritten
+                    ? $"guard settings sync: proxy env written to .env (backup: {outcome.CodexEnvBackupPath ?? "none"}) — the file the embedded CLI core loads itself"
+                    : "guard settings sync: .env proxy env already in place");
+            }
+
             return outcome;
         }, ct);
 

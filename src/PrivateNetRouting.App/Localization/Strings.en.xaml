@@ -216,6 +216,7 @@
     <s:String x:Key="Main.Guard.Settings.Codex.EnvStale">Codex: .env proxy is stale or missing</s:String>
    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code and Codex updated: proxy {0} (backup: {1})</s:String>
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code and Codex already up to date (proxy {0})</s:String>
+    <s:String x:Key="Main.Guard.Settings.FailedFmt">settings sync failed: {0}</s:String>
     <s:String x:Key="Main.Guard.Backup.None">no backup (file was created)</s:String>
     <s:String x:Key="Main.Guard.Wsl">WSL config</s:String>
     <s:String x:Key="Main.Guard.Wsl.Off.Mode">layer is disabled (wsl.mode=off)</s:String>

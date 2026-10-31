@@ -767,7 +767,18 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+            var settings = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+            var settingsErrors = new[] { settings.ClaudeError, settings.CodexError }
+                .Where(error => error is not null)
+                .Cast<string>()
+                .ToList();
+            if (settingsErrors.Count > 0)
+            {
+                // "enable all" is best-effort, but a failed settings sync is not reported as success
+                _viewModel.SetCheckResult("Main.Guard.Settings.FailedFmt", string.Join("; ", settingsErrors));
+                return;
+            }
+
             var wsl = await _runtime.Guard.SyncWslAsync(CancellationToken.None);
             var failed = wsl.Distros.Where(d => d.Failed).ToList();
             if (wsl.LayerDisabled)
@@ -915,6 +926,17 @@ public partial class MainWindow : Window
     private async void OnGuardSettingsSync(object sender, RoutedEventArgs e) => await RunGuardAsync(async () =>
     {
         var result = await _runtime.Guard.SyncSettingsAsync(CancellationToken.None);
+        var errors = new[] { result.ClaudeError, result.CodexError }
+            .Where(error => error is not null)
+            .Cast<string>()
+            .ToList();
+        if (errors.Count > 0)
+        {
+            // one application failing does not hide the other's write, but the line names the failure
+            _viewModel.SetCheckResult("Main.Guard.Settings.FailedFmt", string.Join("; ", errors));
+            return;
+        }
+
         var backups = new[] { result.BackupPath, result.CodexBackupPath }
             .Where(path => path is not null)
             .ToList();

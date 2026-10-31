@@ -2410,6 +2410,30 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsSyncIsolatesTheFailingApplication()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Claude.SettingsPath = Path.Combine(_tempDir, "settings-dir"); // a directory: the write throws
+        Directory.CreateDirectory(config.Claude.SettingsPath);
+        config.Codex.SettingsPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.toml");
+        config.Codex.EnvPath = Path.Combine(_tempDir, $"codex-{Guid.NewGuid():N}.env");
+        var service = MakeService(
+            config,
+            new FakeEgressPolicyStore(),
+            new FakeBanSystemOps(),
+            new FakeSystemProxyStore(),
+            new FakeElevatedRunner(),
+            out _);
+
+        var result = await service.SyncSettingsAsync(CancellationToken.None);
+
+        Assert.NotNull(result.ClaudeError); // the Claude write failed...
+        Assert.True(result.CodexWritten); // ...and the Codex files were still written
+        Assert.Null(result.CodexError);
+    }
+
+    [Fact]
     public async Task OneFailingLayerDoesNotTakeTheWholeSnapshotDown()
     {
         var config = new AppConfig();

@@ -1059,16 +1059,32 @@ internal static class Program
                 }
 
                 var settings = await runtime.Guard.SyncSettingsAsync(CancellationToken.None);
-                Console.WriteLine(settings.Written
-                    ? $"settings.json: written — proxy {settings.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {settings.BackupPath ?? "none"})"
-                    : $"settings.json: already up to date (proxy {settings.ProxyUrl})");
-                Console.WriteLine(settings.CodexWritten
-                    ? $"config.toml: respect_system_proxy = true written (backup: {settings.CodexBackupPath ?? "none"})"
-                    : "config.toml: respect_system_proxy = true already in place");
-                Console.WriteLine(settings.CodexEnvWritten
-                    ? $".env: proxy env written to {settings.CodexEnvPath} (backup: {settings.CodexEnvBackupPath ?? "none"}) — the file the Codex core loads itself"
-                    : $".env: proxy env already in place ({settings.CodexEnvPath})");
-                return 0;
+                if (settings.ClaudeError is not null)
+                {
+                    Console.Error.WriteLine($"settings.json: FAILED: {settings.ClaudeError}");
+                }
+                else
+                {
+                    Console.WriteLine(settings.Written
+                        ? $"settings.json: written — proxy {settings.ProxyUrl}, NO_PROXY, privacy and attribution keys (backup: {settings.BackupPath ?? "none"})"
+                        : $"settings.json: already up to date (proxy {settings.ProxyUrl})");
+                }
+
+                if (settings.CodexError is not null)
+                {
+                    Console.Error.WriteLine($"the Codex layer: FAILED: {settings.CodexError}");
+                }
+                else
+                {
+                    Console.WriteLine(settings.CodexWritten
+                        ? $"config.toml: respect_system_proxy = true written (backup: {settings.CodexBackupPath ?? "none"})"
+                        : "config.toml: respect_system_proxy = true already in place");
+                    Console.WriteLine(settings.CodexEnvWritten
+                        ? $".env: proxy env written to {settings.CodexEnvPath} (backup: {settings.CodexEnvBackupPath ?? "none"}) — the file the Codex core loads itself"
+                        : $".env: proxy env already in place ({settings.CodexEnvPath})");
+                }
+
+                return settings.ClaudeError is null && settings.CodexError is null ? 0 : 1;
 
             case "wsl":
                 if (rest.FirstOrDefault() != "sync")
