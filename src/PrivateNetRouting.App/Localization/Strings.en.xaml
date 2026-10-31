@@ -199,7 +199,7 @@
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} names · NRPT: {1} namespaces · firewall: {2} rules</s:String>
     <s:String x:Key="Main.Guard.Ban.Off">no hosts/NRPT/firewall rules</s:String>
     <s:String x:Key="Main.Guard.Ban.StaleMark">(list is stale)</s:String>
-    <s:String x:Key="Main.Guard.Ban.Stale">The hosts block differs from the configured domain list — enable the ban again to refresh it.</s:String>
+    <s:String x:Key="Main.Guard.Ban.Stale">The ban differs from the config (hosts block, NRPT namespaces or firewall subnets) — enable the ban again to refresh it.</s:String>
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Local ban applied. DNS probe: {0}; direct connection: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">blocked</s:String>
     <s:String x:Key="Main.Guard.Live.Open">OPEN</s:String>

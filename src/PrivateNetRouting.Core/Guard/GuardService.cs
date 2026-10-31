@@ -193,7 +193,13 @@ public sealed class GuardService(
             var hosts = HostsFileBlock.Read(guard.HostsFile, guard.HostsBeginMarker, guard.HostsEndMarker, guard.HostsComment, config.BanHosts);
             var layers = await banOps.GetLayersStateAsync(ct);
             var hostsLayerOn = hosts.Present;
-            var state = hostsLayerOn && layers.NrptRules > 0 && layers.FirewallRules > 0 ? GuardState.On
+
+            // a layer that is there but lags behind the config (a domain or a subnet added since)
+            // is not "on": the card then offers "enable all", which re-applies it
+            var nrptCurrent = layers.NrptRules == 0 || BanLayersMatch.SameNamespaces(layers.NrptNamespaces, config.BanTrees);
+            var firewallCurrent = layers.FirewallRules == 0 || BanLayersMatch.SameSubnets(layers.FirewallSubnets, config.FirewallSubnets);
+            var allPresent = hostsLayerOn && layers.NrptRules > 0 && layers.FirewallRules > 0;
+            var state = allPresent && hosts.Current && nrptCurrent && firewallCurrent ? GuardState.On
                 : hostsLayerOn || layers.NrptRules > 0 || layers.FirewallRules > 0 ? GuardState.Partial
                 : GuardState.Off;
             ban = new LocalBanStatus(
@@ -203,7 +209,11 @@ public sealed class GuardService(
                 layers.NrptRules,
                 layers.NrptNamespaces,
                 layers.FirewallRules,
-                layers.FirewallSubnets);
+                layers.FirewallSubnets)
+            {
+                NrptCurrent = nrptCurrent,
+                FirewallCurrent = firewallCurrent,
+            };
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException)
         {
@@ -246,7 +256,7 @@ public sealed class GuardService(
     {
         return
         [
-            new(GuardKind.LocalBan, ban.State, ban.Detail ?? $"hosts: {ban.HostsEntries} names{(ban.HostsCurrent || ban.HostsEntries == 0 ? "" : " (stale list)")}; NRPT: {ban.NrptRules} rule(s) on {ban.NrptNamespaces.Count} namespaces; firewall: {ban.FirewallRules} rule(s) on {ban.FirewallSubnets.Count} subnets"),
+            new(GuardKind.LocalBan, ban.State, ban.Detail ?? $"hosts: {ban.HostsEntries} names{(ban.HostsCurrent || ban.HostsEntries == 0 ? "" : " (stale list)")}; NRPT: {ban.NrptRules} rule(s) on {ban.NrptNamespaces.Count} namespaces{(ban.NrptCurrent ? "" : " (stale list)")}; firewall: {ban.FirewallRules} rule(s) on {ban.FirewallSubnets.Count} subnets{(ban.FirewallCurrent ? "" : " (stale list)")}"),
             new(GuardKind.EgressPolicy, policy.State, policy.Detail ?? (policy.State == GuardState.On
                 ? $"egressProxyUrl={policy.CurrentUrl}, disableWslSessions={policy.DisableWslSessions}"
                 : policy.State == GuardState.Off

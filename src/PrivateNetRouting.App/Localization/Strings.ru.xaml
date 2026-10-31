@@ -199,7 +199,7 @@
     <s:String x:Key="Main.Guard.Ban.DetailFmt">hosts: {0} имён · NRPT: {1} зон · firewall: {2} правил</s:String>
     <s:String x:Key="Main.Guard.Ban.Off">правил hosts/NRPT/firewall нет</s:String>
     <s:String x:Key="Main.Guard.Ban.StaleMark">(список устарел)</s:String>
-    <s:String x:Key="Main.Guard.Ban.Stale">Блок в hosts отличается от списка доменов конфига — включите бан заново, чтобы обновить.</s:String>
+    <s:String x:Key="Main.Guard.Ban.Stale">Бан отличается от конфига (блок в hosts, пространства имён NRPT или подсети firewall) — включите бан заново, чтобы обновить.</s:String>
     <s:String x:Key="Main.Guard.Ban.LiveFmt">Локальный бан применён. Проба DNS: {0}; прямое соединение: {1}.</s:String>
     <s:String x:Key="Main.Guard.Live.Blocked">закрыто</s:String>
     <s:String x:Key="Main.Guard.Live.Open">ОТКРЫТ</s:String>

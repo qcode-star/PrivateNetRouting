@@ -644,10 +644,10 @@ public partial class MainWindow : Window
             GuardAggregate.SettingsLayer(snapshot) ?? GuardState.Off, // both applications off in the config
             snapshot.Wsl.State);
 
-        // a hosts block that lags behind the configured list carries a visible note at the end of the
+        // a ban layer that lags behind the configured lists carries a visible note at the end of the
         // line (the CLI spells the same marker); it is coloured as a warning and the tooltip says
         // what to do about it
-        var staleHosts = snapshot.Ban.HostsEntries > 0 && !snapshot.Ban.HostsCurrent;
+        var staleHosts = snapshot.Ban.Stale;
         var banDetail = snapshot.Ban.Detail ?? (snapshot.Ban.State switch
         {
             GuardState.Off => Loc.S("Main.Guard.Ban.Off"),

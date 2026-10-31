@@ -2343,7 +2343,8 @@ public class GuardTests : IDisposable
         File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
         var banOps = new FakeBanSystemOps
         {
-            Layers = new BanLayersState(1, [".claude.ai"], 2, ["160.79.104.0/21", "2607:6bc0::/48"]),
+            // what the cmdlets read back for the configured lists: the IPv4 prefix in the mask form
+            Layers = new BanLayersState(1, AppliedNamespaces(config), 2, ["160.79.104.0/255.255.248.0", "2607:6bc0::/48", "2607:6bc0:11::/48"]),
         };
         HostsFileBlock.Apply(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.BanHosts);
         var service = MakeService(
@@ -2360,9 +2361,57 @@ public class GuardTests : IDisposable
         Assert.True(snapshot.Ban.HostsCurrent);
         Assert.Equal(GuardState.On, snapshot.Policy.State);
         Assert.Equal(GuardState.On, snapshot[GuardKind.SystemProxy].State);
-        Assert.Contains("NRPT: 1 rule(s) on 1 namespaces", snapshot[GuardKind.LocalBan].Detail);
+        Assert.Contains($"NRPT: 1 rule(s) on {config.BanTrees.Count * 2} namespaces;", snapshot[GuardKind.LocalBan].Detail);
+        Assert.DoesNotContain("stale", snapshot[GuardKind.LocalBan].Detail);
         Assert.Contains("egressProxyUrl=http://127.0.0.1:18082", snapshot[GuardKind.EgressPolicy].Detail);
     }
+
+    /// <summary>The NRPT namespaces the apply writes for the configured subtrees.</summary>
+    private static List<string> AppliedNamespaces(AppConfig config) =>
+        config.BanTrees.SelectMany(t => new[] { t, "." + t }).ToList();
+
+    [Fact]
+    public async Task ABanLaggingBehindTheConfigIsPartialNotOn()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-stale-layers");
+        File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost" + Environment.NewLine);
+        HostsFileBlock.Apply(config.Guard.HostsFile, config.Guard.HostsBeginMarker, config.Guard.HostsEndMarker, config.Guard.HostsComment, config.BanHosts);
+        var subnets = new List<string> { "160.79.104.0/255.255.248.0", "2607:6bc0::/48", "2607:6bc0:11::/48" };
+        var banOps = new FakeBanSystemOps { Layers = new BanLayersState(1, AppliedNamespaces(config), 2, subnets) };
+        var service = MakeService(config, new FakeEgressPolicyStore(), banOps, new FakeSystemProxyStore(), new FakeElevatedRunner(), out _);
+        Assert.Equal(GuardState.On, (await service.GetStatusAsync(CancellationToken.None)).Ban.State);
+
+        // a subtree added to the config since the ban was applied
+        config.Claude.BanTrees.Add("added.example");
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(GuardState.Partial, snapshot.Ban.State);
+        Assert.False(snapshot.Ban.NrptCurrent);
+        Assert.True(snapshot.Ban.Stale);
+        Assert.Contains("namespaces (stale list)", snapshot[GuardKind.LocalBan].Detail);
+
+        // a subnet added to the config
+        config.Claude.BanTrees.Remove("added.example");
+        config.Claude.FirewallSubnets.Add("198.51.100.0/24");
+        snapshot = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(GuardState.Partial, snapshot.Ban.State);
+        Assert.False(snapshot.Ban.FirewallCurrent);
+
+        // a hosts name added to the config
+        config.Claude.FirewallSubnets.Remove("198.51.100.0/24");
+        config.Claude.BanHosts.Add("added.example");
+        snapshot = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(GuardState.Partial, snapshot.Ban.State);
+        Assert.False(snapshot.Ban.HostsCurrent);
+    }
+
+    [Theory]
+    [InlineData("160.79.104.0/255.255.248.0", "160.79.104.0/21")]
+    [InlineData("192.0.2.7", "192.0.2.7/32")]
+    [InlineData("2001:0db8:0000::/48", "2001:db8::/48")]
+    [InlineData("LocalSubnet", "LocalSubnet")]
+    public void FirewallSubnetsCompareAcrossSpellings(string applied, string expected) =>
+        Assert.Equal(BanLayersMatch.NormalizeSubnet(expected), BanLayersMatch.NormalizeSubnet(applied));
 
     [Fact]
     public async Task AMalformedSettingsFileIsReportedAsUnknownNotAFailure()

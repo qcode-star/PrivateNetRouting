@@ -394,10 +394,10 @@ public class DiagnosticsTests : IDisposable
             config.Guard.HostsBeginMarker,
             config.Guard.HostsEndMarker,
             config.Guard.HostsComment,
-            ["claude.ai"]);
+            config.BanHosts);
         var banOps = new FakeBanSystemOps
         {
-            Layers = new BanLayersState(1, ["claude.ai"], 3, ["160.79.104.0/21"]),
+            Layers = new BanLayersState(1, config.BanTrees.SelectMany(t => new[] { t, "." + t }).ToList(), 3, [.. config.FirewallSubnets]),
         };
         var policy = new FakeEgressPolicyStore
         {
@@ -419,7 +419,7 @@ public class DiagnosticsTests : IDisposable
         var (ban, policyStatus) = await guard.GetCoreStatusAsync(CancellationToken.None);
 
         Assert.Equal(GuardState.On, ban.State);
-        Assert.Equal(1, ban.HostsEntries);
+        Assert.Equal(config.BanHosts.Count, ban.HostsEntries);
         Assert.Equal(GuardState.On, policyStatus.State);
         Assert.Equal("status", Assert.Single(banOps.Calls));
     }

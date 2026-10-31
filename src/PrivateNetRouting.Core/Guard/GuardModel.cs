@@ -46,6 +46,15 @@ public sealed record LocalBanStatus(
     string? Detail = null)
 {
     public static readonly LocalBanStatus Off = new(GuardState.Off, 0, false, 0, [], 0, []);
+
+    /// <summary>The NRPT rule covers exactly the configured subtrees (no rule — nothing to be stale).</summary>
+    public bool NrptCurrent { get; init; } = true;
+
+    /// <summary>The firewall rules block exactly the configured subnets (no rule — nothing to be stale).</summary>
+    public bool FirewallCurrent { get; init; } = true;
+
+    /// <summary>Some applied layer lags behind the config: "enable" again refreshes it.</summary>
+    public bool Stale => (HostsEntries > 0 && !HostsCurrent) || !NrptCurrent || !FirewallCurrent;
 }
 
 /// <summary>Reading HKLM\Policies\Claude requires no rights; writing is administrator-only.</summary>
