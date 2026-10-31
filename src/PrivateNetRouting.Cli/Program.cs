@@ -841,9 +841,9 @@ internal static class Program
             return 1;
         }
 
-        // one stopper is enough — the same self-check the detached worker applies to itself
+        // one stopper is enough: the foreground form refuses beside any running stopper
         var refusal = WatchdogWorker.RefusalReason(
-            runtime.WatchdogControl.FindStopperPids(), Environment.ProcessId, state);
+            runtime.WatchdogControl.FindStoppers(), Environment.ProcessId, selfForeground: true, state);
         if (refusal is not null)
         {
             Console.WriteLine($"watchdog: {refusal}");

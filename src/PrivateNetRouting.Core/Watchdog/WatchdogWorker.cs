@@ -14,14 +14,24 @@ namespace PrivateNetRouting.Core.Watchdog;
 public static class WatchdogWorker
 {
     /// <summary>
-    /// Why a freshly started worker must not run (null — it runs). A stopper exists only over a
+    /// Why a freshly started stopper must not run (null — it runs). A stopper exists only over a
     /// live chain, so a chain that is stopped at start means the chain went down after the spawn;
-    /// and one stopper is enough: when several are alive the lowest pid stays (two workers that
-    /// started together both see each other, so the rule must pick the same survivor for both).
+    /// and one stopper is enough. The foreground `pnr watchdog` refuses beside any other stopper.
+    /// A detached worker steps aside only for a worker with a lower pid (two workers that started
+    /// together both see each other, so the rule must pick the same survivor for both); it does
+    /// not yield to a foreground stopper, which refuses on its side — a worker and a `pnr watchdog`
+    /// started together leave the worker, never neither of them. Pids are not monotonic on
+    /// Windows, so the order between the two forms cannot rest on them.
     /// </summary>
-    public static string? RefusalReason(IReadOnlyList<int> stopperPids, int selfPid, ChainState chain)
+    public static string? RefusalReason(IReadOnlyList<RunningStopper> stoppers, int selfPid, bool selfForeground, ChainState chain)
     {
-        if (stopperPids.Any(pid => pid != selfPid && pid < selfPid))
+        var others = stoppers.Where(stopper => stopper.Pid != selfPid).ToList();
+        if (selfForeground && others.Count > 0)
+        {
+            return $"another stopper is already watching this chain (pid {string.Join(", ", others.Select(stopper => stopper.Pid))})";
+        }
+
+        if (!selfForeground && others.Any(stopper => !stopper.Foreground && stopper.Pid < selfPid))
         {
             return "another stopper is already watching this chain";
         }
@@ -37,8 +47,9 @@ public static class WatchdogWorker
         try
         {
             var refusal = RefusalReason(
-                runtime.WatchdogControl.FindStopperPids(),
+                runtime.WatchdogControl.FindStoppers(),
                 Environment.ProcessId,
+                selfForeground: false,
                 await runtime.Chain.GetStateAsync(stop).ConfigureAwait(false));
             if (refusal is not null)
             {

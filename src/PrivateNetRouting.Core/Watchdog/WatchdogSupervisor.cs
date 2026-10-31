@@ -55,13 +55,26 @@ public sealed class WatchdogSupervisor(
     /// installation: another installation's worker carries the same image name and marker.
     /// </summary>
     public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder, string? ourDirectory = null) =>
+        FindStoppers(finder, ourDirectory).Select(stopper => stopper.Pid).ToList();
+
+    /// <summary>The running stoppers (as FindStopperPids) with their form: the foreground `pnr watchdog` or a detached worker.</summary>
+    public static IReadOnlyList<RunningStopper> FindStoppers(IProcessFinder finder, string? ourDirectory = null) =>
         WorkerHostNames.SelectMany(name => finder.Find(name, WorkerMarker).Select(p => (Name: name, Process: p)))
             .Concat(finder.Find(CliProcessName, CliCommand).Select(p => (Name: CliProcessName, Process: p)))
             .Where(found => IsStopperCommandLine(found.Name, found.Process.CommandLine))
             .Where(found => IsOurInstallation(found.Process.CommandLine, ourDirectory ?? Path.GetDirectoryName(Environment.ProcessPath)))
-            .Select(found => found.Process.Id)
-            .Distinct()
+            .DistinctBy(found => found.Process.Id)
+            .Select(found => new RunningStopper(found.Process.Id, IsForegroundCommandLine(found.Name, found.Process.CommandLine)))
             .ToList();
+
+    /// <summary>The foreground CLI form: `pnr watchdog` (the CLI with the worker marker is a detached worker).</summary>
+    internal static bool IsForegroundCommandLine(string processName, string commandLine)
+    {
+        var arguments = SplitArguments(commandLine);
+        return string.Equals(processName, CliProcessName, StringComparison.OrdinalIgnoreCase)
+            && arguments.Count >= 2
+            && arguments[1] == CliCommand;
+    }
 
     /// <summary>
     /// The stopper's executable lives in this installation (the same directory as this process's
@@ -184,6 +197,9 @@ public sealed class WatchdogSupervisor(
     }
 
     public IReadOnlyList<int> FindStopperPids() => FindStopperPids(processes, Path.GetDirectoryName(_currentExePath()));
+
+    /// <summary>The running stoppers of this installation with their form.</summary>
+    public IReadOnlyList<RunningStopper> FindStoppers() => FindStoppers(processes, Path.GetDirectoryName(_currentExePath()));
 
     public bool IsRunning() => FindStopperPids().Count > 0;
 
@@ -378,3 +394,6 @@ public sealed class WatchdogSupervisor(
         List<int> OtherStopperPids() => FindStopperPids().Where(pid => pid != self).ToList();
     }
 }
+
+/// <summary>A running idle stopper: its pid and whether it is the foreground `pnr watchdog` (otherwise a detached worker).</summary>
+public sealed record RunningStopper(int Pid, bool Foreground);

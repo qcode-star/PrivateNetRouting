@@ -234,10 +234,47 @@ public class WatchdogSupervisorTests : IDisposable
         var up = new ChainState(true, true, true, "Running", true, true);
         var stopped = new ChainState(false, false, false, null, false, false);
 
-        Assert.Null(WatchdogWorker.RefusalReason([50], 50, up)); // alone
-        Assert.Null(WatchdogWorker.RefusalReason([50, 60], 50, up)); // the lowest pid stays
-        Assert.NotNull(WatchdogWorker.RefusalReason([50, 60], 60, up)); // the higher one steps aside
-        Assert.NotNull(WatchdogWorker.RefusalReason([50], 50, stopped)); // nothing to watch
+        RunningStopper Worker(int pid) => new(pid, Foreground: false);
+
+        Assert.Null(WatchdogWorker.RefusalReason([Worker(50)], 50, false, up)); // alone
+        Assert.Null(WatchdogWorker.RefusalReason([Worker(50), Worker(60)], 50, false, up)); // the lowest pid stays
+        Assert.NotNull(WatchdogWorker.RefusalReason([Worker(50), Worker(60)], 60, false, up)); // the higher one steps aside
+        Assert.NotNull(WatchdogWorker.RefusalReason([Worker(50)], 50, false, stopped)); // nothing to watch
+    }
+
+    /// <summary>
+    /// Pids are not monotonic: a `pnr watchdog` with a lower pid than a running worker used to
+    /// pass the lowest-pid rule and run beside it. The foreground form refuses beside any stopper,
+    /// the worker never yields to a foreground one — together they leave exactly the worker.
+    /// </summary>
+    [Fact]
+    public void ForegroundStopperRefusesBesideAWorkerWhateverThePids()
+    {
+        var up = new ChainState(true, true, true, "Running", true, true);
+        var worker = new RunningStopper(500, Foreground: false);
+        var cli = new RunningStopper(300, Foreground: true);
+
+        Assert.NotNull(WatchdogWorker.RefusalReason([cli, worker], 300, selfForeground: true, up));
+        Assert.Null(WatchdogWorker.RefusalReason([cli, worker], 500, selfForeground: false, up));
+        Assert.Null(WatchdogWorker.RefusalReason([cli], 300, selfForeground: true, up)); // alone
+    }
+
+    [Fact]
+    public void FindStoppersTellsTheForegroundFormFromTheWorkers()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["PrivateNetRouting.App.exe"] = [new(11, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker")];
+        finder.ByName["pnr.exe"] =
+        [
+            new(22, @"""C:\app\pnr.exe"" watchdog"),
+            new(23, @"""C:\app\pnr.exe"" --watchdog-worker"),
+        ];
+
+        var stoppers = WatchdogSupervisor.FindStoppers(finder, @"C:\app");
+
+        Assert.Equal(
+            [new RunningStopper(11, false), new RunningStopper(22, true), new RunningStopper(23, false)],
+            stoppers.OrderBy(stopper => stopper.Pid));
     }
 
     [Fact]
