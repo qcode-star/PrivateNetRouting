@@ -524,7 +524,9 @@ public class ElevatedHelperTests : IDisposable
         var name = $"pnr-test-{Guid.NewGuid():N}";
         var socket = $@"\\.\pipe\{name}";
         var pumpReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = Task.Run(async () =>
+        // a dedicated thread, not the pool: a starved pool would leave the pipe unbound for the
+        // whole probe window and the helper would rightly call a live daemon "not there"
+        var pump = new Thread(() =>
         {
             try
             {
@@ -532,14 +534,19 @@ public class ElevatedHelperTests : IDisposable
                 {
                     using var server = new NamedPipeServerStream(name, PipeDirection.In);
                     pumpReady.TrySetResult();
-                    await server.WaitForConnectionAsync();
+                    server.WaitForConnection();
                 }
             }
             catch (Exception)
             {
                 // the test ended: the pump stops with it
             }
-        });
+        })
+        {
+            IsBackground = true,
+            Name = "pnr-test-pipe-pump",
+        };
+        pump.Start();
         await pumpReady.Task.WaitAsync(TimeSpan.FromSeconds(10)); // the pipe exists before the stop runs
         var resultFile = Path.Combine(PinnedDir, "elevated-stop-chain=0a1b2c3d.result");
         var code = await Task.Run(() => ElevatedChainCommands.Execute(
