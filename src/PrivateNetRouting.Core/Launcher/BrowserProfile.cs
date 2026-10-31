@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Net.Socks;
@@ -61,7 +62,7 @@ public static class BrowserEgress
 /// <see cref="FirefoxTermsOfUseVersion"/>); Chromium keeps no proxy in the profile at all
 /// (the address rides --proxy-server), so only the WebRTC policy is seeded for it.
 /// </summary>
-public static class BrowserProfileFiles
+public static partial class BrowserProfileFiles
 {
     public const string FirefoxUserJsName = "user.js";
 
@@ -179,14 +180,32 @@ public static class BrowserProfileFiles
     }
 
     /// <summary>
-    /// The everyday data of either family: Chromium's user-data-dir (Local State at the root), a
-    /// Chromium profile folder (Default\Preferences), a Firefox profile (prefs.js/places.sqlite).
+    /// The everyday data of either family: Chromium's user-data-dir (Local State at the root, or a
+    /// Default\Preferences under it), a Chromium profile folder itself (Preferences or Secure
+    /// Preferences at its root, or a Default/Profile N folder of a user-data-dir), a Firefox
+    /// profile (prefs.js/places.sqlite).
     /// </summary>
     private static bool LooksLikeBrowserUserData(string directory) =>
         File.Exists(Path.Combine(directory, "Local State"))
         || File.Exists(Path.Combine(directory, ChromiumPreferencesRelativePath))
+        || File.Exists(Path.Combine(directory, "Preferences"))
+        || File.Exists(Path.Combine(directory, "Secure Preferences"))
+        || IsChromiumProfileFolderOfUserData(directory)
         || File.Exists(Path.Combine(directory, FirefoxPrefsJsName))
         || File.Exists(Path.Combine(directory, "places.sqlite"));
+
+    /// <summary>A Default/Profile N folder whose parent is a Chromium user-data-dir (Local State).</summary>
+    private static bool IsChromiumProfileFolderOfUserData(string directory)
+    {
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(directory));
+        var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
+        return parent is not null
+            && (name.Equals("Default", StringComparison.OrdinalIgnoreCase) || ChromiumProfileName().IsMatch(name))
+            && File.Exists(Path.Combine(parent, "Local State"));
+    }
+
+    [GeneratedRegex(@"^Profile \d+$", RegexOptions.IgnoreCase)]
+    private static partial Regex ChromiumProfileName();
 
     /// <summary>
     /// prefs.js seed for a profile that has never been started: the Terms-of-Use page is accepted

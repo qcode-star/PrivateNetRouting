@@ -283,13 +283,43 @@ public class BrowserProfileTests : IDisposable
     }
 
     [Fact]
-    public void AChromiumProfileFolderWithoutOurMarkerIsRefused()
+    public void AChromiumUserDataDirWithoutOurMarkerIsRefused()
     {
-        var dir = ProfileDir("chrome-profile-folder");
+        var dir = ProfileDir("chrome-user-data");
         Directory.CreateDirectory(Path.Combine(dir, "Default"));
         File.WriteAllText(Path.Combine(dir, "Default", "Preferences"), "{}");
 
-        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(dir, dir));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(dir));
+    }
+
+    /// <summary>
+    /// A Chromium profile folder itself (User Data\Default, User Data\Profile 1) is the everyday
+    /// data too: Preferences sits at its root, and a Default/Profile N folder of a user-data-dir
+    /// is refused even before the browser wrote its Preferences.
+    /// </summary>
+    [Fact]
+    public void AChromiumProfileFolderInsideAUserDataDirIsRefused()
+    {
+        var userData = ProfileDir("chrome-everyday-user-data");
+        Directory.CreateDirectory(userData);
+        File.WriteAllText(Path.Combine(userData, "Local State"), "{}");
+        var defaultProfile = Path.Combine(userData, "Default");
+        Directory.CreateDirectory(defaultProfile);
+        File.WriteAllText(Path.Combine(defaultProfile, "Preferences"), "{}");
+        var secondProfile = Path.Combine(userData, "Profile 1");
+        Directory.CreateDirectory(secondProfile);
+        File.WriteAllText(Path.Combine(secondProfile, "Secure Preferences"), "{}");
+        var bareProfile = Path.Combine(userData, "Profile 2");
+        Directory.CreateDirectory(bareProfile);
+        File.WriteAllText(Path.Combine(bareProfile, "Bookmarks"), "{}");
+        var copied = ProfileDir("chrome-copied-profile"); // a profile folder copied out of its user-data-dir
+        Directory.CreateDirectory(copied);
+        File.WriteAllText(Path.Combine(copied, "Preferences"), "{}");
+
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(defaultProfile));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(secondProfile));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(bareProfile));
+        Assert.Equal(BrowserProfileFolderKind.BrowserUserData, BrowserProfileFiles.ClassifyFolder(copied));
     }
 
     [Fact]
