@@ -460,6 +460,14 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     public Task StopAsync() => ProxyControl.StopAsync();
 
+    /// <summary>
+    /// The in-process proxy handed over to a detached worker (the tray "Exit", the CLI commands
+    /// that leave a client behind) under the chain operation lock, bounded by
+    /// forwardProxy.handoverLockWaitSeconds.
+    /// </summary>
+    public Task HandOverProxyAsync(CancellationToken ct) =>
+        Chain.HandOverProxyAsync(ProxyControl.DetachAsync, TimeSpan.FromSeconds(Config.ForwardProxy.HandoverLockWaitSeconds), ct);
+
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
     public void ReloadConfig() => ProxyConfigNeedsRestart = AppConfigStore.ReloadInto(Config);
 

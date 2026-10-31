@@ -161,7 +161,10 @@ Architecture notes:
   "Exit" with the chain kept hands an in-process listener over to such a worker
   (`ForwardProxySupervisor.DetachAsync`), and so do the CLI commands that leave a client behind
   (`pnr launch`, `pnr codex launch`, `pnr browser`, `pnr chain up`) before they exit — a failed
-  handover is a non-zero exit; the idle
+  handover is a non-zero exit; the handover runs under the chain operation lock
+  (`ChainSupervisor.HandOverProxyAsync`), so a stop of another process never finds the listener
+  mid-handover, and waits for it at most `forwardProxy.handoverLockWaitSeconds` — past that it
+  hands over without the lock (a warning), an exit never hangs behind a login; the idle
   stopper started from the GUI — a separate worker (`--watchdog-worker`) that outlives the exit on
   its own and disappears after the idle stop (the CLI form `pnr watchdog` — foreground, in the
   terminal).

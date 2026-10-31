@@ -290,7 +290,7 @@ internal static class Program
     {
         try
         {
-            await runtime.ProxyControl.DetachAsync(CancellationToken.None);
+            await runtime.HandOverProxyAsync(CancellationToken.None);
             return true;
         }
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)

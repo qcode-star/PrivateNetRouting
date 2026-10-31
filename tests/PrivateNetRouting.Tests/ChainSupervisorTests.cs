@@ -94,6 +94,44 @@ public class ChainSupervisorTests : IDisposable
         Assert.Contains(steps.Steps, step => step.Component == "Lock" && step.Status == ChainStepStatus.Active);
     }
 
+    /// <summary>
+    /// The proxy handover waits for another process's chain operation (a stop must not find the
+    /// listener mid-handover) and runs as soon as that operation is over.
+    /// </summary>
+    [Fact]
+    public async Task ProxyHandoverWaitsForAnotherProcessesChainOperation()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create();
+        var detached = false;
+
+        var handover = supervisor.HandOverProxyAsync(_ => { detached = true; return Task.CompletedTask; }, TimeSpan.FromSeconds(30), CancellationToken.None);
+        await Task.Delay(300);
+        Assert.False(detached); // the other process's stop is still running
+
+        holder.Dispose();
+        await handover.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(detached);
+    }
+
+    /// <summary>An exit does not hang behind a long operation (a login): past the bound the handover runs without the lock.</summary>
+    [Fact]
+    public async Task ProxyHandoverStopsWaitingAfterTheBound()
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(_logPath)!, "chain-operation.lock");
+        using var holder = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        var supervisor = Create();
+        var detached = false;
+
+        await supervisor.HandOverProxyAsync(_ => { detached = true; return Task.CompletedTask; }, TimeSpan.FromMilliseconds(300), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(detached);
+        using var reader = new StreamReader(new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        Assert.Contains("handing the proxy over without waiting", reader.ReadToEnd());
+    }
+
     /// <summary>A lock file that cannot be opened at all is not "held": the operation runs without it at once.</summary>
     [Fact]
     public async Task AnUnopenableCrossProcessLockIsLoggedAndIgnoredAtOnce()

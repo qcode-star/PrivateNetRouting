@@ -287,6 +287,50 @@ public sealed class ChainSupervisor(
         }
     }
 
+    /// <summary>
+    /// Hands the in-process proxy over to a detached worker (<paramref name="detach"/>) under the
+    /// chain operation lock, so a stop of another process (the idle stopper, `pnr chain down`)
+    /// never interleaves with it: otherwise its stop request finds the listener mid-handover and
+    /// the fresh worker outlives the stopped chain. The handover is part of an exit (the tray
+    /// "Exit", a CLI command leaving its client behind), so the wait is bounded by
+    /// <paramref name="lockWait"/>: an operation that holds the lock longer (a bring-up waiting for
+    /// a login) does not keep the exit hanging — the proxy is then handed over without the lock,
+    /// with a warning, as before the lock existed.
+    /// </summary>
+    public Task HandOverProxyAsync(Func<CancellationToken, Task> detach, TimeSpan lockWait, CancellationToken ct) =>
+        Task.Run(() => HandOverSerializedAsync(detach, lockWait, ct));
+
+    private async Task HandOverSerializedAsync(Func<CancellationToken, Task> detach, TimeSpan lockWait, CancellationToken ct)
+    {
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        wait.CancelAfter(lockWait);
+        var inProcess = false;
+        IDisposable crossProcess = NoOperationLock.Instance;
+        try
+        {
+            try
+            {
+                await _operation.WaitAsync(wait.Token).ConfigureAwait(false);
+                inProcess = true;
+                crossProcess = await AcquireOperationLockAsync(null, wait.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                log.Warn($"chain: another chain operation still runs after {lockWait.TotalSeconds:0}s, handing the proxy over without waiting for it");
+            }
+
+            await detach(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            crossProcess.Dispose();
+            if (inProcess)
+            {
+                _operation.Release();
+            }
+        }
+    }
+
     /// <summary>The progress component of the wait for another process's operation (not a chain link).</summary>
     public const string LockComponent = "Lock";
 

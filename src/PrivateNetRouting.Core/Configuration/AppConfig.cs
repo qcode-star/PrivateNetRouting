@@ -681,6 +681,12 @@ public sealed class ForwardProxyConfig
     public int WorkerStopWaitSeconds { get; set; } = 10;
 
     /// <summary>
+    /// How many seconds the proxy handover to a detached worker waits for another chain operation
+    /// (the chain lock) before it hands over without waiting: an exit must not hang behind a login.
+    /// </summary>
+    public int HandoverLockWaitSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Optional extra DoH resolvers ("http(s)://IP:PORT/dns-query") on top of netmap discovery
     /// (tailscale mode only; in the socks5 mode DoH is not used at all).
     /// </summary>

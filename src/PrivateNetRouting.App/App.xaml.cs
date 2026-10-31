@@ -356,7 +356,7 @@ public partial class App : Application
                 }
                 else
                 {
-                    await runtime.ProxyControl.DetachAsync(CancellationToken.None);
+                    await runtime.HandOverProxyAsync(CancellationToken.None);
                 }
             }
             catch (Exception ex)
