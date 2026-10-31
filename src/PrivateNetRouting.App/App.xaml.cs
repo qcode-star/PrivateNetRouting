@@ -322,6 +322,10 @@ public partial class App : Application
 
         _exitStarted = true;
         _exiting = true;
+        // disposing the tray's ContextMenuStrip inside its own Click handler is the classic
+        // WinForms ObjectDisposedException path: yield first, so the teardown is posted to the
+        // dispatcher and runs after the menu's click message has been fully processed
+        await Task.Yield();
         _tray?.Dispose();
         _tray = null;
         var runtime = _runtime;
