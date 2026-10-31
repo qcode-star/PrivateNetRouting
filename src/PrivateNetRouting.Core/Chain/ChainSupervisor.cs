@@ -635,9 +635,12 @@ public sealed class ChainSupervisor(
             }
         }
 
-        // a rollback leaves the links that were up before the bring-up; it ends the whole chain
-        // only when nothing of ours is running any more — the same end state a full stop must reach
-        var wholeChain = NothingOfOursRunning();
+        // a full stop whose every step succeeded ends the whole chain even when the proxy port is
+        // still held — the proxy step already decided that holder is not ours (a foreign process,
+        // an elevated owner, a worker that would not die) and warned about it. A rollback leaves
+        // the links that were up before the bring-up; it, and a stop with a failed step, end the
+        // whole chain only when nothing of ours is running any more
+        var wholeChain = (raised is null && failures.Count == 0) || NothingOfOursRunning();
         log.Info(failures.Count == 0
             ? wholeChain
                 ? "chain: stopped"

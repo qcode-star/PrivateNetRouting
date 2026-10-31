@@ -530,6 +530,26 @@ public class ChainSupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task AFullStopFiresTheHookWhenAForeignListenerKeepsTheProxyPort()
+    {
+        var hookRan = false;
+        var supervisor = Create(
+            proxy: new FakeProxy(_calls) { IsRunning = true, PortStaysHeld = true },
+            daemon: new FakeDaemon(_calls) { IsHttpListening = true, IsProcessAlive = true },
+            keeper: new FakeKeeper(_calls) { IsRunning = true },
+            chainStopped: _ =>
+            {
+                hookRan = true;
+                return Task.CompletedTask;
+            });
+
+        await supervisor.StopAsync(null, CancellationToken.None);
+
+        Assert.Contains("daemon.kill", _calls);
+        Assert.True(hookRan); // the stoppers do not outlive a full stop over a foreign port holder
+    }
+
+    [Fact]
     public async Task StopRaisedLeavesTheLinksThatWereUpBefore()
     {
         var stoppedHooks = 0;
@@ -1161,9 +1181,12 @@ public class ChainSupervisorTests : IDisposable
             return Task.CompletedTask;
         }
 
+        /// <summary>The port stays held after the stop (a foreign listener the stop leaves alone).</summary>
+        public bool PortStaysHeld { get; init; }
+
         public Task StopAsync()
         {
-            IsRunning = false;
+            IsRunning = PortStaysHeld;
             calls.Add("proxy.stop");
             return Task.CompletedTask;
         }
