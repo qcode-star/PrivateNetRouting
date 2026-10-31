@@ -217,19 +217,43 @@ public class DaemonStopTests : IDisposable
         var name = $"pnr-test-{Guid.NewGuid():N}";
         var config = Config();
         config.Socket = $@"\\.\pipe\{name}";
-        using var server = new NamedPipeServerStream(name, PipeDirection.In);
-        _ = Task.Run(server.WaitForConnection);
-        var ports = new FakePortProbe();
-        using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
-        var daemon = new SidecarDaemon(
-            config,
-            ports,
-            new FakeFinderByName(),
-            log,
-            new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) => 0),
-            new FakeVersionProbe());
+        // the kill probes the pipe repeatedly (every 200 ms for 3 s, then once more): keep a
+        // fresh listening instance for every probe, the way the real daemon serves its IPC pipe
+        var servers = new List<NamedPipeServerStream>();
+        try
+        {
+            for (var i = 0; i < 40; i++)
+            {
+                var server = new NamedPipeServerStream(name, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances);
+                servers.Add(server);
+                _ = Task.Run(server.WaitForConnection);
+            }
 
-        await Assert.ThrowsAsync<IOException>(() => daemon.KillAsync(CancellationToken.None));
+            var ports = new FakePortProbe();
+            using var log = new FileLog(Path.Combine(_dir, "daemon.log"));
+            var daemon = new SidecarDaemon(
+                config,
+                ports,
+                new FakeFinderByName(),
+                log,
+                new ElevatedRunner(config, log, elevatedBypass: true, executor: (_, _) => 0),
+                new FakeVersionProbe());
+
+            await Assert.ThrowsAsync<IOException>(() => daemon.KillAsync(CancellationToken.None));
+        }
+        finally
+        {
+            foreach (var server in servers)
+            {
+                try
+                {
+                    server.Dispose();
+                }
+                catch (IOException)
+                {
+                }
+            }
+        }
     }
 
     private sealed class FakeVersionProbe : ITailscaleVersionProbe
