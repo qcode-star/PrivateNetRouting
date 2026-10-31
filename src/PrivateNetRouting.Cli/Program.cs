@@ -558,7 +558,7 @@ internal static class Program
                     assumeYes = true;
                     break;
                 case "--url":
-                    if (i + 1 >= rest.Count)
+                    if (i + 1 >= rest.Count || rest[i + 1].StartsWith("--", StringComparison.Ordinal))
                     {
                         Console.Error.WriteLine("--url requires a value");
                         return 1;
