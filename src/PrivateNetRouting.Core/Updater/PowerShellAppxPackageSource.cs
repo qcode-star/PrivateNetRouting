@@ -30,7 +30,8 @@ public sealed class PowerShellAppxPackageSource(IPowerShellExecutor powershell, 
     {
         var script =
             "Get-AppxPackage -Name '" + packageName.Replace("'", "''") + "' | " +
-            "Sort-Object Version -Descending | " +
+            // [version] and not the bare property: a string sort puts 2.9.0.0 above 2.26454.2.0
+            "Sort-Object { if ($_.Version) { [version]$_.Version } else { [version]'0.0.0.0' } } -Descending | " +
             "Select-Object -First 1 -Property Name,Version,Publisher,InstallLocation,PackageFamilyName | " +
             "ConvertTo-Json -Compress";
         var (code, output) = await powershell.RunScriptAsync(script, ct);

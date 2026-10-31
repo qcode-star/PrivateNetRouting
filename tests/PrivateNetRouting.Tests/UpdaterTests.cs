@@ -7,6 +7,7 @@ using PrivateNetRouting.Core.Chain;
 using PrivateNetRouting.Core.Configuration;
 using PrivateNetRouting.Core.Logging;
 using PrivateNetRouting.Core.Runtime;
+using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
 
 namespace PrivateNetRouting.Tests;
@@ -720,6 +721,29 @@ public class UpdaterTests : IDisposable
     public void PackageJsonEmptyOutputMeansNoPackage(string json)
     {
         Assert.Null(PowerShellAppxPackageSource.ParsePackageJson(json));
+    }
+
+    /// <summary>A string Sort-Object puts 2.9.0.0 above 2.26454.2.0 — the script must cast to [version].</summary>
+    [Fact]
+    public async Task InstalledPackageQuerySortsByNumericVersion()
+    {
+        var scripts = new List<string>();
+        var source = new PowerShellAppxPackageSource(
+            new ScriptCapturingPowerShell(scripts, (0, """{"Name":"Claude","Version":"2.26454.2.0"}""")),
+            new FileLog(Path.Combine(_root, $"appx-{Guid.NewGuid():N}.log")));
+
+        await source.GetInstalledAsync("Claude", CancellationToken.None);
+
+        Assert.Contains(scripts, script => script.Contains("Sort-Object { if ($_.Version) { [version]$_.Version }", StringComparison.Ordinal));
+    }
+
+    private sealed class ScriptCapturingPowerShell(List<string> scripts, (int Code, string Output) answer) : IPowerShellExecutor
+    {
+        public Task<(int Code, string Output)> RunScriptAsync(string script, CancellationToken ct)
+        {
+            scripts.Add(script);
+            return Task.FromResult(answer);
+        }
     }
 
     [Fact]
