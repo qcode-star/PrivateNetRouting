@@ -69,10 +69,54 @@ public sealed class GuardService(
     {
         var (ban, policyStatus) = await GetCoreStatusAsync(ct);
 
-        var settingsStatus = settings.Read();
-        var codexStatus = codexSettings.Read();
-        var wslStatus = await wsl.ReadAsync(ct);
-        var sysProxyStatus = systemProxy.Read();
+        // one failing layer must not take the whole snapshot down (the WSL sync isolates per distro
+        // the same way): a throwing layer is reported as Unknown with the reason — a malformed
+        // settings file is surfaced (Q-02) and left alone
+        var expectedProxy = ClaudeEnvValues.WindowsProxyUrl(config);
+        var expectedNoProxy = ClaudeEnvValues.BuildNoProxy(config.BypassDomains);
+
+        ClaudeSettingsStatus settingsStatus;
+        try
+        {
+            settingsStatus = settings.Read();
+        }
+        catch (Exception ex)
+        {
+            settingsStatus = new ClaudeSettingsStatus(GuardState.Unknown, null, null, expectedProxy, expectedNoProxy, FileMissing: false)
+            {
+                Detail = ex.Message,
+            };
+        }
+
+        CodexSettingsStatus codexStatus;
+        try
+        {
+            codexStatus = codexSettings.Read();
+        }
+        catch (Exception ex)
+        {
+            codexStatus = new CodexSettingsStatus(GuardState.Unknown, null, FileMissing: false, EnvUpToDate: false) { Detail = ex.Message };
+        }
+
+        WslConfigStatus wslStatus;
+        try
+        {
+            wslStatus = await wsl.ReadAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            wslStatus = new WslConfigStatus(GuardState.Unknown, [], 0, null, $"failed to read: {ex.Message}");
+        }
+
+        SystemProxyStatus sysProxyStatus;
+        try
+        {
+            sysProxyStatus = systemProxy.Read();
+        }
+        catch (Exception ex)
+        {
+            sysProxyStatus = new SystemProxyStatus(false, null, null) { Detail = ex.Message };
+        }
 
         return new GuardSnapshot(
             ban,
@@ -110,7 +154,7 @@ public sealed class GuardService(
                 layers.FirewallRules,
                 layers.FirewallSubnets);
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException)
         {
             ban = UnknownBan(ex);
         }
@@ -181,8 +225,11 @@ public sealed class GuardService(
                 : string.Join("; ", wsl.Distros.Select(d =>
                     $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")} (claude script {(d.ScriptPort?.ToString() ?? "-")}, codex proxy env {(d.ProxyEnvPresent ? d.ProxyEnvPort?.ToString() ?? "present" : "missing")}){(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))
                 + (wsl.Warning is null ? "" : (wsl.Distros.Count == 0 && wsl.Reason.Length > 0 ? "; " : "") + wsl.Warning)),
-            new(GuardKind.SystemProxy, sysProxy.Enabled ? GuardState.On : GuardState.Off,
-                sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled"),
+            new(GuardKind.SystemProxy,
+                sysProxy.Detail is not null
+                    ? GuardState.Unknown
+                    : sysProxy.Enabled ? GuardState.On : GuardState.Off,
+                sysProxy.Detail ?? (sysProxy.Enabled ? $"enabled: {sysProxy.Server}" : "disabled")),
         ];
     }
 

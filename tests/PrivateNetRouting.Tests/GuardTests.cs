@@ -31,11 +31,19 @@ internal sealed class FakeBanSystemOps : IBanSystemOps
 {
     public BanLayersState Layers { get; set; } = BanLayersState.Empty;
 
+    /// <summary>Thrown by the status read instead of returning Layers (a broken cmdlet output).</summary>
+    public Exception? StatusError { get; set; }
+
     public List<string> Calls { get; } = [];
 
     public Task<BanLayersState> GetLayersStateAsync(CancellationToken ct)
     {
         Calls.Add("status");
+        if (StatusError is not null)
+        {
+            throw StatusError;
+        }
+
         return Task.FromResult(Layers);
     }
 
@@ -74,11 +82,22 @@ internal sealed class FakeSystemProxyStore : ISystemProxyStore
 {
     public SystemProxyStatus Status { get; set; } = new(false, null, null);
 
+    /// <summary>Thrown by Read instead of returning Status (an unreadable registry).</summary>
+    public Exception? ReadError { get; set; }
+
     public (string? Server, string? Bypass)? EnabledWith { get; private set; }
 
     public bool Disabled { get; private set; }
 
-    public SystemProxyStatus Read() => Status;
+    public SystemProxyStatus Read()
+    {
+        if (ReadError is not null)
+        {
+            throw ReadError;
+        }
+
+        return Status;
+    }
 
     public void Enable(string server, string bypass) => EnabledWith = (server, bypass);
 
@@ -2254,6 +2273,73 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.On, snapshot[GuardKind.SystemProxy].State);
         Assert.Contains("NRPT: 1 rule(s) on 1 namespaces", snapshot[GuardKind.LocalBan].Detail);
         Assert.Contains("egressProxyUrl=http://127.0.0.1:18082", snapshot[GuardKind.EgressPolicy].Detail);
+    }
+
+    [Fact]
+    public async Task AMalformedSettingsFileIsReportedAsUnknownNotAFailure()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-malformed");
+        config.Claude.SettingsPath = Path.Combine(_tempDir, "settings.json");
+        File.WriteAllText(config.Claude.SettingsPath, "[]"); // valid JSON, not an object (Q-02)
+        var service = MakeService(
+            config,
+            new FakeEgressPolicyStore(),
+            new FakeBanSystemOps(),
+            new FakeSystemProxyStore(),
+            new FakeElevatedRunner(),
+            out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Unknown, snapshot.Settings.State);
+        Assert.Equal(GuardState.Unknown, snapshot[GuardKind.ClaudeSettings].State);
+        Assert.Contains("not a JSON object", snapshot.Settings.Detail);
+    }
+
+    [Fact]
+    public async Task ABrokenBanLayerOutputIsReportedAsUnknown()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-broken-ban");
+        var service = MakeService(
+            config,
+            new FakeEgressPolicyStore(),
+            new FakeBanSystemOps
+            {
+                StatusError = new InvalidDataException("unexpected NRPT/firewall status output"),
+            },
+            new FakeSystemProxyStore(),
+            new FakeElevatedRunner(),
+            out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Unknown, snapshot.Ban.State);
+        Assert.Contains("unexpected NRPT/firewall status output", snapshot[GuardKind.LocalBan].Detail);
+    }
+
+    [Fact]
+    public async Task OneFailingLayerDoesNotTakeTheWholeSnapshotDown()
+    {
+        var config = new AppConfig();
+        config.ForwardProxy.Listen = "127.0.0.1:18082";
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-failing-layer");
+        var service = MakeService(
+            config,
+            new FakeEgressPolicyStore(),
+            new FakeBanSystemOps(),
+            new FakeSystemProxyStore { ReadError = new InvalidOperationException("registry is unreadable") },
+            new FakeElevatedRunner(),
+            out _);
+
+        var snapshot = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Unknown, snapshot[GuardKind.SystemProxy].State);
+        Assert.Contains("registry is unreadable", snapshot[GuardKind.SystemProxy].Detail);
+        Assert.Equal(GuardState.Off, snapshot.Ban.State); // the other layers are still read
     }
 
     [Fact]

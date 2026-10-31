@@ -104,8 +104,10 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
             var state = proxyOk && noProxyOk && drift.Count == 0 ? GuardState.On : GuardState.Partial;
             return new ClaudeSettingsStatus(state, proxy, noProxy, expectedProxy, expectedNoProxy, FileMissing: false, Drift: drift);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)
         {
+            // a malformed file (a non-object root included) is reported as Unknown and left alone
+            // (Q-02): the guard never rewrites what it could not read
             return new ClaudeSettingsStatus(GuardState.Unknown, null, null, expectedProxy, expectedNoProxy, FileMissing: false)
             {
                 Detail = ex.Message,

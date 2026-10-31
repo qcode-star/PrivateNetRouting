@@ -70,7 +70,7 @@ public sealed record ClaudeSettingsStatus(
     string? Detail = null,
     IReadOnlyList<string>? Drift = null);
 
-public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override);
+public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override, string? Detail = null);
 
 /// <summary>
 /// Status of the Codex settings layer: the flag is read from config.toml, the proxy env from the
