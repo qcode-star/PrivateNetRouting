@@ -644,6 +644,26 @@ public class BrowserLauncherTests : IDisposable
         Assert.False(launcher.IsOurBrowserRunning());
     }
 
+    /// <summary>
+    /// The profile is matched as a whole argument value: a sibling folder whose name only starts
+    /// with ours is another profile, and a configured path with a trailing separator matches the
+    /// launch, whose command line carries it trimmed.
+    /// </summary>
+    [Fact]
+    public void IsOurBrowserRunningMatchesTheWholeProfilePathOnly()
+    {
+        var config = ConfiguredConfig();
+        config.Browser.ExecutablePath = @"C:\fake\firefox.exe";
+        var launcher = Create(config);
+
+        _processes.Processes = [new FoundProcess(1, $"firefox.exe -profile \"{_profileDir}2\" --new-instance")];
+        Assert.False(launcher.IsOurBrowserRunning());
+
+        config.Browser.ProfileDir = _profileDir + Path.DirectorySeparatorChar;
+        _processes.Processes = [new FoundProcess(2, $"firefox.exe -profile \"{_profileDir}\" --new-instance")];
+        Assert.True(launcher.IsOurBrowserRunning());
+    }
+
     [Fact]
     public void IsOurBrowserRunningIsFalseWithoutAProfile()
     {

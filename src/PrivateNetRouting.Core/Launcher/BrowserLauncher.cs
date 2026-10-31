@@ -257,12 +257,14 @@ public sealed class BrowserLauncher(
         }
 
         var exeName = Path.GetFileNameWithoutExtension(config.Browser.ExecutablePath);
-        var profileDir = config.Browser.ProfileDir;
+        // the profile has to stand alone as an argument value — `…\profile` is not `…\profile2` —
+        // and without a trailing separator: the command line builder trims it from the launch
+        var profileDir = Path.TrimEndingDirectorySeparator(config.Browser.ProfileDir);
         try
         {
             return processFinder
                 .FindByNameContains(exeName)
-                .Any(p => p.CommandLine.Contains(profileDir, StringComparison.OrdinalIgnoreCase));
+                .Any(p => ProcessMatch.ContainsArgumentValue(p.CommandLine, profileDir));
         }
         catch (Exception ex)
         {
