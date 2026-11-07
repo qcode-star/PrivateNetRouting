@@ -98,10 +98,21 @@ public sealed class ClaudeSettingsGuard(AppConfig config)
             var env = ReadEnvOf(root);
             var proxy = ClaudeSettingsShape.Text(env?["HTTPS_PROXY"]);
             var noProxy = ClaudeSettingsShape.Text(env?["NO_PROXY"]);
-            var proxyOk = proxy == expectedProxy && ClaudeSettingsShape.Text(env?["HTTP_PROXY"]) == expectedProxy;
-            var noProxyOk = noProxy == expectedNoProxy;
-            var drift = ClaudeSettingsShape.DriftOf(root);
-            var state = proxyOk && noProxyOk && drift.Count == 0 ? GuardState.On : GuardState.Partial;
+            var proxyOk = ClaudeSettingsShape.ProxyEnvInSync(env, expectedProxy, expectedNoProxy);
+            var drift = ClaudeSettingsShape.DriftOf(root).ToList();
+            if (env is not null && !proxyOk)
+            {
+                // DriftOf carries only the config-independent keys; name here every maintained
+                // env key whose value is not the expected one, so a partial status is never
+                // unexplained
+                drift.AddRange(ClaudeSettingsShape.ProxyEnvKeys
+                    .Where(key => ClaudeSettingsShape.Text(env[key]) != expectedProxy));
+                drift.AddRange(ClaudeSettingsShape.NoProxyEnvKeys
+                    .Where(key => ClaudeSettingsShape.Text(env[key]) != expectedNoProxy));
+                drift.AddRange(ClaudeSettingsShape.ProxyFixedEnv.Keys
+                    .Where(key => ClaudeSettingsShape.Text(env[key]) != ClaudeSettingsShape.ProxyFixedEnv[key]));
+            }
+            var state = proxyOk && drift.Count == 0 ? GuardState.On : GuardState.Partial;
             return new ClaudeSettingsStatus(state, proxy, noProxy, expectedProxy, expectedNoProxy, FileMissing: false, Drift: drift);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)

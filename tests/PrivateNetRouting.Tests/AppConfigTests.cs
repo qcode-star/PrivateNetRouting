@@ -888,14 +888,18 @@ public class AppConfigTests : IDisposable
         var config = AppConfigStore.LoadOrCreate(_path);
         Assert.Contains("claude.ai", config.BanHosts);
         Assert.Contains("chatgpt.com", config.BanHosts);
-        Assert.Contains("anthropic.com", config.Claude.BanTrees); // the probe www.anthropic.com lives under the tree...
-        Assert.DoesNotContain("www.anthropic.com", config.Claude.BanHosts); // ...and stays absent from hosts
+        Assert.Contains("anthropic.com", config.Claude.BanTrees);
         Assert.Contains("openai.com", config.Codex.BanTrees);
         Assert.DoesNotContain("www.openai.com", config.Codex.BanHosts);
         Assert.Equal(config.Claude.BanHosts.Count + config.Codex.BanHosts.Count, config.BanHosts.Count);
         Assert.NotEmpty(config.Claude.FirewallSubnets);
         Assert.Empty(config.Codex.FirewallSubnets); // OpenAI rides on shared clouds
-        Assert.All(config.Guard.BanProbes, probe => Assert.StartsWith("www.", probe));
+        // every probe is a live NRPT check: under a ban tree, absent from the hosts lists
+        Assert.All(config.Guard.BanProbes, probe =>
+        {
+            Assert.Contains(probe[(probe.IndexOf('.') + 1)..], config.BanTrees);
+            Assert.DoesNotContain(probe, config.BanHosts);
+        });
     }
 
     [Fact]
@@ -984,7 +988,7 @@ public class AppConfigTests : IDisposable
         Assert.True(config.ForwardProxy.Enabled);
         Assert.Empty(config.BypassDomains);
         Assert.Empty(config.DirectTlds);
-        Assert.Equal(["www.anthropic.com", "www.openai.com"], config.Guard.BanProbes);
+        Assert.Equal(["probe.claudeusercontent.com", "www.openai.com"], config.Guard.BanProbes);
         Assert.Equal("api.anthropic.com", config.ForwardProxy.HealthCheckHost);
 
         // every key of the template must land in the model: a misplaced key is silently ignored

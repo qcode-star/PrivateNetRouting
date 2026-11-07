@@ -128,13 +128,24 @@ public sealed class ClaudeConfig
     /// </summary>
     public string SettingsPath { get; set; } = @"%USERPROFILE%\.claude\settings.json";
 
-    /// <summary>Exact names for the hosts layer of the local ban (public Anthropic domains).</summary>
+    /// <summary>
+    /// Exact names for the hosts layer of the local ban: the apexes plus every known public
+    /// subdomain (hosts carries finite names only — wildcard namespaces such as
+    /// *.claudeusercontent.com are closed by the NRPT trees and the firewall instead).
+    /// </summary>
     public List<string> BanHosts { get; set; } =
     [
         "claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com",
         "claudemcpclient.com", "claudemcpcontent.com", "claude.dev", "clau.de",
-        "api.anthropic.com", "console.anthropic.com", "statsig.anthropic.com",
-        "downloads.claude.ai", "a.claude.ai", "assets.claude.ai", "assets-proxy.anthropic.com",
+        "www.anthropic.com", "api.anthropic.com", "console.anthropic.com", "statsig.anthropic.com",
+        "auth.anthropic.com", "oauth.anthropic.com", "a-api.anthropic.com", "a-cdn.anthropic.com",
+        "api-staging.anthropic.com", "mcp-proxy.anthropic.com", "mcp-proxy-staging.anthropic.com",
+        "docs.anthropic.com", "support.anthropic.com", "status.anthropic.com", "portal.anthropic.com",
+        "api-pr-preview.anthropic.com", "assets-proxy.anthropic.com",
+        "www.claude.ai", "api.claude.ai", "a.claude.ai", "assets.claude.ai", "preview.claude.ai", "downloads.claude.ai",
+        "www.claude.com", "api.claude.com", "code.claude.com", "platform.claude.com", "releases.claude.com",
+        "docs.claude.com", "status.claude.com", "support.claude.com", "mcp.claude.com",
+        "gcal.mcp.claude.com", "gmail.mcp.claude.com", "slack.mcp.claude.com", "microsoft365.mcp.claude.com",
         "anthropic.qualtrics.com", "servd-anthropic-website.b-cdn.net",
     ];
 
@@ -613,9 +624,13 @@ public sealed class GuardConfig
 
     /// <summary>
     /// Live ban probes: each name must be inside the ban trees but absent from the hosts lists —
-    /// a clean NRPT check (one per app).
+    /// a clean NRPT check (one per app). The Claude probe rides the claudeusercontent.com
+    /// wildcard: any name under it resolves to Anthropic's own addresses when the ban is off,
+    /// and the namespace is unbounded — no finite hosts list can ever enumerate it, so nothing
+    /// is reserved in hosts for the probe; NRPT is what closes the wildcard, and the probe
+    /// verifies exactly that.
     /// </summary>
-    public List<string> BanProbes { get; set; } = ["www.anthropic.com", "www.openai.com"];
+    public List<string> BanProbes { get; set; } = ["probe.claudeusercontent.com", "www.openai.com"];
 }
 
 public sealed class LoggingConfig

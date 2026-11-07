@@ -339,8 +339,12 @@ public sealed class WslConfigGuard(
                     read.ProxyEnvPort);
             }
 
+            // the SyncClaude-and-unknown-proxy case returned above, so here a live sync always
+            // carries the expected proxy address
             var proxyOk = !config.Wsl.SyncClaude
-                || (read.SettingsProxy == expectedProxy && SettingsEnv(read, "HTTP_PROXY") == expectedProxy);
+                || (expectedProxy is { } proxy
+                    && read.SettingsProxy == proxy
+                    && ClaudeSettingsShape.ProxyEnvInSync(read.SettingsRoot?["env"] as JsonObject, proxy, expected.NoProxy));
             var ok = portOk && proxyOk && envOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,
@@ -1440,6 +1444,24 @@ public sealed class WslConfigGuard(
             if (read.SettingsPresent && SettingsEnv(read, "NO_PROXY") != expected.NoProxy)
             {
                 parts.Add("settings NO_PROXY differs from the config");
+            }
+
+            // the rest of the proxy env PNR maintains (all protocols, both cases, the fixed
+            // switches): one line naming every key that does not carry its expected value
+            if (expectedProxy is not null && read.SettingsRoot?["env"] is JsonObject settingsEnv)
+            {
+                var stale = ClaudeSettingsShape.ProxyEnvKeys
+                    .Where(key => key is not ("HTTPS_PROXY" or "HTTP_PROXY")
+                        && ClaudeSettingsShape.Text(settingsEnv[key]) != expectedProxy)
+                    .Concat(ClaudeSettingsShape.NoProxyEnvKeys
+                        .Where(key => ClaudeSettingsShape.Text(settingsEnv[key]) != expected.NoProxy))
+                    .Concat(ClaudeSettingsShape.ProxyFixedEnv.Keys
+                        .Where(key => ClaudeSettingsShape.Text(settingsEnv[key]) != ClaudeSettingsShape.ProxyFixedEnv[key]))
+                    .ToList();
+                if (stale.Count > 0)
+                {
+                    parts.Add("settings proxy env not in sync: " + string.Join(", ", stale));
+                }
             }
 
             if (read.ScriptUser != expected.User)

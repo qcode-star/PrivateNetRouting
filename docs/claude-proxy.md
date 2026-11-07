@@ -55,12 +55,26 @@ inside them, and the engine built into the desktop app reads the same file:
 ```json
 {
   "env": {
-    "HTTP_PROXY": "http://127.0.0.1:18081",
     "HTTPS_PROXY": "http://127.0.0.1:18081",
+    "HTTP_PROXY": "http://127.0.0.1:18081",
+    "https_proxy": "http://127.0.0.1:18081",
+    "http_proxy": "http://127.0.0.1:18081",
+    "ALL_PROXY": "http://127.0.0.1:18081",
+    "all_proxy": "http://127.0.0.1:18081",
+    "CLAUDE_CODE_HTTP_PROXY": "http://127.0.0.1:18081",
+    "CLAUDE_CODE_HTTPS_PROXY": "http://127.0.0.1:18081",
+    "grpc_proxy": "http://127.0.0.1:18081",
+    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS": "1",
     "NO_PROXY": "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com",
+    "no_proxy": "localhost,127.0.0.1,.local,corp.example.com,.corp.example.com",
     "DISABLE_TELEMETRY": "1",
     "DISABLE_ERROR_REPORTING": "1",
     "DISABLE_BUG_COMMAND": "1",
+    "DISABLE_FEEDBACK_COMMAND": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_GROWTHBOOK": "1",
+    "DO_NOT_TRACK": "1",
+    "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
@@ -72,10 +86,17 @@ inside them, and the engine built into the desktop app reads the same file:
 }
 ```
 
-`NO_PROXY` is curl-style: each zone is two entries — `zone` and `.zone` (subdomains) — unlike
-Chromium's `*.zone` spelling. The same file also carries the nonessential-traffic switches
-(telemetry, error reporting, the feedback paths and the session surveys off) and the attribution
-keys (no `Co-Authored-By` trailer on commits, no attribution line on pull requests). Edit
+The sync maintains this whole shape. The proxy URL goes into every spelling the engine reads:
+the documented pair (the lowercase variants are honored too) plus `ALL_PROXY`, the
+`CLAUDE_CODE_HTTP_PROXY`/`CLAUDE_CODE_HTTPS_PROXY` pair and `grpc_proxy` seen in the shipped
+binary — every embedded stack (HTTP and gRPC) reads its own key. `CLAUDE_CODE_PROXY_RESOLVES_HOSTS`
+hands name resolution to the proxy, so the names ride the CONNECT and the local hosts block stays
+out of the path. `NO_PROXY` is curl-style: each zone is two entries — `zone` and `.zone`
+(subdomains) — unlike Chromium's `*.zone` spelling. The same file also carries the
+nonessential-traffic switches (telemetry, error reporting, the feedback paths, the session
+surveys, feature-flag fetching, the auto-updater, the plugin-marketplace auto-install) and the
+attribution keys (no `Co-Authored-By` trailer on commits, no attribution line on pull requests).
+Edit
 surgically: preserve every other key of the file, and keep a timestamped backup before a rewrite —
 the file belongs to Claude, not to the proxy setup.
 

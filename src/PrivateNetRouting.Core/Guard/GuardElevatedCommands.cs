@@ -110,7 +110,7 @@ public static class GuardElevatedCommands
             ops.ApplyNrptAsync(CancellationToken.None).GetAwaiter().GetResult();
             ops.ApplyFirewallAsync(CancellationToken.None).GetAwaiter().GetResult();
             FlushTolerantly(ops, log);
-            var probes = guard.BanProbes.Count > 0 ? guard.BanProbes : ["www.anthropic.com"];
+            var probes = guard.BanProbes.Count > 0 ? guard.BanProbes : ["probe.claudeusercontent.com"];
             var blocked = probes.ToDictionary(probe => probe, probe => ProbeBlocked(probe));
             if (blocked.Any(pair => pair.Value == false))
             {

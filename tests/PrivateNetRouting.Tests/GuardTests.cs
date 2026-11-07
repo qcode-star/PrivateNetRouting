@@ -591,9 +591,26 @@ public class GuardTests : IDisposable
         var env = json["env"]!;
         Assert.Equal("bar", (string?)env["FOO"]); // foreign keys survive
         Assert.Equal("opus", (string?)json["model"]);
+        // the proxy env in every spelling the engine reads (documented and binary-seen)
+        foreach (var key in ClaudeSettingsShape.ProxyEnvKeys)
+        {
+            Assert.Equal("http://127.0.0.1:18082", (string?)env[key]);
+        }
+
+        foreach (var key in ClaudeSettingsShape.NoProxyEnvKeys)
+        {
+            Assert.Equal("localhost,127.0.0.1,.local,corp.example.com,.corp.example.com", (string?)env[key]);
+        }
+
+        Assert.Equal("1", (string?)env["CLAUDE_CODE_PROXY_RESOLVES_HOSTS"]);
         Assert.Equal("1", (string?)env["DISABLE_TELEMETRY"]);
         Assert.Equal("1", (string?)env["DISABLE_ERROR_REPORTING"]);
         Assert.Equal("1", (string?)env["DISABLE_BUG_COMMAND"]);
+        Assert.Equal("1", (string?)env["DISABLE_FEEDBACK_COMMAND"]);
+        Assert.Equal("1", (string?)env["DISABLE_AUTOUPDATER"]);
+        Assert.Equal("1", (string?)env["DISABLE_GROWTHBOOK"]);
+        Assert.Equal("1", (string?)env["DO_NOT_TRACK"]);
+        Assert.Equal("1", (string?)env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"]);
         Assert.Equal("1", (string?)env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"]);
         Assert.Equal("1", (string?)env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
         Assert.False((bool)json["includeCoAuthoredBy"]!);
@@ -603,6 +620,24 @@ public class GuardTests : IDisposable
 
         // the second sync finds the file already in the maintained shape: no rewrite
         Assert.False(guard.Sync().Written);
+    }
+
+    [Fact]
+    public void SettingsStatusNamesEveryOutOfSyncProxyKey()
+    {
+        var config = SettingsConfig();
+        var guard = new ClaudeSettingsGuard(config);
+        guard.Sync();
+
+        // one belt-and-braces key removed: the status stays partial and names it
+        var root = JsonNode.Parse(File.ReadAllText(config.Claude.SettingsPath))!.AsObject();
+        ((JsonObject)root["env"]!).Remove("https_proxy");
+        File.WriteAllText(config.Claude.SettingsPath, root.ToJsonString());
+
+        var status = guard.Read();
+        Assert.Equal(GuardState.Partial, status.State);
+        Assert.Contains("https_proxy", status.Drift!);
+        Assert.DoesNotContain("HTTPS_PROXY", status.Drift!);
     }
 
     [Fact]
@@ -653,7 +688,7 @@ public class GuardTests : IDisposable
         var guard = new ClaudeSettingsGuard(config);
         guard.Sync();
 
-        // the proxy env is correct, but the maintained keys are missing or wrong
+        // the belt-and-braces proxy keys are stale and the maintained keys are missing or wrong
         File.WriteAllText(config.Claude.SettingsPath, """
             {
               "env": {
