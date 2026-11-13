@@ -4,7 +4,8 @@ Private personal project: a WPF application on .NET 10 LTS (Windows Desktop) tha
 single window the functionality for maintaining Claude Desktop on this machine: a local proxy with
 DoH resolution, a proxy chain supervisor, a launcher, idle auto-stop,
 an MSIX updater, direct-access blocking, and diagnostics. Below are the rules that must not be
-broken and the architecture of the application.
+broken and the shape of the application; the detailed architecture, behavior and interfaces live
+in `specs/` — start at `specs/INDEX.md`.
 
 ## Rule #0: ambiguities — ask the owner
 
@@ -95,342 +96,103 @@ the application's modules, with a transparent status of what was done.
 In all md files of the repository we record only the current actual state: no history of "it was
 like this, then we changed it", no check dates, no session references. When a fact stops being true
 it is rewritten or deleted. AGENTS.md is a living document: a module is implemented — update the
-row, don't append a note.
+row, don't append a note. The same applies to `specs/` (see `specs/META.md` for their update rules).
 
 ## Architecture
 
 A single WPF application (single instance, tray + windows) plus a headless CLI mode. Core modules
-do not depend on the UI (testability); the UI is a thin wrapper.
+do not depend on the UI (testability); the UI is a thin wrapper. Everything is composed from the
+user config in `ProxyRuntime.FromConfig`. Detailed behavior, flows, invariants and contracts live
+in `specs/` — the table below is the map, not the spec.
+
 Application modes (the owner's decision):
 
-- **normal GUI** (`PrivateNetRouting.App` with no arguments): the status/control window; the tray
-  icon lives as long as the application runs; minimizing and closing the window hide it to the tray
-  (the proxy and the started idle stopper keep working — the stopper is a detached process and
-  survives even the real exit); the real exit is only from the tray menu — "Exit" leaves the chain
-  running in the background (the in-process forward proxy is handed over to a detached worker, the
-  next start sees the chain as it was), "Exit with full chain stop" brings it down first — or
-  ending the Windows session; a second launch shows the hidden window;
-- **shortcut GUI** (`--launch`): this is how the Claude desktop shortcut works — if Claude is
-  already running, the application window is simply shown; if not, the window draws the bring-up in
-  the chain card (tunnel, checks) and then starts Claude with proxy flags;
+- **normal GUI** (`PrivateNetRouting.App` with no arguments): the status/control window; closing or
+  minimizing hides it to the tray; the real exit is only from the tray menu — "Exit" keeps the chain
+  (the in-process proxy is handed to a detached worker), "Exit with full chain stop" brings it down
+  first — or the end of the Windows session; a second launch shows the hidden window;
+- **shortcut GUI** (`--launch`, `--launch-browser`): the desktop shortcuts — the chain bring-up is
+  drawn in the chain card, then Claude/browser starts with proxy settings;
 - **console** (`pnr`, a separate exe): the headless commands.
 
 Ports per the owner's decision: **18081** (forward proxy, the address for
 the client), **18082** (daemon HTTP), **18083** (daemon SOCKS5). Every module takes its addresses/ports/names from the
 config; they change only by explicitly editing the user config.
 
-| Module | What it does | Implementation |
-|---|---|---|
-| ForwardProxy | local CONNECT proxy. Why it exists: the tailscale sidecar's own proxies (SOCKS5 and HTTP) resolve names with the system resolver — the tsdial dialer never consults the netstack DNS (a long-open upstream limitation of userspace mode) — and the direct-access ban blackholes exactly the AI names there; besides that, the clients (the managed policy of Claude, `HTTP(S)_PROXY` of Claude Code and Codex) speak HTTP CONNECT, which a plain SOCKS5 upstream does not answer — this proxy is the translator. It refuses (403) a CONNECT to a loopback or link-local target — through the chain that would be the upstream's own host (the check sees what the client asked for: an address literal, a `localhost` name, or — in the tailscale and http modes — every address a name resolves to locally; in the socks5 mode a name is resolved by the trusted upstream itself, so a foreign alias of its loopback is not caught there — that refusal is defense-in-depth, the mode's contract is that the upstream resolves) — and warns in the log when `forwardProxy.listen` is not a loopback address (the proxy has no client authentication). An upstream with a mixed HTTP+SOCKS inbound (e.g. sing-box) makes the local proxy redundant in the socks5 mode: `forwardProxy.enabled=false` runs no local proxy at all and every client is pointed at `chain.socks5.upstream` itself — the one address must then answer HTTP CONNECT as well as SOCKS5, the mixed inbound does the CONNECT-to-SOCKS translation (the "applications proxy" endpoint, AppProxyEndpoint: launchers, the policy and settings env, the WSL sync, the updater downloads, the health checks, the browser profile with the forward-proxy egress all take their address from it; the tailscale mode refuses the bring-up with an error when the flag is off — the proxy is load-bearing there). The http mode: the provided plain HTTP proxy (`chain.http.upstream`) speaks CONNECT itself, so the local proxy never runs there at all (`forwardProxy.enabled` is ignored) and that address is the AppProxyEndpoint for everyone. The tailscale mode: DoH resolution of names (the pool is auto-filled from the tailnet netmap — any DoH resolvers of the tailnet DNS config: http and https, by IP or by name, names resolved once at discovery and kept for TLS SNI; the optional `forwardProxy.dohSeed` adds extra endpoints) and dialing by IP through the SOCKS5 upstream — the sidecar's own listener (`chain.tailscale.socksListen`): the address is derived from the daemon's listener and cannot drift from it; `chain.socks5.upstream` (with its RFC 1929 user/pass) belongs to the socks5 mode alone. The socks5 mode: the trusted external upstream (`chain.socks5.upstream`) resolves on its side — the target name rides the CONNECT itself (ATYP=3), no DoH machinery exists there at all (also with optional RFC 1929 user/pass), bind on localhost and the WSL gateway, activity marker (mtime) for the watchdog; in a skipped shape (the http mode, or socks5 with the flag off) the whole proxy does not exist — the supervisor is an honest no-op (never running, nothing to start/stop/detach), `pnr proxy` says so and exits; the listener placement mode is decided by ForwardProxySupervisor: in-process (default) or a detached worker (`forwardProxy.detached`, its own exe with the `--proxy-worker` marker, spawned through cmd with redirection) — the port is a single resource: a busy one is not bound by anyone, stop kills only the worker identified by cmdline; an in-process owner of ours (the GUI in the tray, a foreground pnr proxy) is asked through a session-local named event (NamedEventProxyStopChannel) to stop its own listener — the detached idle stopper cannot kill the GUI (the owner serializes such a request with its own start/detach/stop, and a request meant for a listener that is already gone is ignored); any other foreign owner — an owner whose event cannot be opened (an elevated one) included — is left alone (warning to the log) | `PrivateNetRouting.Core.Net.*`; CLI `pnr proxy [--detached]` |
-| ChainSupervisor | idempotent chain bring-up/shutdown; `chain.mode` picks the shape (a change applies after a restart). "tailscale" (default): userspace tailscaled daemon → watch-ipn keeper → node (a node without a key — an interactive `tailscale login` first: the auth URL rides the progress, the GUI opens the page in the browser, the CLI prints it; the control server: chain.tailscale.loginServer, or — empty — the system-wide tailscale's one picked up from its prefs; every `tailscale up` mentions the control server the node is bound to — the configured one, else the node's own ControlURL from its prefs, else the system one — because tailscale rejects an up that leaves out a non-default control server; bounded by loginWaitSeconds) → forward proxy → health check; the daemon start/stop elevation is `chain.tailscale.elevation`: auto (default) — direct on tailscale 1.104.1+ (`--windows-mode=dev`, the pipe is owned by the user — that release removed the Administrators owner from the pipe SDDL), through a runas copy of itself on older builds (the only UAC), "never"/"always" force a mode (the modes are version-locked: a 1.104.1+ daemon rejects a custom socket without the dev flag even elevated); the elevated path executes the standard per-machine Tailscale install (`%ProgramFiles%\Tailscale`) regardless of `tailscaledPath`/`cliPath` — the user-writable config does not name what runs as administrator: the elevated start refuses without that install and takes the dev flag from the version of the binary it actually runs, the elevated stop downs the node with the standard CLI when present (otherwise it skips the down) and kills by image name + statedir/socket either way; it runs only while the daemon answers on its pipe — a stop of an already stopped chain asks no UAC. "socks5": one egress check of the provided external upstream (a CONNECT-by-name of the health host through the upstream — the upstream resolves it on its side, polled to the same deadline) → forward proxy → health check — no UAC, no tailscale processes, no DoH machinery (the names ride the CONNECT; the DoH pool is not even built), stop takes down only the proxy. "http": the same shape against the provided plain HTTP proxy (`chain.http.upstream`) — the egress check is the HTTP CONNECT roundtrip straight against it (the upstream speaks CONNECT natively and resolves the name on its side), no SOCKS5 exists anywhere in the shape, no local proxy ever runs (`forwardProxy.enabled` is ignored), stop has nothing local to stop; in the socks5 mode with the local proxy skipped (`forwardProxy.enabled=false`) the proxy link does not exist the same way: egress check → health against the upstream itself (the skipped shapes shrink the chain rail to two stages, ChainState.ProxyRunning is null — "not applicable", not false). The bring-up honours its cancellation token: a cancellation surfaces as OperationCanceledException, never wrapped into a link's ChainException (the GUI stop during a bring-up relies on it). Operations of different processes are serialized by a lock file next to the chain log: a waiter waits for the holder without a deadline (a bring-up holds it through a login), on its own token — a stop included — with a "Lock" progress step (the card shows a hint); a lock file that cannot be opened at all is logged and the operation runs without it. "Our" processes are identified by the statedir/pipe in the command line; daemon/keeper logs are file handles through cmd, surviving application exit. Daemon liveness is determined by the responsiveness of its named pipe (an elevated daemon hides its CommandLine from a non-elevated WMI reader — Windows 11 24H2+; an elevated stop still kills processes by cmdline search) | `PrivateNetRouting.Core.Chain`; CLI `pnr chain up\|down\|status`, `pnr check` |
-| Launcher | starting Claude Desktop with `--proxy-server`/`--proxy-bypass-list` (the bypass list is built from the config domains, both spellings of each zone; the base entries — localhost/private ranges — are fixed in the code), checking and bringing up the chain (live CONNECT, then an idempotent chain up), the bring-up steps drawn live in the chain card of the main window (spinner, elapsed time, the current step; on a live chain nothing is drawn at all), control warnings to the log about the `egressProxyUrl` managed policy and an already running Claude without flags (the log warning is paired with an offer to the owner: an application started outside the launcher is single-instance, so the flags of a new start never reach the processes of the running copy — the GUI shows a dialog, the CLI asks on the console, `--restart` answers without asking, and on consent the copy is closed gracefully (WM_CLOSE, then a forced tree kill of what survived the `restartGraceSeconds` wait) and started again through the proxy; `RunningApp` holds the scan, the report and the close for both applications), mode flags (check-only/no-splash); the GUI shortcut mode `--launch`: Claude already running (exact process name) — only the application window, not running — a full launch whose bring-up runs in the window. The Codex desktop app (OpenAI, a Microsoft Store MSIX; `codex.*` config) is started by the same contract: live CONNECT → idempotent chain up → a refresh of the proxy env in `CODEX_HOME/.env` (the desktop app strips the inherited proxy env from the processes it spawns, so the embedded CLI core takes the proxy from that file — see `CodexEnvFile`; after a WSL codex session it may hold the NAT gateway address, which is unreachable from Windows once WSL is down) → the same Chromium flags **plus the proxy env variables** (HTTP(S)_PROXY/ALL_PROXY/NO_PROXY — a belt-and-braces path for any Codex child that does inherit them); the launch goes through `Invoke-CommandInDesktopPackage` targeting the manifest entry point `app\ChatGPT.exe` (the packaged stub loses arguments, a DCOM activation loses the env); an already running Codex without flags — the same warning to the log | `PrivateNetRouting.Core.Launcher` (ClaudeLauncher + CodexLauncher); CLI `pnr launch [--check-only] [--no-splash] [--restart]` (the flag is accepted and ignored: the progress belongs to the GUI window), `pnr codex launch [--check-only] [--restart]`; the Claude desktop shortcut → `PrivateNetRouting.App --launch` |
-| Watchdog | idle auto-stop: periodic activity check (claude* and codex* processes (`codex.processName`), connections to the proxy, connections to the chain's egress listener (`chain.tailscale.socksListen` — a browser pointed there by `browser.egress=chain` goes straight there, past the application proxy, so browsing keeps the chain from being stopped under an open browser; the default forward-proxy egress is covered by the proxy-connection check; the external-upstream modes (socks5, http) have no local egress to guard), activity marker freshness (the signal is skipped when the local proxy does not run — a skipped shape, the http mode or socks5 with the flag off: nobody touches the marker, connections to the upstream's port remain the source); the first poll is after the interval, every timer tick is Debug, Info only carries a reason change and the auto-stop itself), when idle — stopping the app hosts inside the RUNNING configured WSL distros (Claude: RPC server.shutdown with its own binary and SIGTERM→SIGKILL escalation on orphans; Codex: the process trees of the desktop app's core — a codex app-server whose environment carries CODEX_HOME, with its descendants (CODEX_HOME alone marks nothing: a user may export it in every shell), SIGTERM→SIGKILL; no distro is brought up just for the check), then — after a fresh activity check, since the WSL pass takes minutes and a client started meanwhile keeps the chain — stopping the chain with the existing orchestrator (a failed chain stop — a declined UAC — is retried on the next ticks, three failures in a row make the stopper give up with an error and exit; activity regained in between resets the count); the stopper lives only over a live chain — a completed chain stop takes it down through the orchestrator's chain-stopped hook (the calling stopper spares its own process and exits right after), it cannot be armed over a down chain (the GUI Start is disabled, `pnr watchdog` refuses), and the explicit start is the toggle in the chain card or the foreground CLI form: the GUI starts a detached worker (its own exe with the `--watchdog-worker` marker, spawned through cmd with redirection) that outlives the application and switches itself off after the idle stop; `watchdog.autoStart` (default on) — after every successful chain raise the orchestrator's hook re-arms the stopper fire-and-forget, the checkbox sits in the chain card row next to the toggle; one stopper at a time — the foreground `pnr watchdog` refuses beside any running stopper, of two workers the lower pid stays (a worker never yields to a foreground one, so a race leaves the worker); liveness is read from process command lines, the stop kills only the identified stoppers, and the worker is never written to autostart (rule #4) | `PrivateNetRouting.Core.Watchdog` (WatchdogService + WatchdogSupervisor/Worker); CLI `pnr watchdog`; the "Idle stop" row of the chain card (the interval is under `watchdog.*`, the distro list and paths are under `wsl.*`) |
-| Updater | manual MSIX update: version check BEFORE the chain bring-up ("nothing to install" — no UAC), the package address from Claude's own update feed — asked through the already-live proxy, without raising the chain (the AppX journal where the built-in updater leaves a failed-download address is the fallback; or manual entry), multi-threaded chunked download through the application's own forward proxy (a resume reuses only the parts of the same address, length and chunk size — a manifest next to them; other parts are discarded), Publisher verification (a cached package that fails it, or that the installer refuses, is removed from the cache unless `--keep-file` — the next run downloads it anew), closing Claude, `Add-AppxPackage -ForceApplicationShutdown` (`--keep-running` keeps Claude open: no close and no forced shutdown — an installation whose files are in use fails instead); a GUI with steps/progress/stop button, an offer to raise the chain once when no source has an address (the check then repeats over the live chain; a refusal leaves the manual entry), a pause before installation and a deferred installation (`--install-from`); during the download the activity marker is kept fresh (auto-stop does not shut the chain down under the download); on GUI start — a background update check (read-only on versions, the feed and the journal, no chain and no UAC; `ui.checkUpdatesOnStart`): an update is announced only with a concrete offered version ("no address known" is not "an update exists") — an accent dot on the update button (the versions in its tooltip) and a tray balloon, and the update window's own check or a finished installation keeps the dot in sync (a stale one is dropped); after a successful installation the window closes itself in 30 s with a visible countdown (any interaction keeps it open); a downloaded package of the installed version (an address that named no comparable version) is up to date unless `--force` asked for a reinstall — Claude is not closed, nothing is installed, the download is not kept; an installation whose observed version did not reach the package's is `NoChange`, not a success — the CLI exits non-zero (`--force` accepts only the reinstall of the installed version it asked for, never an update that did not land), the window marks the step failed, shows the version warning and keeps the update dot; a full run with no address yet raises the chain and asks the feed once more. The Codex desktop app updates through the Microsoft Store (CodexUpdater + the WinRT AppInstallManager; the Store CDN is not part of the ban — no chain, no UAC, no downloads of our own): the check asks the Store catalog by the product id (`codex.update.storeProductId`) and OpenAI's own version manifest for the offered version — through the live proxy only, the host is under the ban (no manifest answer never hides an update); the update hands the package family name to the Store and polls the install item (a Store that queues no item — no update offered any more — fails the run with that reason; `codex.update.updateTimeoutSeconds` limit, "Stop" cancels the Store item); a running Codex is closed first; a finished check or installation keeps the Codex update dot in sync, while a Store item that completed without a new registered version is the same `NoChange` (the CLI exits non-zero, the window marks it failed) | `PrivateNetRouting.Core.Updater` + `UpdateWindow` and `CodexUpdateWindow` in App; CLI `pnr update [--check] [--download-only] [--force] [--keep-file] [--keep-running] [--url <url>] [--install-from <path>]` (a flag the chosen mode would ignore is an error: the download/install flags with `--check`, `--url`/`--download-only` with `--install-from`), `pnr codex update [--check]` |
-| Guard | direct-access control: the managed policy `egressProxyUrl` (+`disableWslSessions=0`); a local ban in three layers — a hosts block, one NRPT rule for all subtrees, a firewall outbound Block by subnet (the rule identifiers are configurable; the application maintains a ban with these identifiers instead of creating a parallel one); the settings of both applications in one sync — the maintained shape of Claude Code settings.json (the application proxy in every spelling the engine reads — the documented pair, the lowercase variants, ALL_PROXY, the binary-seen CLAUDE_CODE_HTTP(S)_PROXY pair and grpc_proxy — plus the proxy-resolves-names switch and NO_PROXY from the config domains, the nonessential-traffic switches — telemetry, error reporting, feedback, surveys, feature-flag fetching, the auto-updater, marketplace auto-install — and the attribution keys: no Co-Authored-By trailer on commits and no attribution line on PRs) and the Codex layer — the flag `[features] respect_system_proxy = true` in config.toml (a belt-and-braces for the sysproxy layer only: upstream the flag is not reliably honoured — openai/codex#39237, #29958 — connectivity never rests on it) plus the proxy env (HTTP(S)_PROXY/ALL_PROXY/NO_PROXY) in the `.env` of the same CODEX_HOME — the embedded CLI core loads that file after its own start, applying the values over the inherited environment, so it is what actually carries the proxy to the core (both files get surgical edits: every other line survives byte for byte, a backup to `.pnr-bak-*` before a rewrite — a state already present among the backups is not backed up again, the matching copy is touched instead, so mtime order mirrors the preserved states; the copies live in three numbered slots, the oldest one reused, fresh files are created when Codex has none yet; an application off in the config — `claude.enabled`/`codex.enabled` — is skipped by the sync, no file of it is written or created, and its half of the settings layer has no vote in the status); in WSL also a startup script with the NAT gateway address and the Codex proxy env layer — a profile.d snippet that exports the application proxy only to the shells Codex itself starts inside the distro (the desktop app passes `CODEX_HOME` into the distro for its own processes and runs them through a login shell; the codex command name is the fallback) and rewrites that CODEX_HOME `.env` to the current gateway address (the core's .env load overrides the exports, so the loopback form the Windows side keeps would win otherwise; the launcher refreshes it back before every launch), recomputes the WSL NAT gateway address at every shell start (127.0.0.1 inside a distro is the distro itself), hands a `~/.claude` left owned by root (an older boot script created it) back to the distro user — the directory only, by a root step of the sync before the user-side settings.json write and again by the startup script at boot and leaves ordinary shells, apt, pip and git on the direct route; the sync also wires the distro's boot layer — the `[boot]` command of `/etc/wsl.conf` is pointed at a marked runner (`/etc/wsl.d/startup.sh`) that executes the startup directory in name order, a foreign command in the slot is preserved as `00-user-boot-command.sh` (the 00- name keeps it first), a foreign file already at the runner path is replaced, and a command that merely references the runner path (`bash …`, `… &`, a redirection) is left as written (wrapping a runner of the same directory into that directory would recurse), and the already-done state is recognized by the runner marker and not rewritten; the layer is entirely optional: `wsl.mode` = on/off/auto and the two sync switches `wsl.syncClaude`/`wsl.syncCodex` (both off — the layer reports off); the distro list is `wsl.distros` (name and user), the in-distro paths are `wsl.startupScriptPath` and `wsl.proxyEnvPath`; the WinINET system proxy on/off — the first enable while the switch is off preserves the user's own ProxyServer/ProxyOverride (a save next to them in the same key), disabling restores them and consumes the save, and when there was nothing to restore the store clears its own values (recognized by the address this installation writes, so a repeated off never wipes the user's restored settings); a PAC script (AutoConfigURL) or automatic detection, which WinINET prefers to the manual proxy, is read and reported — the status is partial and `sysproxy on` warns — and never changed. Every synced address is the applications proxy endpoint (AppProxyEndpoint — the local forward proxy's, or the external one when the local proxy is skipped; the distros reach a host-local endpoint through the WSL NAT gateway (recomputed at every shell start) and a routable external one at its own address, baked into the startup script and the Codex env snippet; the WSL status then warns read-only when that endpoint is loopback-only, hence unreachable from the distros — the upstream must listen on the WSL-facing address itself, the app creates no firewall rule for it). The status of all guards is read-only (a GUI card, `pnr guard status [--live]`); a ban layer that lags behind the config (hosts names, NRPT subtrees, firewall subnets — compared across the firewall's mask spelling) makes the ban partial, not on, so the card offers to apply it again, and a distro is on only when every value the WSL sync maintains matches the config (the proxy port/host, the full proxy env of settings.json and of the Codex snippet, the privacy/attribution keys, the startup script's user, the [boot] wiring of the runner); the ban and the policy go through an elevated helper, and after a ban — live probes (DNS/direct/proxied; a probe name must sit inside the ban trees but outside the hosts lists — the Claude one rides the unbounded *.claudeusercontent.com wildcard, so no finite name is reserved in hosts for it) | `PrivateNetRouting.Core.Guard` + the "Guards" card in App; CLI `pnr guard status [--live] \| ban on\|off \| policy on\|off \| settings sync \| wsl sync \| sysproxy on\|off` |
-| App self-update | a one-time check on GUI start (`ui.checkAppUpdatesOnStart`) and a "Check for updates…" item of the "?" help menu: the repository's GitHub releases against the running version; a newer release — an offer to open the releases page (no auto-install); the request is anonymous api.github.com (the repository is public), no chain and no proxy needed; at start a failure is logged quietly, from the menu it is a message box | `PrivateNetRouting.Core.AppUpdate` + the "?" menu item; log `appupdate.log` |
-| Browser profile | two phases: creation and launch. **Creation** — once, through the dialog ("?" help menu → "Create browser profile…"): the family (firefox/chrome), the profile folder (the system folder picker) and the browser executable (the standard places are probed first, any file can be pointed at by hand), plus an optional shortcut with an editable path (the desktop default is suggested, a missing parent folder is created; the checkbox is "Create a shortcut" — the path decides where it lands). The folder is classified in Core (`BrowserProfileFiles.ClassifyFolder`): a profile this application wrote — the `.pnr-profile` marker, the managed `user.js` of an older profile, or the configured path (it wins over the browser-data signs below — a Chromium profile of a build before the marker has a `Local State` of its own — except inside the browsers' standard everyday data locations, `BrowserProfileFiles.EverydayBrowserDataRoots`) — is re-created silently, a browser's real data folder (`Local State`, `Default\Preferences`, `prefs.js`, `places.sqlite`) or a Chromium profile folder itself (`Preferences`/`Secure Preferences` at its root, a `Default`/`Profile N` folder of a user-data dir) is refused outright, any other non-empty folder is only an advisory. The dialog writes the profile files — Firefox: `user.js` (all protocols through the browser egress from `browser.egress` with the names resolved on the egress side: the forward-proxy egress is written as http/ssl prefs of the application's CONNECT proxy, the chain egress as SOCKS5 with `socks_remote_dns` (the http mode's chain egress is an HTTP proxy itself — http/ssl prefs too); `no_proxies_on` from the `bypassDomains` domains in both forms + `*.tld` from `directTlds`, `failover_direct=false` — no silent direct fallback, `trr.mode=5`, the tabs of the last session back on start (`browser.startup.page=3`), no startup offers (welcome/upgrade dialog/what's-new/default-browser prompt/telemetry), WebRTC off (`media.peerconnection.enabled`/`media.navigator.enabled`) and the built-in VPN off; a fresh profile also gets a one-time `prefs.js` seed accepting the Terms-of-Use page — written only when no `prefs.js` exists yet and never into user.js, which would pin the value forever (verified live on Firefox 157)); Chromium: the WebRTC policy merged into `Default/Preferences` (`webrtc.ip_handling_policy` — the family's only lever, its command-line switch is dropped by current builds and a full off switch never existed there; the keys of an existing file survive) — and records the profile in `browser.*`. **The traffic goes through the browser egress chosen by `browser.egress`**: "forward-proxy" (default) — the applications proxy endpoint (AppProxyEndpoint) over HTTP CONNECT: names ride the CONNECT and are resolved on the proxy side, past the local ban; in the default shape that is the local forward proxy (`forwardProxy.listen`) and the proxy process (the GUI in the tray or the detached worker) has to be running, in a skipped shape (the http mode, or socks5 with `forwardProxy.enabled=false`) it is the external endpoint and nothing of ours has to run. "chain" — the chain's final egress (`chain.tailscale.socksListen` in the tailscale mode, the external upstream in the other modes: `chain.socks5.upstream` as SOCKS5, `chain.http.upstream` as HTTP CONNECT): the browser works independently of the application process (the desktop shortcut needs no PNR; the chain, however, has to be up), but the tailscale sidecar resolves names with the system resolver, so the names blocked from direct access do not open through it — such a launch warns in the log. **Launch** (the "Browser" button, `--launch-browser`, `pnr browser`) is only a start: a TCP probe of the egress (`browser.probeTimeoutSeconds`), then the browser; on a dead egress a question — when the egress is ours to raise (the forward proxy while the chain runs it, the sidecar's listener in the tailscale mode — never an external upstream) yes raises the chain (drawn in the chain card) and starts; over an external endpoint — the upstream with `browser.egress=chain`, or the skipped-shape egress — there is nothing to raise (the question is only whether to start anyway; a refusal is `Cancelled`). Firefox's `user.js` is refreshed on every application launch (the egress address and the bypass list stay fresh for the button and the shortcut alike), only in a folder the creation rule accepts — a configured folder classified as a browser's real data or as foreign refuses the launch before the probe, nothing written; Chromium carries everything on the command line (`--proxy-server=<scheme>://`, the bypass list, `--user-data-dir`, `--no-first-run`, `--no-default-browser-check`, `--restore-last-session` — its session preference is MAC-protected against file edits, hence the flag; WebRTC is left to the profile policy alone — the family's command-line switch is gone from current builds, verified live on Chrome 155: the policy alone zeroes out ICE candidates, a profile without it exposes a host candidate); `--private`/`--url` come only from the CLI flags — the launch opens no URL of its own; a first click without a profile — a warning with the offer to create one; an already running instance of ours (cmdline with our profile) is not duplicated; only the profile is touched — never the browser's system settings or the everyday profile | `PrivateNetRouting.Core.Launcher.BrowserProfile` (`BrowserEgress`, `BrowserProfileFiles`, `BrowserProfileCommandLine`, `BrowserExecutableLocator`, `BrowserProfileService`; `IShortcutFactory`/`WScriptShortcutFactory` in SystemOps) + `BrowserLauncher` (probe → start); `BrowserProfileWindow` in App; CLI `pnr browser [--check-only] [--private] [--yes] [--url <url>]`; the "Browser" button in the main window; GUI shortcut mode `--launch-browser`; the "Claude (browser)" shortcuts point at the application |
-| Diagnostics | a read-only state summary: owners of the chain listeners with PIDs (a TCP table through iphlpapi, no PowerShell), keeper/node — or, in an external-upstream mode (socks5, http), one egress line (the upstream, the socks5 one with its user and never the password, and its reachability), the proxy's WSL bind (flagged when it is not the current gateway address), counters and age of the activity marker, a detailed CONNECT roundtrip (time + first response line), the core of the guards (policy + ban, without WSL), idle stopper liveness (visible from outside by the command line: the detached worker `--watchdog-worker` or the foreground `pnr watchdog`); a fully stopped chain — a short "normal" message instead of the full picture (in the external modes the daemon ports mean nothing and are not consulted; in a skipped shape the forward-proxy port is not consulted either and the summary says "skipped — the applications point at …", with the CONNECT roundtrip running against the upstream); log viewing (a list with sizes, tail by name `--tail N`) and rotation: the process's live log — in place (`FileLog.RotateNow`), a free file — by shifting the age chain, one held by another process — honestly "locked" | `PrivateNetRouting.Core.Diagnostics` + `DiagnosticsWindow` in App (the "Diagnostics…" item of the "?" help menu: a highlighted summary and an "Open logs" button — the log list and rotation live in the CLI); CLI `pnr status`, `pnr logs list \| show <name> [--tail N] \| rotate [<name>...]` |
-| Localization | UI multilingual support: strings are in the `Strings.<code>.xaml` dictionaries (`{DynamicResource}` in XAML, `Loc.S`/`Loc.F` in code), the dictionary is swapped on the fly; the language is `ui.language` in the config: `auto` (system language) or a code, an unsupported one — English; a new language = a dictionary + a code in `AppLanguage.Supported` | `PrivateNetRouting.App/Localization`; en/ru; a flag selector (en/ru, drawn by `LanguageFlag`) in the window header — no "system" option: the config's `auto` is shown as the language it resolves to, a manual choice writes the concrete code to the config |
+| Module | What it does | Spec | Implementation |
+|---|---|---|---|
+| ForwardProxy | local CONNECT proxy — the translator every client points at (CONNECT ↔ SOCKS5/DoH per chain mode, target refusals, listener placement and handover) | [forward-proxy](specs/domains/forward-proxy/README.md), [doh](specs/domains/doh-resolution.md) | `Core.Net.*`; `pnr proxy` |
+| ChainSupervisor | idempotent chain bring-up/shutdown in three shapes (`chain.mode`: tailscale/socks5/http), cross-process operation lock, daemon elevation | [chain](specs/domains/chain/README.md) | `Core.Chain`; `pnr chain up\|down\|status`, `pnr check` |
+| Launcher | Claude/Codex desktop launches through the chain (proxy flags, bypass lists, restart of a copy without flags) | [launchers](specs/domains/launchers/README.md) | `Core.Launcher`; `pnr launch`, `pnr codex launch` |
+| Browser profile | created-once browser profile (Firefox/Chromium) and its launch through the chain | [browser](specs/domains/browser/README.md) | `Core.Launcher.BrowserProfile` + `BrowserLauncher`; `pnr browser` |
+| Watchdog | idle auto-stop: app hosts in running WSL distros, then the chain; detached stopper worker | [watchdog](specs/domains/watchdog/README.md) | `Core.Watchdog`; `pnr watchdog` |
+| Updater | manual MSIX update of Claude through the chain; Codex update through the Microsoft Store | [updater](specs/domains/updater/README.md) | `Core.Updater`; `pnr update`, `pnr codex update` |
+| Guard | direct-access control: managed policy, three-layer local ban, settings/env sync (Windows + WSL), WinINET system proxy | [guard](specs/domains/guard/README.md) | `Core.Guard`; `pnr guard …` |
+| App self-update | GitHub releases check, an offer to open the releases page (no auto-install) | [app-update](specs/domains/app-update.md) | `Core.AppUpdate` |
+| Diagnostics | read-only state summary; log list/tail/rotation | [diagnostics](specs/domains/diagnostics.md) | `Core.Diagnostics`; `pnr status`, `pnr logs …` |
 
-Architecture notes:
+Architecture essentials (the specs hold the details):
 
-- WPF: long waits go through async/await and dispatcher queues, without blocking the UI thread;
-  the UI thread is STA; a single instance through a named mutex with activation of the existing
-  window. The unavoidable synchronous waits on asynchronous work (runtime start/stop in
-  OnStartup/OnExit) must go through `Task.Run` (without the Dispatcher context), and Core
-  start/stop paths do not capture the context (`ConfigureAwait(false)`): a blocking wait on the UI
-  thread + the await continuation posted to the dispatcher queue = a deadlock and an eternally
-  alive process (the regression test is `StopCompletesUnderBlockedSynchronizationContext`).
-- Tray and GUI lifetime: `ShutdownMode=OnExplicitShutdown`, closing/minimizing the main window only
-  hides it (the `TrayIcon` tray on WinForms NotifyIcon — WinForms is referenced for it alone, and
-  global usings are removed to avoid name conflicts with WPF); the tray menu is show window,
-  chain up / chain down / launch Claude (the same code paths as the chain card and the launch
-  button, enablement follows the card's buttons), "Exit" (the chain keeps working: an in-process
-  proxy is handed to a detached worker) and "Exit with full chain stop" — both first cancel a
-  bring-up or launch in flight and wait for its rollback (the chain is left as it was before that
-  operation), and an exiting instance ignores the shortcut signals; the started idle stopper
-  keeps working — it lives in its own detached process and survives even the real exit. Desktop
-  shortcuts: Claude → `--launch`, "Claude (browser)" → `--launch-browser`.
-- Elevation: a separate helper launch (runas) with a window-0, not a restart of the whole
-  application.
-- Link lifetimes: the daemon/keeper/node outlive the application exit (detached, file handles
-  through cmd); the forward proxy by default lives as long as its process (the application window or
-  `pnr proxy`), and with `forwardProxy.detached=true` — in a separate worker (its own exe with
-  `--proxy-worker`) that outlives the command/GUI exit: bring-up/shutdown go through chain up/down
-  (a GUI exit does not kill the worker), a one-off bring-up — `pnr proxy --detached`; the tray
-  "Exit" with the chain kept hands an in-process listener over to such a worker
-  (`ForwardProxySupervisor.DetachAsync`), and so do the CLI commands that leave a client behind
-  (`pnr launch`, `pnr codex launch`, `pnr browser`, `pnr chain up`, `pnr update`) before they
-  exit, a failure after the chain was raised included — a failed handover is a non-zero exit; the handover runs under the chain operation lock
-  (`ChainSupervisor.HandOverProxyAsync`), so a stop of another process never finds the listener
-  mid-handover, and waits for it at most `forwardProxy.handoverLockWaitSeconds` — past that it
-  hands over without the lock (a warning), an exit never hangs behind a login; the idle
-  stopper started from the GUI — a separate worker (`--watchdog-worker`) that outlives the exit on
-  its own and disappears after the idle stop (the CLI form `pnr watchdog` — foreground, in the
-  terminal).
-- Logs: one canonical file per log — all writers (the GUI in the tray + `pnr` from a terminal,
-  detached workers) open the same `<name>.log` with FileShare.ReadWrite and seek to the end
-  before every line; rotation is by size — at start and before the next record into an overgrown
-  file (a chain held by another process postpones the rotation until the owner's RotateNow or the
-  next start), manually — from diagnostics (the live log of the process — in place, a free file —
-  by shifting, a held one — honestly "locked"); the shifts of all processes are serialized by a `<log>.rotation-lock` file (a held one postpones the rotation like a held log, and a size rotation re-checks the size under it — a log another process has just rotated is left alone); a shift stages the current file under a name
-  unique per rotation (`<log>.rotating-<pid>-<random>`), and a staging file left by a crashed or
-  failed rotation is never overwritten: the next rotation (or the next start) appends it to the
-  end of `.1`, so no record is lost.
-- Updater: the version check phase runs before the chain bring-up (no extra UAC is needed);
-  installation is not interrupted; during long phases keep the activity marker fresh so that
-  auto-stop does not shut the chain down under the download.
-- Releases and installation: `Directory.Build.props` holds the version and must match the release
-  tag (the workflow checks); a `v*` tag runs the release workflow — tests, then
-  `packaging/make-release.ps1` (both projects self-contained into one folder, the portable zip,
-  the Inno Setup installer) — and attaches zip + setup to a GitHub release with generated notes.
-  The installer is per-user (`%LOCALAPPDATA%\Programs\PrivateNetRouting`, no elevation), recognizes
-  the running GUI by the single-instance mutex, terminates the background workers before touching
-  the files (they have no window, so the Restart Manager cannot close them — the install and the
-  uninstall would stop on the "unable to automatically close all applications" error), and writes
-  no autostart entries (rule #4). The uninstaller reverts nothing outside its folder: it asks first,
-  listing the commands that turn the guards off (`pnr guard ban|policy|sysproxy off`, `pnr chain down`).
-- Guard: the ban rule identifiers (hosts block markers, the NRPT rule DisplayName, the firewall
-  rule Group) are in the config; the application maintains a ban with these identifiers, not a
-  parallel one. The guard status is read-only; after applying or removing a ban — live probes,
-  not "it should work".
-- The external protocols the semantics rest on: CONNECT roundtrip as a health check, the WSL host's
-  `server.shutdown` RPC, Claude's update feed (`claude.update.updateFeedUrl`, the same endpoint the
-  built-in updater polls) as the primary source of the package URL with the AppX journal as the
-  fallback, AppX Publisher verification.
-- UI tokens: everything visual comes from `App.xaml` — semantic brush names (window/band/card/code,
-  three weights of text, two brand accents — Claude coral and Codex/OpenAI green —, the state
-  colours), a 4px spacing grid, two corner radii and a
-  four-step type scale, with control styles on top. Windows and code reference the keys (code goes
-  through `Theme`) and never hardcode a colour, size or radius; a state is always a word next to the
-  colour, never colour alone; machine data (addresses, paths, counters, log lines) is monospaced
-  with tabular figures.
+- Threads: the WPF host never blocks the UI thread on Core async work (`Task.Run` where a
+  synchronous wait is unavoidable) and Core start/stop paths use `ConfigureAwait(false)` — a
+  blocking wait + a dispatcher continuation is a deadlock (regression test
+  `StopCompletesUnderBlockedSynchronizationContext`). See [layers](specs/architecture/layers.md).
+- Lifetimes: chain links outlive the application as detached processes; the forward proxy and the
+  idle stopper can run in detached workers (`--proxy-worker`, `--watchdog-worker`); nothing is ever
+  written to autostart (rule #4). See [ADR-006](specs/decisions/006-detached-processes-no-autostart.md).
+- Elevation: only a separate runas helper of the same binary with validated, pinned arguments —
+  never a restart of the app. See [elevated-helper](specs/domains/elevated-helper.md).
+- Logs: one canonical file per log shared by all writers, size rotation, records in English. See
+  [logging](specs/domains/logging.md).
+- UI: everything visual comes from the `App.xaml` token dictionary (code goes through `Theme`); a
+  state is always a word next to the colour, machine data is monospaced. See
+  [app-shell](specs/domains/app-shell/README.md).
+
+Releases and installation: `Directory.Build.props` holds the version and must match the release
+tag (the workflow checks); a `v*` tag runs tests, then `packaging/make-release.ps1` (self-contained
+publish of App+Cli, the portable zip, the Inno Setup installer) and attaches zip + setup to a
+GitHub release. The installer is per-user (`%LOCALAPPDATA%\Programs\PrivateNetRouting`, no
+elevation), terminates the background workers before touching the files (they have no window, so
+the Restart Manager cannot close them), and writes no autostart entries (rule #4). The uninstaller
+reverts nothing outside its folder: it asks first, listing the commands that turn the guards off
+(`pnr guard ban|policy|sysproxy off`, `pnr chain down`).
 
 ## Repository structure
 
 ```
 src/
-  PrivateNetRouting.App/     # WPF: windows, single instance (mutex + event, activation of the
-                             # window hidden to the tray), tray (TrayIcon: show window, chain
-                             # up/down, launch Claude, two exits, balloon),
-                             # the language selector with drawn flag marks (en/ru; the config's
-                             # "auto" shows as the resolved language, a manual choice writes the
-                             # code to the config; LanguageFlag + the data template) and the "?"
-                             # help menu (diagnostics, open logs, create browser profile,
-                             # check for updates, about with the project's GitHub page),
-                             # the chain card — the single lifecycle control
-                             # (idempotent bring-up/stop of the whole chain, the animated rail
-                             # that runs a chain operation live — a bring-up (the card's or a
-                             # launch's), or a stop, whose stage words flip to stopping/stopped
-                             # and whose finished stages repaint neutral; a chain snapshot
-                             # taken while an operation runs never overwrites the rail,
-                             # during a bring-up (own or a launch's) Stop acts as cancel — the
-                             # operation aborts, what got raised is extinguished (a launch
-                             # extinguishes only the chain it raised itself; a bring-up cancelled
-                             # while it still waited for another process's operation extinguishes
-                             # nothing),
-                             # status rows: the PNR listeners with connection counters, the
-                             # upstream row (tailscale listeners, or the socks5 egress with its
-                             # reachability word), the config with its actions (open the
-                             # folder / reload; a reload that changed the proxy or chain
-                             # section, or a value the composition captured — the logs, the
-                             # PowerShell path, the application markers, the WSL distros —
-                             # says an application restart applies it), the idle
-                             # stopper with its status, the
-                             # auto-start flag and the toggle; collapsible to one compact row —
-                             # overall status dot + word and the same two buttons, a chain
-                             # operation expands the card and collapses it back on success,
-                             # the choice is remembered in ui.chainCardExpanded),
-                             # the --launch shortcut mode
-                             # (Claude running → window only), the "Browser" button and the
-                             # --launch-browser shortcut mode (the profile created once by the
-                             # dialog, egress probe before the start, "already running" note),
-                             # the launch actions in one row — the Claude pair pinned
-                             # left, the shared "Browser" button centred (it leans to the freed
-                             # side: without Codex — the right edge, without Claude — the left),
-                             # the Codex pair pinned
-                             # right (Launch Codex in the OpenAI green, CodexButton; an app off
-                             # in the config — claude.enabled/codex.enabled — takes its pair out, its
-                             # tray launch item and its startup update check with it), each
-                             # update button carries its app's update dot,
-                             # the startup Claude and Codex update checks, the update windows
-                             # (UpdateWindow for Claude, CodexUpdateWindow for the Store update;
-                             # the "Guards" card (status and control of
-                             # ban/policy/settings.json/WSL; collapsible to one row — aggregate
-                             # status dot + word and a single combined action: "enable all"
-                             # = ban + policy + both syncs, best-effort: a failing step
-                             # does not stop the rest, the result line names the failures
-                             # and keeps the live ban verdict; "disable all" = ban + policy;
-                             # ban and policy go as one elevation (--elevated-guard-all-on/off),
-                             # remembered in ui.guardsCardExpanded), the diagnostics window
-                             # (DiagnosticsWindow: read-only state summary with highlighting,
-                             # the logs-folder button);
-                             # the shared application icon
-                             # (AppIcons + Assets/app.ico, the tray is a WinForms NotifyIcon);
-                             # the windowless roles (the detached proxy worker, the idle stopper,
-                             # the elevated helper commands) run from Program.Main through
-                             # HeadlessHost, before WPF starts — no Application, no dispatcher; the
-                             # helper gets the asking user's config through --config and
-                             # the user's APPDATA/LOCALAPPDATA/USERPROFILE through --env (the
-                             # config paths expand with them, not with the administrator's)
-    LanguageFlag.cs          # the language selector's option data (LanguageOption) and the drawn
-                             # mark of a language: the Union Jack / three stripes
-    Localization/            # string dictionaries Strings.<code>.xaml + Loc: on-the-fly dictionary
-                             # swap (DynamicResource in XAML, Loc.S/Loc.F in code,
-                             # Loc.LanguageChanged)
-    ChainRail.cs             # the chain rail of the main window: the mode's stages as markers on a
-                             # link (tailscale: five, socks5: three — the label keys come in through
-                             # the constructor), built in code so a stage can light up (colour
-                             # fade, a pop when it completes, a breath while it is being brought up)
-    StepRail.cs              # one row of a vertical rail (the update window's phases), sharing the
-                             # marker vocabulary of the chain rail: hollow / check / cross
-    FormattedRuns.cs         # a localized message as inline runs: the words in the interface face,
-                             # the substituted values in the mono one; a value padded to a fixed
-                             # field keeps a live-updating line from shifting (the update windows'
-                             # detail and countdown lines)
-    Theme.cs                 # App.xaml tokens for the code paths: state → brush, state → word
-    WindowTheme.cs           # dark DWM title bar; unsupported builds keep the system one
-  PrivateNetRouting.Core/    # logic without UI
-    Configuration/           # AppConfig (including claude.enabled/codex.enabled — an app off hides its
-                             # UI pair, its tray item and its startup update check, its pnr
-                             # commands refuse with a note, and the settings sync skips it; ui.language, ui.checkUpdatesOnStart,
-                             # ui.chainCardExpanded, ui.guardsCardExpanded),
-                             # AppLanguage (auto → system → en),
-                             # loading from %APPDATA% (the template is config/*.example.json);
-                             # UI writes (AppConfigStore.Update) edit only the changed values in
-                             # the file text (JsonTextPatch: comments and layout survive), one
-                             # writer at a time, through a symlink to its target, by File.Replace
-    Logging/                 # FileLog: DEBUG..ERROR levels (logging.level, default info); one
-                             # shared file per log (no PID fallback); size rotation at start and
-                             # during writes (postponed while the chain is held) + manual RotateNow
-    AppUpdate/               # app self-update: AppUpdateChecker (the running version vs the
-                             # latest release of the repository) + GitHubAppReleaseFeed
-                             # (anonymous api.github.com — the repository is public); the
-                             # "?"-menu item and the one-time start check
-                             # (ui.checkAppUpdatesOnStart, the offer opens the releases page)
-    Net/Dns/                 # DnsWire (RFC 1035/8484), DohClient (plain http and https over the
-                             # upstream), DohEndpointPool, cache resolver,
-                             # TailscaleNetmapDohSource (auto-filling the pool from the tailnet
-                             # config: any DoH resolvers — http/https, by IP or by name)
-    Net/Socks/               # Socks5Client (no-auth or user/pass; dial by IPv4 or by name, ATYP=1/3)
-    Net/WslGateway.cs        # WSL NAT gateway address (vEthernet (WSL...)) for the proxy bind (re-read, the bind follows a recreated WSL network)
-    Net/Proxy/               # ForwardProxyService (CONNECT proxy), parser, ProxyHealthCheck
-                             # (CheckAsync-bool + ProbeAsync with timing and a status line),
-                             # ForwardProxySupervisor (listener placement: in-process or a detached
-                             # worker, the port is a single resource), ProxyWorker (the body of
-                             # --proxy-worker for pnr and App)
-    Chain/                   # ChainSupervisor (orchestration), SidecarDaemon (direct or elevated
-                             # start by chain.tailscale.elevation, stale kill), TailscaleVersionProbe
-                             # (the auto elevation decision), SidecarKeeper (watch-ipn),
-                             # SidecarCli, ElevatedChain (runas helper)
-    Launcher/                # ClaudeLauncher (bypass list, chain bring-up on failure, launch with
-                             # proxy flags, warnings about the policy/running Claude);
-                             # CodexLauncher (the Codex desktop app: package-context launch with
-                             # proxy flags + env, already-running warning);
-                             # RunningApp (an already running copy: the state scan, the log report,
-                             # the graceful/forced close of the restart);
-                             # BrowserProfile (the profile created once: files of both families,
-                             # the command line shared by the button and the shortcut, the
-                             # executable lookup, the config write-back) and BrowserLauncher
-                             # (egress probe → start; "already running" by the profile in cmdline)
-    Updater/                 # ClaudeUpdater (MSIX update orchestration: check → chain →
-                             # download → Publisher verification → install), PowerShellRunner,
-                             # PowerShellAppxPackageSource (Get-AppxPackage/Add-AppxPackage),
-                             # UpdateFeedUrlFinder (address from Claude's update feed through the
-                             # live proxy) + PowerShellJournalUrlFinder + PackageUrl (address from
-                             # the AppX journal),
-                             # CodexUpdater + StoreUpdateSource (the Store update: search by
-                             # product id, start by package family name, status polling)
-                             # + CodexVersionManifest (OpenAI's offered-version manifest through
-                             # the live proxy),
-                             # FragmentDownloader (chunked download with retries and resume),
-                             # MsixPackage (Identity/Publisher from AppxManifest.xml)
-    Guard/                   # direct-access control: EgressPolicyStore (HKLM Policies\Claude),
-                             # HostsFileBlock (idempotent hosts block), PowerShellBanSystemOps
-                             # (NRPT + firewall via cmdlets), ClaudeSettingsGuard (the maintained
-                             # shape of settings.json: proxy env, privacy switches, attribution
-                             # keys; ClaudeSettingsShape holds the manifest both the Windows and
-                             # the WSL write share),
-                             # CodexSettingsGuard (the respect_system_proxy flag in config.toml of
-                             # Codex plus the proxy env in CODEX_HOME/.env — surgical edits of
-                             # files owned by the app; CodexEnvFile holds the .env merge),
-                             # WslConfigGuard (the distro boot layer — the [boot] command of wsl.conf
-                             # → the marked runner of the startup directory, a foreign command
-                             # preserved as 00-…; startup script + settings.json of the distros; the
-                             # layer is optional: mode on/off/auto, sync per distro),
-                             # WinInetSystemProxyStore + system proxy bypass, GuardService
-                             # (status/operations/live probes), GuardElevatedCommands (UAC helper)
-    Watchdog/                # idle auto-stop: ClaudeUsageProbe (processes/connections/marker),
-                             # WslAppHostStopper (stopping the app hosts of the running configured distros:
-                             # Claude RPC + signal escalation, Codex app-server trees by CODEX_HOME),
-                             # WatchdogService (the loop, WSL → chain),
-                             # WatchdogSupervisor (the detached worker lifecycle: start by the
-                             # --watchdog-worker marker through cmd, liveness/stop by command
-                             # lines), WatchdogWorker (the worker body)
-    SystemOps/               # ports, WMI process lookup, privileges, launching through cmd with file
-                             # redirection, PowerShellRunner (IPowerShellExecutor: AppX/DnsClient/NetSecurity),
-                             # TcpConnectionTable (port listeners with PID via GetExtendedTcpTable)
-    Runtime/                 # ActivityMarker (the mtime marker for the watchdog)
-    Diagnostics/             # DiagnosticsService (state summary: port owners, keeper/node,
-                             # WSL bind, counters, marker, detailed CONNECT, the core of the guards,
-                             # the watchdog), LogStore (log list/tail/external rotation)
-    ProxyRuntime.cs          # composition of proxy + chain + launcher + watchdog + updater +
-                             # diagnostics from AppConfig (+ RotateLog: the live log — in place,
-                             # a free one — by shifting)
-  PrivateNetRouting.Cli/     # headless `pnr` mode (proxy [--detached] | chain status|up|down |
-                             # check | status | logs list|show <name> [--tail N]|rotate [<name>...] |
-                             # launch [--check-only] [--no-splash] [--restart] |
-                             # browser [--check-only] [--private] [--yes] [--url <url>] |
-                             # codex launch [--check-only] [--restart] | update [--check] ... |
-                             # watchdog | guard status [--live] | ban/policy/settings/wsl/sysproxy |
-                             # config; the hidden `--proxy-worker` — the detached worker body)
+  PrivateNetRouting.App/     # WPF host: windows, tray, single instance, localization,
+                             # windowless worker/helper roles (HeadlessHost)
+  PrivateNetRouting.Core/    # all logic (no UI): Configuration, Logging, Net/{Dns,Socks,Proxy},
+                             # Chain, Launcher, Updater, Guard, Watchdog, Diagnostics, AppUpdate,
+                             # SystemOps, Runtime; ProxyRuntime composes everything from AppConfig
+  PrivateNetRouting.Cli/     # the headless `pnr` console
 tests/
-  PrivateNetRouting.Tests/   # xUnit: wire formats, parser, config, the DoH pool, SOCKS5,
-                             # an end-to-end proxy run on a fake SOCKS5 + echo server,
-                             # the proxy supervisor on fakes (in-process/detached: spawn with a
-                             # marker, idempotence, busy port, kill of the identified worker,
-                             # a foreign owner is left alone, start/stop timeouts),
-                             # chain orchestration on fakes (order/idempotence/failures),
-                             # the Claude launcher on fakes (bypass list/order/modes), the browser
-                             # profile on fakes (user.js of both families/the Chromium policy
-                             # merge/command lines/the shortcut service) and the browser launcher
-                             # on fakes (bypass lists/egress probe/dead-egress contract/path
-                             # fallback/"already running"), the Codex launcher/updater on fakes
-                             # (launch script/launch order/Store search/update polling/version
-                             # manifest/codex activity probe), the watchdog on fakes
-                             # (WSL→chain order, the stopper output parser, the activity probe),
-                             # the idle stopper supervisor on fakes (liveness by command lines,
-                             # idempotent start, kill of the identified stoppers only),
-                             # the guard on fakes (hosts block, settings.json env, config.toml flag of Codex:
-                             # add/insert/rewrite/dotted/fresh file, the .env merge: fresh/replace/
-                             # export-form/foreign lines/idempotence, NRPT/firewall
-                             # scripts, the WSL layer: modes/status/sync, orchestration:
-                             # layers/elevation/live probes), the updater on fakes (versions/journal
-                             # URL, chunked download on a fake HTTP: resume/retries/cancellation,
-                             # Publisher, closing Claude, the full cycle), diagnostics on fakes
-                             # (summary: stopped chain/port owners/WSL bind/health/guards/watchdog,
-                             # the core of the guards without WSL, ProbeAsync on a live TcpListener),
-                             # logs (list/tail/rotation/busy file/shared single file/size
-                             # rotation during writes/postponed rotation/RotateNow), the cmd argument form
+  PrivateNetRouting.Tests/   # xUnit against Core only (per-module test classes + Fakes.cs)
 config/
   appsettings.example.json   # user config template with placeholders
 packaging/
-  setup.iss                  # Inno Setup script: per-user install (no elevation), the version
-                             # via /DAppVersion, no autostart (rule #4)
-  make-release.ps1           # self-contained publish of App+Cli + zip + installer into
-                             # artifacts/; the release workflow runs the same script
+  setup.iss                  # Inno Setup: per-user install, no autostart (rule #4)
+  make-release.ps1           # self-contained publish of App+Cli + zip + installer
 .github/
-  workflows/release.yml      # a v* tag: tests → make-release.ps1 → a GitHub release with the
-                             # zip and the installer (the tag must match Directory.Build.props)
+  workflows/release.yml      # v* tag: tests -> make-release.ps1 -> GitHub release
+specs/                       # the specification system — start at specs/INDEX.md
 ```
 
-The test project references `PrivateNetRouting.Core` only, plus `Fakes.cs` (the shared fake
-implementations — add new fakes there). The WPF app and the CLI therefore have no automated
-coverage: for changes in them, build and exercise the real window/command, and keep logic in Core
-so it stays testable.
+Per-file roles live in the "Key Files" sections of the specs. The test project references
+`PrivateNetRouting.Core` only (fakes in `Fakes.cs` and beside the tests that need them), so the
+WPF app and the CLI have no automated coverage: for changes in them, build and exercise the real
+window/command, and keep logic in Core so it stays testable.
 
 The user config is `%APPDATA%\PrivateNetRouting\appsettings.json` (created on first launch from the
 default values); logs are in `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
+
+## Specifications
+
+Detailed system specs live in `specs/`. Before making structural changes, read the relevant spec:
+
+- Start with `specs/INDEX.md` to find the right document for your task.
+- `specs/META.md` defines spec formats and update rules.
 
 ## Environment and commands
 
@@ -487,7 +249,7 @@ branches or straight into `main` (a personal repository, the main thing is not t
   `info`, an unknown value = `info`); all records are in English. Info carries one-off events
   (start/stop/auto-stop, important things — Warn/Error); periodic and per-request records (watchdog
   and DoH pool timers, proxy connects/resolves, chain bring-up steps, download fragments) are Debug
-  only. Rotation by size at start; manual rotation — from diagnostics (by the
+  only. Rotation by size at start and during writes; manual rotation — from diagnostics (by the
   file owner, in place).
 - UI localization: strings are in the `src/PrivateNetRouting.App/Localization/Strings.<code>.xaml`
   dictionaries (XAML — `{DynamicResource Key}`, code — `Loc.S`/`Loc.F`); the language is
@@ -500,6 +262,8 @@ branches or straight into `main` (a personal repository, the main thing is not t
 
 ## Where to look first
 
+- `specs/INDEX.md` — the specification system: task → spec navigation (architecture, domains,
+  contracts, ADRs). Read the relevant spec before structural changes.
 - `.secret.agents.md` (repository root, git-ignored, the deliberate exception to rule #1) — the
   machine-specific facts: real addresses, distro and user names, references to sources. Read it
   when a task needs real environment values; never copy its contents into a commit or another file.
