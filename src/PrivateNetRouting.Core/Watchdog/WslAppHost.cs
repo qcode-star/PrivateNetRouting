@@ -103,8 +103,9 @@ public sealed class WslProcessRunner : IWslProcessRunner
 /// Stopper via `wsl.exe -d &lt;distro&gt; -u root -- bash -s`: first the running distros are listed
 /// (`--list --running`, wsl.exe output is UTF-16LE with possible NULs) and intersected with the
 /// configured names — a distro that is not running is skipped without being started. In every
-/// running configured distro the stop script runs once (the Claude and Codex passes are gated
-/// by the stopClaude/stopCodex flags — the apps disabled in the config are not touched).
+/// running configured distro the stop script runs once; the Claude and Codex passes are the
+/// caller's choice (<c>stopClaude</c>/<c>stopCodex</c>): the idle auto-stop passes the apps
+/// enabled in the config, the owner's manual stop passes exactly the app of its button.
 /// </summary>
 public sealed class WslAppHostStopper(
     IReadOnlyList<string> distros,
@@ -382,7 +383,12 @@ public sealed class WslAppHostStopper(
             fi
         fi
 
-        claude_left=$(count_all)
+        # only the passes that ran contribute to the verdict: a Codex-only stop while Claude
+        # hosts are alive is a clean stop, not a stuck one
+        claude_left=0
+        if [ "$STOP_CLAUDE" = "1" ]; then
+            claude_left=$(count_all)
+        fi
         total=$((claude_left + codex_left))
         echo "REMAIN=$total"
         if [ "$total" = "0" ]; then

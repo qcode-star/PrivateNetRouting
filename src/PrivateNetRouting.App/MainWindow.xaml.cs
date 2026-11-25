@@ -21,6 +21,7 @@ using PrivateNetRouting.Core.Launcher;
 using PrivateNetRouting.Core.Net.Socks;
 using PrivateNetRouting.Core.SystemOps;
 using PrivateNetRouting.Core.Updater;
+using PrivateNetRouting.Core.Watchdog;
 
 namespace PrivateNetRouting.App;
 
@@ -76,6 +77,7 @@ public partial class MainWindow : Window
     private bool _chainBusyBringingUp; // the busy operation raises the chain — the rail speaks "starting", a stop speaks "stopping"
     private string? _openedAuthUrl; // the browser opens the login page once per URL
     private bool _launchBusy;
+    private bool _stopBusy; // the owner's manual app stop runs — a launch must not race it
     private CancellationTokenSource? _operationCts; // cancels the running chain/launch operation
     private TaskCompletionSource? _operationEnded; // completes when that operation (and its rollback) is over
     private bool _fillingLanguages;
@@ -289,11 +291,14 @@ public partial class MainWindow : Window
     private void OnToggleChainCard(object sender, RoutedEventArgs e) => SetChainCardExpanded(!_chainCardExpanded, persist: true);
 
     /// <summary>
-    /// The launch/update buttons of an application turned off in the config (claude.enabled /
-    /// codex.enabled) leave the row: the owner sees only what they use. The browser button is
-    /// shared and stays, leaning to the freed side: without Codex it takes the right edge,
-    /// without Claude the left one, with both on or both off it keeps the centre.
-    /// Follows a config reload.
+    /// <summary>
+    /// The launch/update/stop buttons of an application turned off in the config (claude.enabled /
+    /// codex.enabled) leave the row: the owner sees only what they use. The shared browser button
+    /// stays and leans to the freed side: without Codex it takes the right edge, without Claude the
+    /// left one, with both on or both off it keeps the centre.
+    /// With both apps on, the two stop buttons take a row of their own under the launch pairs
+    /// (each under its app's group); with one app on, its stop button sits in the launch row next
+    /// to its pair, where the missing group left room. Follows a config reload.
     /// </summary>
     private void ApplyAppAvailability()
     {
@@ -303,13 +308,28 @@ public partial class MainWindow : Window
         var codex = codexOn ? Visibility.Visible : Visibility.Collapsed;
         BtnLaunchClaude.Visibility = claude;
         BtnUpdateClaude.Visibility = claude;
+        BtnStopClaude.Visibility = claude;
         BtnUpdateCodex.Visibility = codex;
         BtnLaunchCodex.Visibility = codex;
+        BtnStopCodex.Visibility = codex;
+
+        // both on: the stop buttons take the row's outer edges, under the two launch buttons
+        // (Stop Claude left, Stop Codex right); one on: the button sits next to its pair in the
+        // launch row itself
+        var both = claudeOn && codexOn;
+        var stopRow = both ? 1 : 0;
+        Grid.SetRow(BtnStopClaude, stopRow);
+        Grid.SetRow(BtnStopCodex, stopRow);
+        Grid.SetColumn(BtnStopClaude, both ? 0 : 2);
+        Grid.SetColumn(BtnStopCodex, both ? 8 : 6);
+        BtnStopClaude.Margin = both ? new Thickness(0, 8, 0, 0) : new Thickness(8, 0, 0, 0);
+        BtnStopCodex.Margin = both ? new Thickness(0, 8, 0, 0) : new Thickness(0, 0, 8, 0);
+
         Grid.SetColumn(BtnLaunchBrowser, (claudeOn, codexOn) switch
         {
-            (true, false) => 6,
+            (true, false) => 8,
             (false, true) => 0,
-            _ => 3,
+            _ => 4,
         });
     }
 
@@ -1368,6 +1388,72 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnLaunchClaude(object sender, RoutedEventArgs e) => await RunLaunchAsync();
 
+    private async void OnStopClaude(object sender, RoutedEventArgs e) => await RunStopAppAsync(AppStopTarget.Claude);
+
+    private async void OnStopCodex(object sender, RoutedEventArgs e) => await RunStopAppAsync(AppStopTarget.Codex);
+
+    /// <summary>
+    /// The owner's manual stop of one app: its Windows processes and its hosts in the running
+    /// configured WSL distros, in parallel. Not a chain operation — no operation slot, no rail,
+    /// no cancel: the two stop buttons gray out until Core returns, the launch waits for it, and
+    /// the result line reports what was found and what survived. The chain is not touched.
+    /// </summary>
+    private async Task RunStopAppAsync(AppStopTarget target)
+    {
+        if (_chainBusy || _launchBusy || _stopBusy)
+        {
+            return;
+        }
+
+        var appNameKey = target == AppStopTarget.Claude ? "App.Name.Claude" : "App.Name.Codex";
+        _stopBusy = true;
+        _viewModel.SetStopBusy(true);
+        _viewModel.SetCheckResult("Main.Stop.BusyFmt", Loc.S(appNameKey));
+        try
+        {
+            // WMI scans, window messages and process handles must not run on the UI thread; a
+            // stop that has started is left to finish — the same policy as the chain stop
+            var result = await Task.Run(() => _runtime.AppStopper.StopAsync(target, CancellationToken.None));
+            ReportAppStop(result, appNameKey);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
+        }
+        finally
+        {
+            _stopBusy = false;
+            _viewModel.SetStopBusy(false);
+        }
+    }
+
+    /// <summary>The result line of a manual stop: nothing / done / not everything stopped.</summary>
+    private void ReportAppStop(AppStopResult result, string appNameKey)
+    {
+        var wsl = result.Wsl is null
+            ? "Main.Stop.Wsl.NoDistros"
+            : result.Wsl.State switch
+            {
+                WslHostState.Stopped => "Main.Stop.Wsl.Stopped",
+                WslHostState.Stuck => "Main.Stop.Wsl.Stuck",
+                _ => "Main.Stop.Wsl.None",
+            };
+        if (result.SomethingSurvived)
+        {
+            _viewModel.SetCheckResult(
+                "Main.Stop.PartialFmt", Loc.S(appNameKey), result.Windows.Survived.Count, Loc.S(wsl));
+        }
+        else if (result.AnythingStopped)
+        {
+            _viewModel.SetCheckResult(
+                "Main.Stop.DoneFmt", Loc.S(appNameKey), result.Windows.Closed, Loc.S(wsl));
+        }
+        else
+        {
+            _viewModel.SetCheckResult("Main.Stop.NothingFmt", Loc.S(appNameKey));
+        }
+    }
+
     /// <summary>
     /// Shortcut mode (App --launch instead of the Claude shortcut): Claude is already running — just
     /// show the window, without a second instance; not running — a normal launch whose bring-up is
@@ -2183,6 +2269,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _chainOperationRunning;
     private bool _chainOperationCancellable;
     private bool _launchRunning;
+    private bool _stopRunning;
     private string? _updateNoticeKey;
     private object?[] _updateNoticeArgs = [];
     private readonly bool _externalUpstream;
@@ -2409,7 +2496,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _chainStateBrush, value);
     }
 
-    public bool CanLaunch => !_chainOperationRunning && !_launchRunning;
+    public bool CanLaunch => !_chainOperationRunning && !_launchRunning && !_stopRunning;
+
+    /// <summary>
+    /// The manual stop is offered while no chain/launch/stop operation owns the apps: a launch
+    /// inspects and may close a running copy, and a stop while it runs would race that. It is
+    /// independent of the chain state — stopping the apps never stops the chain.
+    /// </summary>
+    public bool CanStopApps => !_chainOperationRunning && !_launchRunning && !_stopRunning;
 
     public bool CanGuard { get; private set; } = true;
 
@@ -2465,8 +2559,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         OnPropertyChanged(nameof(CanLaunch));
+        OnPropertyChanged(nameof(CanStopApps));
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
+    }
+
+    /// <summary>
+    /// The manual app stop: the buttons gray out while it runs, the launch waits for it, the
+    /// chain card is not touched (this is not a chain operation and it is not cancellable).
+    /// </summary>
+    public void SetStopBusy(bool busy)
+    {
+        _stopRunning = busy;
+        OnPropertyChanged(nameof(CanStopApps));
+        OnPropertyChanged(nameof(CanLaunch));
     }
 
     public void SetChainBusy(bool busy, bool cancellable = false)
@@ -2481,6 +2587,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         OnPropertyChanged(nameof(CanChainUp));
         OnPropertyChanged(nameof(CanChainDown));
+        OnPropertyChanged(nameof(CanStopApps));
     }
 
     public void SetCheckResult(string key, params object?[] args)

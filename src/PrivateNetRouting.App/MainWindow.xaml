@@ -359,12 +359,19 @@
             </StackPanel>
         </Border>
 
-                <!-- Launch actions, one row: the Claude pair pinned left, the shared browser
-                     button centred, the Codex pair pinned right. An app turned off in the config
-                     (claude.enabled / codex.enabled) takes its pair out of the row; the browser stays
-                     and leans to the freed side (ApplyAppAvailability moves its column): without
-                     Codex it takes the right edge, without Claude the left one, with both on or
-                     both off it keeps the centre.
+                <!-- Launch actions: the Claude group pinned left, the shared browser button
+                     centred, the Codex group pinned right. An app turned off in the config
+                     (claude.enabled / codex.enabled) takes its group out of the row; the browser
+                     stays and leans to the freed side (ApplyAppAvailability moves its column):
+                     without Codex it takes the right edge, without Claude the left one, with both
+                     on or both off it keeps the centre.
+                     The owner's manual stop lives in the same groups: with only one app enabled
+                     its quiet "Stop <app>" button sits in this row next to that app's pair — the
+                     other group is gone and there is room; with both enabled the two stop buttons
+                     take a row of their own under the pairs, each under its app's group
+                     (ApplyAppAvailability moves them between the rows). They stop every process of
+                     THAT app on Windows and its hosts in the running configured WSL distros; the
+                     launch button never changes meaning, and the chain stays untouched.
                      The buttons size to their labels
                      (no minimum width — no empty space around the text) and the two star columns
                      are pure spacers: they carry the spread on a wide window and give way (down to
@@ -373,16 +380,22 @@
                      by the brand dot on the update button (the tooltip carries the versions);
                      Diagnostics and the logs folder live in the help menu of the "?" button in the header. -->
                 <Grid Margin="0,16,0,16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*" MinWidth="20"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*" MinWidth="20"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <!-- the row's own padding is tighter than the app-wide one: five buttons must fit one row -->
+                    <!-- the row's own padding is tighter than the app-wide one: the buttons must fit one row -->
                     <Button x:Name="BtnLaunchClaude" Grid.Column="0" Content="{DynamicResource Main.Button.LaunchClaude}" Padding="12,0" Click="OnLaunchClaude"
                             IsEnabled="{Binding CanLaunch}"/>
                     <Button x:Name="BtnUpdateClaude" Grid.Column="1" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateClaude" IsEnabled="{Binding CanLaunch}"
@@ -395,9 +408,15 @@
                                      Visibility="{Binding UpdateBadgeVisibility}"/>
                         </StackPanel>
                     </Button>
-                    <Button x:Name="BtnLaunchBrowser" Grid.Column="3" Content="{DynamicResource Main.Button.LaunchBrowser}" Padding="12,0"
+                    <Button x:Name="BtnStopClaude" Grid.Column="2" Content="{DynamicResource Main.Button.StopClaude}"
+                            Style="{StaticResource GhostButton}" Padding="12,0" Margin="8,0,0,0" HorizontalAlignment="Left"
+                            Click="OnStopClaude" IsEnabled="{Binding CanStopApps}"/>
+                    <Button x:Name="BtnLaunchBrowser" Grid.Column="4" Content="{DynamicResource Main.Button.LaunchBrowser}" Padding="12,0"
                             Style="{StaticResource SecondaryButton}" Click="OnLaunchBrowser" IsEnabled="{Binding CanLaunch}"/>
-                    <Button x:Name="BtnUpdateCodex" Grid.Column="5" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateCodex" IsEnabled="{Binding CanLaunch}"
+                    <Button x:Name="BtnStopCodex" Grid.Column="6" Content="{DynamicResource Main.Button.StopCodex}"
+                            Style="{StaticResource GhostButton}" Padding="12,0" Margin="0,0,8,0" HorizontalAlignment="Right"
+                            Click="OnStopCodex" IsEnabled="{Binding CanStopApps}"/>
+                    <Button x:Name="BtnUpdateCodex" Grid.Column="7" Style="{StaticResource SecondaryButton}" Padding="12,0" Click="OnUpdateCodex" IsEnabled="{Binding CanLaunch}"
                             Margin="0,0,8,0"
                             ToolTipService.ShowOnDisabled="True" ToolTip="{Binding CodexUpdateBadgeToolTip}">
                         <StackPanel Orientation="Horizontal">
@@ -407,7 +426,7 @@
                                      Visibility="{Binding CodexUpdateBadgeVisibility}"/>
                         </StackPanel>
                     </Button>
-                    <Button x:Name="BtnLaunchCodex" Grid.Column="6" Content="{DynamicResource Main.Button.LaunchCodex}" Padding="12,0"
+                    <Button x:Name="BtnLaunchCodex" Grid.Column="8" Content="{DynamicResource Main.Button.LaunchCodex}" Padding="12,0"
                             Style="{StaticResource CodexButton}" Click="OnLaunchCodex"
                             IsEnabled="{Binding CanLaunch}"/>
                 </Grid>

@@ -262,6 +262,20 @@ public class WatchdogTests : IDisposable
         Assert.Contains("STOP_CODEX=0", neither);
     }
 
+    /// <summary>
+    /// The final verdict counts only the passes that ran: a Codex-only stop (the owner's manual
+    /// button) must not report the Claude hosts it was never asked to stop as its own leftovers.
+    /// </summary>
+    [Fact]
+    public void StopScriptCountsOnlyTheSelectedPass()
+    {
+        var codexOnly = WslAppHostStopper.Script(stopClaude: false, stopCodex: true);
+
+        Assert.Contains("claude_left=0", codexOnly);
+        Assert.Contains("if [ \"$STOP_CLAUDE\" = \"1\" ]; then", codexOnly);
+        Assert.Contains("claude_left=$(count_all)", codexOnly);
+    }
+
     /// <summary>Every RUNNING configured distro is visited; a distro that is not running
     /// is not started for the stop. The aggregate state is the worst of the distros.</summary>
     [Fact]

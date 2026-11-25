@@ -15,6 +15,7 @@ update rules live in [META.md](META.md).
 | Change the tailscale daemon/keeper/CLI | [Chain sidecar](domains/chain/sidecar.md) |
 | Change elevation / the runas helper | [Elevated helper](domains/elevated-helper.md), [Security model](architecture/security-model.md) |
 | Change how Claude/Codex start (flags, bypass, restart) | [Launchers](domains/launchers/README.md), [Codex](domains/launchers/codex.md), [Running app](domains/launchers/running-app.md) |
+| Change the manual stop of Claude/Codex (Windows + WSL) | [App stop](domains/launchers/app-stop.md), [Running app](domains/launchers/running-app.md), [WSL app stoppers](domains/watchdog/wsl-app-stoppers.md), [ADR-008](decisions/008-manual-app-stop.md) |
 | Change the browser profile or its launch | [Browser profile](domains/browser/README.md), [Profile files](domains/browser/profile-files.md), [Launch](domains/browser/launch.md) |
 | Change idle auto-stop / the stopper | [Watchdog](domains/watchdog/README.md), [Usage probe](domains/watchdog/usage-probe.md), [WSL app stoppers](domains/watchdog/wsl-app-stoppers.md) |
 | Change the Claude MSIX update | [Claude MSIX update](domains/updater/claude-msix.md), [Updater](domains/updater/README.md) |
@@ -47,6 +48,7 @@ CLI ----------+--> ProxyRuntime --------+
                   +-- Net/Proxy --> Net/Dns (DoH) --> Net/Socks (SOCKS5) --> contracts/protocols
                   +-- Chain --> elevated-helper --> (guard commands shared)
                   +-- Launcher --> RunningApp
+                  |            --> AppStopper --> Watchdog/wsl-app-stoppers
                   |            --> Browser (profile + launch)
                   +-- Updater (claude-msix | codex-store)
                   +-- Guard (ban | settings-sync | wsl-layer | system-proxy)
@@ -71,7 +73,7 @@ CLI ----------+--> ProxyRuntime --------+
 | Activity marker | [activity-marker.md](domains/activity-marker.md) |
 | Chain | [README](domains/chain/README.md), [Orchestration](domains/chain/orchestration.md), [Sidecar](domains/chain/sidecar.md) |
 | Elevated helper | [elevated-helper.md](domains/elevated-helper.md) |
-| Launchers | [README](domains/launchers/README.md), [Codex](domains/launchers/codex.md), [Running app](domains/launchers/running-app.md) |
+| Launchers | [README](domains/launchers/README.md), [Codex](domains/launchers/codex.md), [Running app](domains/launchers/running-app.md), [App stop](domains/launchers/app-stop.md) |
 | Browser profile | [README](domains/browser/README.md), [Profile files](domains/browser/profile-files.md), [Launch](domains/browser/launch.md) |
 | Watchdog | [README](domains/watchdog/README.md), [Usage probe](domains/watchdog/usage-probe.md), [WSL app stoppers](domains/watchdog/wsl-app-stoppers.md) |
 | Updater | [README](domains/updater/README.md), [Claude MSIX](domains/updater/claude-msix.md), [Codex Store](domains/updater/codex-store.md) |
@@ -103,3 +105,4 @@ Template: [`_template.md`](decisions/_template.md) (copy for a new ADR — see [
 | [005](decisions/005-chain-mode-shapes.md) | Chain mode shapes behind one orchestrator |
 | [006](decisions/006-detached-processes-no-autostart.md) | Detached processes, no services, no autostart |
 | [007](decisions/007-profiles.md) | Profiles — one process tree per config |
+| [008](decisions/008-manual-app-stop.md) | Manual stop of the desktop apps |

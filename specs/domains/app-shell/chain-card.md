@@ -3,7 +3,7 @@
 ## Role
 
 The single lifecycle control of the main window: the animated chain rail, the status rows, the
-launch action row, the compact collapsed form, and the guards card beneath it.
+launch action row and the stop row beneath it, the compact collapsed form, and the guards card.
 
 ## Key Files
 
@@ -50,6 +50,18 @@ for the chain" until the next raise).
 / `codex.enabled=false` remove the pair and its tray item. All launches share the
 running-copy consent flow (`LaunchPrompts`) and the health-check-first contract.
 
+**Stop row**: the owner's explicit shutdown of that app's processes on Windows and its hosts in
+the running configured WSL distros ([App stop](../launchers/app-stop.md)). With both apps
+enabled the two quiet ghost buttons take a row of their own under the launch pairs and hold its
+outer edges — "Stop Claude" under Launch Claude, "Stop Codex" under Launch Codex; with only one
+app enabled its stop button sits in the launch row next to that pair (the missing group left
+room).
+No dialog: the click is the decision; the chain stays untouched, and a stop that started is not
+cancelled. The launch buttons keep their meaning — a launch of a running copy still activates
+its window. Both stop buttons gray out while a chain/launch/stop operation runs; a launch waits
+while a stop runs. The result line says what was found ("nothing to stop" included), how many
+Windows processes were closed and the WSL outcome; survivors make it a partial result.
+
 **Guards card**: four rows (ban / policy / settings / WSL) with per-layer state words and
 actions; the collapsed form shows the aggregate (`GuardAggregate`: Unknown dominates, all-on
 good, all-off bad, else mixed) plus one combined button — "enable all" (one elevation for ban
@@ -71,6 +83,8 @@ the live ban verdict) / "disable all" (ban + policy, one elevation). Status is p
 ## Invariants
 
 - At most one chain/launch operation at a time (shared busy flags and one operation slot).
+- A manual app stop is not a chain operation: it has its own busy flag, blocks a launch while it
+  runs, and never touches the operation slot, the rail or the chain.
 - Stop during a bring-up cancels; Stop during a stop waits it out.
 - A cancelled bring-up restores the pre-operation chain state (rollback of raised links only).
 - The rail is never repainted from a stale or mid-operation snapshot.
@@ -80,5 +94,6 @@ the live ban verdict) / "disable all" (ban + policy, one elevation). Status is p
 
 - [App shell](README.md) — the window and tray around the card
 - [Chain](../chain/README.md) — what the operations do underneath
+- [App stop](../launchers/app-stop.md) — the stop row's operation
 - [Guard](../guard/README.md) — the guards card's status model
 - [Watchdog](../watchdog/README.md) — the idle stopper row

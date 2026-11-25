@@ -11,7 +11,7 @@ reached without an interface that the tests can fake.
 | Interface | Package | Consumed By | Purpose |
 |---|---|---|---|
 | `IPortProbe` (`TcpPortProbe`) | `SystemOps` | forward-proxy supervisor, chain | "is this port listening" (no admin) |
-| `IProcessFinder` (`WmiProcessFinder`) | `SystemOps` | chain, launchers, watchdog, diagnostics | process scan by name/command line (WMI) |
+| `IProcessFinder` (`WmiProcessFinder`) | `SystemOps` | chain, launchers (launch/restart/stop), watchdog, diagnostics | process scan by name/command line (WMI) |
 | `ITcpConnectionTable` (`TcpConnectionTable`) | `SystemOps` | proxy supervisor, diagnostics | port listeners with PIDs (iphlpapi, no PowerShell) |
 | `IPowerShellExecutor` (`PowerShellRunner`) | `SystemOps` | guard ban ops, AppX source, journal finder, Codex launcher | windowless PowerShell scripts |
 | `IShortcutFactory` (`WScriptShortcutFactory`) | `SystemOps` | browser profile service | desktop `.lnk` creation (WScript.Shell COM) |
@@ -26,12 +26,12 @@ reached without an interface that the tests can fake.
 | `IStoreUpdateSource` / `IStoreInstallHandle` (`StoreUpdateSource`) | `Updater` | Codex updater | WinRT AppInstallManager |
 | `ICodexVersionManifest` (`CodexVersionManifest`) | `Updater` | Codex updater | offered-version manifest |
 | `IClaudeProcessSource` / `IClaudeProcessHandle` (`RunningClaudeProcessSource`) | `Updater` | both updaters | running app handles for the close |
-| `IRunningAppCloser` (`WindowsRunningAppCloser`) | `Launcher` | launchers, updaters | graceful close + tree kill |
+| `IRunningAppCloser` (`WindowsRunningAppCloser`) | `Launcher` | launchers (restart, manual stop), updaters | graceful close + tree kill |
 | `IEgressPolicyStore` (`RegistryEgressPolicyStore`) | `Guard` | GuardService | HKLM managed policy |
 | `IBanSystemOps` (`PowerShellBanSystemOps`) | `Guard` | GuardService | NRPT + firewall |
 | `ISystemProxyStore` (`WinInetSystemProxyStore`) | `Guard` | GuardService | WinINET proxy values |
 | `IClaudeUsageProbe` / `IEstablishedConnectionCounter` | `Watchdog` | WatchdogService | busy/idle signals |
-| `IWslProcessRunner` (`WslProcessRunner`) | `Watchdog`/`Guard` | WSL stopper, WSL guard | `wsl.exe` / in-distro bash |
+| `IWslProcessRunner` (`WslProcessRunner`) | `Watchdog`/`Guard`/`Launcher` | WSL stopper (idle auto-stop, manual app stop), WSL guard | `wsl.exe` / in-distro bash |
 | `IAppReleaseFeed` (`GitHubAppReleaseFeed`) | `AppUpdate` | app self-update | GitHub releases |
 | `TimeProvider` | BCL | marker, DNS cache, downloads | injectable clock |
 

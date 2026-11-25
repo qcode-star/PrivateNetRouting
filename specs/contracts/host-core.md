@@ -10,7 +10,7 @@ contracts.
 
 | Interface | Package | Consumed By | Purpose |
 |---|---|---|---|
-| `ProxyRuntime.FromConfig(AppConfig, logFileName?, ProfileContext?)` | `Core` | App, CLI, workers | the whole object graph: `Config`, `Profile`, `ProxyService?`, `ProxyControl`, `Chain`, `Launcher`, `CodexLauncher`, `Browser`, `BrowserProfile`, `Watchdog`, `WatchdogControl`, `Updater`, `CodexUpdater`, `Guard`, `Diagnostics`, `Logs`, `AppUpdate`, `Log` |
+| `ProxyRuntime.FromConfig(AppConfig, logFileName?, ProfileContext?)` | `Core` | App, CLI, workers | the whole object graph: `Config`, `Profile`, `ProxyService?`, `ProxyControl`, `Chain`, `Launcher`, `CodexLauncher`, `AppStopper`, `Browser`, `BrowserProfile`, `Watchdog`, `WatchdogControl`, `Updater`, `CodexUpdater`, `Guard`, `Diagnostics`, `Logs`, `AppUpdate`, `Log` |
 | `ProxyRuntime.StartAsync/StopAsync/DisposeAsync` | `Core` | both hosts | proxy lifecycle (dispose on the thread pool from the GUI) |
 | `ProxyRuntime.HandOverProxyAsync(ct)` | `Core` | both hosts | hand the in-process listener to a worker under the chain lock |
 | `ProxyRuntime.CheckHealthAsync(timeout)` | `Core` | both hosts | the live CONNECT roundtrip |
@@ -34,9 +34,9 @@ exit (the GUI via `Task.Run(...).GetAwaiter().GetResult()` — never on the disp
 
 Down: `AppConfig` values and user decisions (consent answers as flags/delegates — e.g.
 `LauncherOptions.RestartRunning`, `ConfirmDeadEgress`). Up: result records
-(`LaunchResult`, `UpdateRunResult`, `GuardSnapshot`, `DiagnosticsSummary`, `ChainState`,
-`ChainStep` progress), typed failures (`ChainException`, `UpdateOutcome.NoChange`), and
-one-shot events (`VersionStateResolved`, auth URL on a `ChainStep`).
+(`LaunchResult`, `AppStopResult`, `UpdateRunResult`, `GuardSnapshot`, `DiagnosticsSummary`,
+`ChainState`, `ChainStep` progress), typed failures (`ChainException`, `UpdateOutcome.NoChange`),
+and one-shot events (`VersionStateResolved`, auth URL on a `ChainStep`).
 
 ## Error Propagation
 

@@ -88,6 +88,8 @@
     <s:String x:Key="Main.Button.UpdateClaude">Обновить Claude</s:String>
     <s:String x:Key="Main.Button.UpdateCodex">Обновить Codex</s:String>
     <s:String x:Key="Main.Button.LaunchCodex">Запустить Codex</s:String>
+    <s:String x:Key="Main.Button.StopClaude">Остановить Claude</s:String>
+    <s:String x:Key="Main.Button.StopCodex">Остановить Codex</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">цепочка поднята</s:String>
@@ -111,6 +113,16 @@
     <s:String x:Key="Main.Launch.RestartDeclined">запуск отменён: запущенная копия работает без прокси</s:String>
     <s:String x:Key="Main.Launch.RestartedFmt">Claude перезапущен через прокси ({0} с)</s:String>
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude отключён в конфиге (claude.enabled = false) — запускать нечего</s:String>
+
+    <!-- Ручная остановка приложения: явное действие владельца (процессы Windows + хосты WSL) -->
+    <s:String x:Key="Main.Stop.BusyFmt">останавливаю {0}…</s:String>
+    <s:String x:Key="Main.Stop.DoneFmt">{0} остановлен — Windows: {1} процессов, WSL: {2}</s:String>
+    <s:String x:Key="Main.Stop.PartialFmt">{0}: остановлено не всё — выживших процессов Windows: {1}, WSL: {2}</s:String>
+    <s:String x:Key="Main.Stop.NothingFmt">{0} не запущен — останавливать нечего</s:String>
+    <s:String x:Key="Main.Stop.Wsl.None">хостов нет</s:String>
+    <s:String x:Key="Main.Stop.Wsl.Stopped">остановлено</s:String>
+    <s:String x:Key="Main.Stop.Wsl.Stuck">не подтверждено</s:String>
+    <s:String x:Key="Main.Stop.Wsl.NoDistros">дистрибутивы WSL не настроены</s:String>
 
     <!-- Профиль браузера: создаётся один раз диалогом, дальше запускается как есть -->
     <s:String x:Key="Main.Browser.Done">Браузер запущен со своим профилем (выход отвечает)</s:String>

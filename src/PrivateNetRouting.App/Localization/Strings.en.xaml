@@ -88,6 +88,8 @@
     <s:String x:Key="Main.Button.UpdateClaude">Update Claude</s:String>
     <s:String x:Key="Main.Button.UpdateCodex">Update Codex</s:String>
     <s:String x:Key="Main.Button.LaunchCodex">Launch Codex</s:String>
+    <s:String x:Key="Main.Button.StopClaude">Stop Claude</s:String>
+    <s:String x:Key="Main.Button.StopCodex">Stop Codex</s:String>
 
     <!-- Operation results -->
     <s:String x:Key="Main.Chain.UpDone">chain is up</s:String>
@@ -111,6 +113,16 @@
     <s:String x:Key="Main.Launch.RestartDeclined">launch cancelled: the running copy works without the proxy</s:String>
     <s:String x:Key="Main.Launch.RestartedFmt">Claude restarted through the proxy ({0} s)</s:String>
     <s:String x:Key="Main.Launch.ClaudeDisabled">Claude is turned off in the config (claude.enabled = false) — nothing to launch</s:String>
+
+    <!-- Manual app stop: the owner's explicit shutdown of one app (Windows processes + WSL hosts) -->
+    <s:String x:Key="Main.Stop.BusyFmt">stopping {0}…</s:String>
+    <s:String x:Key="Main.Stop.DoneFmt">{0} stopped — Windows: {1} processes, WSL: {2}</s:String>
+    <s:String x:Key="Main.Stop.PartialFmt">{0}: not everything stopped — Windows survivors: {1}, WSL: {2}</s:String>
+    <s:String x:Key="Main.Stop.NothingFmt">{0} was not running — nothing to stop</s:String>
+    <s:String x:Key="Main.Stop.Wsl.None">no hosts running</s:String>
+    <s:String x:Key="Main.Stop.Wsl.Stopped">stopped</s:String>
+    <s:String x:Key="Main.Stop.Wsl.Stuck">not confirmed</s:String>
+    <s:String x:Key="Main.Stop.Wsl.NoDistros">no WSL distros configured</s:String>
 
     <!-- Browser profile: created once through the dialog, then started as it is -->
     <s:String x:Key="Main.Browser.Done">Browser started with its own profile (the egress answers)</s:String>

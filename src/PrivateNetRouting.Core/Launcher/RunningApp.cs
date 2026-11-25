@@ -269,11 +269,22 @@ public sealed class WindowsRunningAppCloser : IRunningAppCloser, IDisposable
         _unpinned.Clear();
     }
 }
-public sealed record RunningAppCloseResult(int ClosedGracefully, int Killed, IReadOnlyList<int> Survived)
+/// <summary>
+/// What a close did: <paramref name="Scanned"/> — the processes the scan found (the whole family,
+/// children included), <paramref name="ClosedGracefully"/> — those that took a WM_CLOSE to their
+/// own top-level window, <paramref name="Killed"/> — those the forced tree kill removed,
+/// <paramref name="Survived"/> — still alive at the end. Children that die with a closed parent
+/// are counted in <paramref name="Scanned"/> only: <c>Scanned - Survived.Count</c> is the number
+/// of processes the close actually got rid of.
+/// </summary>
+public sealed record RunningAppCloseResult(int ClosedGracefully, int Killed, IReadOnlyList<int> Survived, int Scanned = 0)
 {
     public static RunningAppCloseResult Nothing { get; } = new(0, 0, []);
 
-    public bool AnythingClosed => ClosedGracefully + Killed > 0;
+    public bool AnythingClosed => Scanned - Survived.Count > 0;
+
+    /// <summary>The processes the close removed (window closes, tree kills and children alike).</summary>
+    public int Closed => Scanned - Survived.Count;
 }
 
 /// <summary>
@@ -381,8 +392,10 @@ public sealed class RunningApp(
     /// <summary>
     /// Closes the running copy: WM_CLOSE to the main window first (the children go down with it),
     /// then a forced tree kill of whatever is still alive. The caller has already asked the owner.
+    /// <paramref name="purpose"/> names the reason in the log: the same close serves the restart
+    /// flow and the owner's explicit stop, and the line must not claim the wrong one.
     /// </summary>
-    public async Task<RunningAppCloseResult> CloseAsync(string appName, TimeSpan graceful, CancellationToken ct)
+    public async Task<RunningAppCloseResult> CloseAsync(string appName, string purpose, TimeSpan graceful, CancellationToken ct)
     {
         var processes = Inspect().Processes;
         if (processes.Count == 0)
@@ -410,13 +423,13 @@ public sealed class RunningApp(
             ? []
             : await WaitUntilGoneAsync(forced, KillWait, ct).ConfigureAwait(false);
 
-        log.Info($"{logPrefix}: {appName} closed to restart through the proxy ({processes.Count} processes: window close {asked}, forced {forced.Count - survived.Count})");
+        log.Info($"{logPrefix}: {appName} closed {purpose} ({processes.Count} processes: window close {asked}, forced {forced.Count - survived.Count})");
         if (survived.Count > 0)
         {
             log.Warn($"{logPrefix}: {survived.Count} {appName} processes survived the close ({string.Join(", ", survived)}) — the new start will only activate the existing window");
         }
 
-        return new RunningAppCloseResult(asked, forced.Count - survived.Count, survived);
+        return new RunningAppCloseResult(asked, forced.Count - survived.Count, survived, processes.Count);
     }
 
     /// <summary>The --proxy-server value of a command line; null — the flag is absent.</summary>

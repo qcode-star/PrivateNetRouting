@@ -95,7 +95,7 @@ public sealed class CodexLauncher(
             // start of a single-instance app would only activate the existing window, so the
             // running copy is closed first. A copy that carries our proxy is left alone.
             restarted = (await _running
-                    .CloseAsync("Codex", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
+                    .CloseAsync("Codex", "to restart through the proxy", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
                     .ConfigureAwait(false))
                 .AnythingClosed;
         }
@@ -134,6 +134,14 @@ public sealed class CodexLauncher(
     /// the launch (LauncherOptions.RestartRunning).
     /// </summary>
     public RunningAppInfo InspectRunning() => _running.Inspect();
+
+    /// <summary>
+    /// The owner's explicit stop: close every process of the app (WM_CLOSE first, a tree kill of
+    /// what survives) — a copy that carries our proxy included, unlike the launch-time restart
+    /// offer, which never touches one. The WSL hosts are the app stopper's other half.
+    /// </summary>
+    public Task<RunningAppCloseResult> CloseRunningAsync(CancellationToken ct) =>
+        _running.CloseAsync("Codex", "on the owner's request", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct);
 
     /// <summary>The owner has refused the restart offer: the log keeps the reason nothing started.</summary>
     public void NoteRestartDeclined() => _running.NoteDeclined("Codex");

@@ -142,7 +142,7 @@ public sealed class ClaudeLauncher(
             // The owner has already agreed to the restart (GUI dialog, CLI question): a copy
             // that carries our proxy is left alone — a new start only activates its window.
             restarted = (await _running
-                    .CloseAsync("Claude", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
+                    .CloseAsync("Claude", "to restart through the proxy", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct)
                     .ConfigureAwait(false))
                 .AnythingClosed;
         }
@@ -176,6 +176,14 @@ public sealed class ClaudeLauncher(
     /// the launch (LauncherOptions.RestartRunning).
     /// </summary>
     public RunningAppInfo InspectRunning() => _running.Inspect();
+
+    /// <summary>
+    /// The owner's explicit stop: close every process of the app (WM_CLOSE first, a tree kill of
+    /// what survives) — a copy that carries our proxy included, unlike the launch-time restart
+    /// offer, which never touches one. The WSL hosts are the app stopper's other half.
+    /// </summary>
+    public Task<RunningAppCloseResult> CloseRunningAsync(CancellationToken ct) =>
+        _running.CloseAsync("Claude", "on the owner's request", TimeSpan.FromSeconds(config.RestartGraceSeconds), ct);
 
     /// <summary>The owner has refused the restart offer: the log keeps the reason nothing started.</summary>
     public void NoteRestartDeclined() => _running.NoteDeclined("Claude");

@@ -5,7 +5,9 @@
 Idle auto-stop: while the chain is up and nothing uses it, stop the app hosts inside the
 running configured WSL distros and then the chain itself — so the tailnet node, the proxy and
 the WSL app hosts do not linger unattended. The stopper lives only over a live chain and never
-registers itself in autostart.
+registers itself in autostart. The same in-distro pass, with one app selected, backs the
+window's manual stop ([App stop](../launchers/app-stop.md)) — that caller does not need the
+chain.
 
 ## Key Files
 
@@ -100,5 +102,6 @@ lifecycle.
 
 - [Usage probe](usage-probe.md) — the busy/idle signals
 - [WSL app stoppers](wsl-app-stoppers.md) — the in-distro stop pass
+- [App stop](../launchers/app-stop.md) — the owner's manual stop (one app, no chain needed)
 - [Chain orchestration](../chain/orchestration.md) — the stop and the hooks
 - [Activity marker](../activity-marker.md) — the freshness signal

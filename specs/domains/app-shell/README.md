@@ -3,9 +3,9 @@
 ## Purpose
 
 The WPF host: one single-instance process per profile with a tray icon, the main window (chain
-card, guards card, launch row), the update/diagnostics/profile windows, and the windowless roles
-(detached proxy worker, idle stopper, elevated helper commands) that run before WPF starts.
-Profiles: [Profiles](../configuration/profiles.md).
+card, guards card, the launch/stop row), the update/diagnostics/profile windows, and the
+windowless roles (detached proxy worker, idle stopper, elevated helper commands) that run before
+WPF starts. Profiles: [Profiles](../configuration/profiles.md).
 
 ## Key Files
 
@@ -13,7 +13,7 @@ Profiles: [Profiles](../configuration/profiles.md).
 - `src/PrivateNetRouting.App/HeadlessHost.cs` — windowless roles + crash logging
 - `src/PrivateNetRouting.App/App.xaml` + `src/PrivateNetRouting.App/App.xaml.cs` — `ShutdownMode`, single-instance mutex + events, tray wiring, exit paths, startup checks
 - `src/PrivateNetRouting.App/TrayIcon.cs` — the WinForms `NotifyIcon` menu and balloon
-- `src/PrivateNetRouting.App/MainWindow.xaml` + `src/PrivateNetRouting.App/MainWindow.xaml.cs` — chain card, guards card, launch row (detail: [Chain card](chain-card.md))
+- `src/PrivateNetRouting.App/MainWindow.xaml` + `src/PrivateNetRouting.App/MainWindow.xaml.cs` — chain card, guards card, the launch actions with their stop buttons (detail: [Chain card](chain-card.md))
 - `src/PrivateNetRouting.App/DiagnosticsWindow.xaml`, `src/PrivateNetRouting.App/BrowserProfileWindow.xaml`, `src/PrivateNetRouting.App/AboutWindow.xaml` (+ code-behinds)
 - `src/PrivateNetRouting.App/Theme.cs`, `WindowTheme.cs`, `App.xaml` — the UI token dictionary
 
@@ -50,7 +50,9 @@ card's buttons; no Codex tray item; the launch item disappears when `claude.enab
 its rollback (the chain is left as it was before that operation); then either stop the chain
 ("Exit with full chain stop") or hand the in-process proxy listener over to a detached worker
 ("Exit") so the chain keeps serving. A started idle stopper outlives both exits (its own
-process). An exiting instance ignores shortcut signals.
+process). A manual app stop is not a chain operation: the exit neither cancels nor waits for it
+(the WSL half runs in its own `wsl.exe` child and finishes; the window never blocks an exit on
+a stop). An exiting instance ignores shortcut signals.
 
 **Headless roles** (before WPF, from `Program.Main`): the `--proxy-worker` body, the
 `--watchdog-worker` body, and the `--elevated-*` helper commands (`--result-file` required,
@@ -84,7 +86,7 @@ chain, no UAC.
 | `ui.language` | `auto` | see [Localization](localization.md) |
 | `ui.checkUpdatesOnStart` / `ui.checkAppUpdatesOnStart` | `true` | startup checks |
 | `ui.chainCardExpanded` / `ui.guardsCardExpanded` | `true` | card collapse state |
-| `claude.enabled` / `codex.enabled` | `true` | false hides the app's button pair, tray item and startup check |
+| `claude.enabled` / `codex.enabled` | `true` | false hides the app's launch/update/stop buttons, tray item and startup check |
 
 ## Extension Points
 

@@ -5,13 +5,15 @@
 Start the two desktop apps (Claude, Codex) through the proxy chain: verify the chain live,
 bring it up idempotently on failure, build the proxy flags/bypass lists, warn about a policy
 gap or an already running copy without flags, and handle the restart-consent flow. Also owns
-the scan/report/close machinery for an already running copy.
+the scan/report/close machinery for an already running copy, and the owner's manual stop of
+either app on Windows and in WSL ([App stop](app-stop.md)).
 
 ## Key Files
 
 - `src/PrivateNetRouting.Core/Launcher/ClaudeLauncher.cs` — `ClaudeLauncher`, `ClaudeBypassList`, `LauncherOptions`, `LaunchOutcome`, `LaunchResult`
 - `src/PrivateNetRouting.Core/Launcher/CodexLauncher.cs` — `CodexLauncher`, `CodexLaunchOutcome` (package-context launch; detail in [Codex](codex.md))
 - `src/PrivateNetRouting.Core/Launcher/RunningApp.cs` — `RunningApp`, `RunningAppState`, `IRunningAppCloser`, `WindowsRunningAppCloser` (detail in [Running app](running-app.md))
+- `src/PrivateNetRouting.Core/Launcher/AppStopper.cs` — `AppStopper`, `AppStopTarget`, `AppStopResult` (detail in [App stop](app-stop.md))
 
 ## Core Types
 
@@ -23,6 +25,12 @@ public enum LaunchOutcome { Launched, CheckOnly, RestartedExisting, Reported }
 
 public sealed record LaunchResult(LaunchOutcome Outcome, bool ChainRaised,
                                   TimeSpan Elapsed, bool RestartedExisting = false);
+
+public enum AppStopTarget { Claude, Codex }
+
+public sealed record AppStopResult(AppStopTarget Target, bool Disabled,
+                                   RunningAppCloseResult Windows, WslHostStopResult? Wsl,
+                                   TimeSpan Elapsed);
 
 public static class ClaudeBypassList {
     // fixed base + each bypassDomains zone in two forms ("zone", "*.zone"), joined with ";"
@@ -52,12 +60,23 @@ private ranges (`10/8`, `172.16/12`, `192.168/16`), `169.254/16`, `100.64/10` (C
 The Codex launcher runs the same skeleton (steps 1-4 with "Codex" naming) and then a
 package-context start — see [Codex](codex.md).
 
+Manual stop (the window's "Stop Claude" / "Stop Codex", no launch involved):
+
+```
+AppStopper.StopAsync(target)
+  Windows: the target launcher's CloseRunningAsync (any copy, a proxied one included)
+  WSL:     one WslAppHostStopper pass after the close, exactly that app's flags,
+           running configured distros only (a closing app may restart its WSL host)
+  the chain is untouched
+```
+
 ## Invariants
 
 - The owner-consent question ("restart the running copy?") is the caller's (GUI dialog / CLI
   prompt); Core only exposes the state and performs the close on consent
   (`NoteRestartDeclined()` logs a refusal).
-- A running copy **with** our proxy flags (`Proxied`) is never closed.
+- A launch/restart never closes a copy **with** our proxy flags (`Proxied`); the owner's manual
+  stop closes any copy ([ADR-008](../../decisions/008-manual-app-stop.md)).
 - The health check never raises the chain by itself; the bring-up happens exactly once, inside
   `LaunchAsync`, and is reported in `LaunchResult.ChainRaised`.
 - The launch address always comes from `AppProxyEndpoint` — never from `forwardProxy.listen`.
@@ -72,7 +91,7 @@ package-context start — see [Codex](codex.md).
 | `claude.aliasPath` | WindowsApps execution alias | env vars expanded |
 | `claude.processName` / `codex.processName` | `Claude` / `ChatGPT` | running-copy detection |
 | `bypassDomains` | `[]` | zones; two spellings per zone everywhere |
-| `restartGraceSeconds` | 15 | WM_CLOSE wait before the forced tree kill |
+| `restartGraceSeconds` | 15 | WM_CLOSE wait before the forced tree kill: the launch restart and the manual stop |
 | `closeWaitSeconds` / `killSettleSeconds` | 25 / 3 | shared with the updaters' app close |
 
 ## Extension Points
@@ -85,6 +104,7 @@ package-context start — see [Codex](codex.md).
 
 - [Codex](codex.md) — the package-context launch and env refresh
 - [Running app](running-app.md) — the scan/close contract
+- [App stop](app-stop.md) — the owner's manual stop (Windows + WSL)
 - [Chain](../chain/README.md) — the bring-up behind step 1
 - [Guard](../guard/settings-sync.md) — the settings/env layer the flags mirror
 - [Proxied apps](../../contracts/proxied-apps.md) — the maintained shapes the flags belong to

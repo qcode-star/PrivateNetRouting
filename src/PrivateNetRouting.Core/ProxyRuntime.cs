@@ -55,6 +55,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
     /// <summary>Codex desktop app launcher (Microsoft Store MSIX, package-context launch).</summary>
     public CodexLauncher CodexLauncher { get; }
 
+    /// <summary>
+    /// The owner's manual stop of one desktop app: the launcher's running-copy close on Windows
+    /// and the idle stopper's WSL pass for that app — the buttons behind it are the window's,
+    /// the chain is not involved.
+    /// </summary>
+    public AppStopper AppStopper { get; }
+
     public BrowserLauncher Browser { get; }
 
     /// <summary>Creation of the browser profile (the "?" help menu dialog): the profile files, the desktop shortcut and the write-back into the user config.</summary>
@@ -102,7 +109,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(ProfileContext profile, AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService? proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(ProfileContext profile, AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService? proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, AppStopper appStopper, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
         Profile = profile;
         Config = config;
@@ -116,6 +123,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _launcherLog = launcherLog;
         CodexLauncher = codexLauncher;
         _codexLauncherLog = codexLauncherLog;
+        AppStopper = appStopper;
         Browser = browser;
         _browserLog = browserLog;
         BrowserProfile = browserProfile;
@@ -277,6 +285,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
             codexLauncherLog,
             new PowerShellRunner(config.PowerShellPath));
 
+        // the owner's manual stop: the launchers' running-copy close plus the idle stopper's WSL
+        // script for exactly one app (the script is the same; only its pass flags differ)
+        var appStopper = new AppStopper(config, launcher, codexLauncher);
+
         var browserLog = NewLog("browser.log");
         var browser = new BrowserLauncher(
             config,
@@ -406,7 +418,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
             logs,
             profile: profile);
 
-        return new ProxyRuntime(profile, config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserProfile, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
+        return new ProxyRuntime(profile, config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, appStopper, browser, browserProfile, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
