@@ -5,7 +5,7 @@ namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
 /// The persistent guard layer of Codex (ChatGPT desktop and the CLI), two files of CODEX_HOME:
-/// the flag `[features] respect_system_proxy = true` and the `[features.network_proxy]` block in
+/// the flag `[features] respect_system_proxy = false` and the `[features.network_proxy]` block in
 /// `~/.codex/config.toml` — the latter turns on Codex's managed network proxy for sandboxed
 /// commands and lets it honour the proxy env for its upstream, so command traffic leaves through
 /// the application's forward proxy instead of a direct route. The permission profile still decides
@@ -15,6 +15,13 @@ namespace PrivateNetRouting.Core.Guard;
 /// The embedded CLI core loads .env after its own start: the desktop app strips the inherited
 /// proxy env variables from the processes it spawns, so this file is what actually carries the
 /// proxy to the core (the launcher's env reaches only the Chromium part, via the flags).
+///
+/// The flag is maintained off on purpose. With `respect_system_proxy = true` Codex resolves the
+/// system proxy first; when the system proxy is disabled the route resolves to direct and the
+/// client calls `no_proxy()`, so the proxy env of .env is ignored — login/token exchange and
+/// account requests then go direct and fail on a blocked network. With `false` the core keeps
+/// reqwest's default proxy behavior, which reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from .env; that
+/// is the transport this guard relies on.
 ///
 /// The desktop app owns config.toml and rewrites it, so the edits are surgical: every other line is
 /// preserved byte for byte, only the maintained keys are inserted or rewritten, the newline style
@@ -30,6 +37,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
     private const string SectionName = "features";
     private const string KeyName = "respect_system_proxy";
     private const string DottedKey = SectionName + "." + KeyName;
+    private const string FlagValue = "false";
 
     // The sandbox network layer of newer Codex builds: Codex runs its own managed proxy for the
     // commands a permission profile lets out to the network, and that proxy honours the proxy env
@@ -67,9 +75,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
             var value = FindValue(flagText);
             var networkOk = NetworkProxyUpToDate(flagText);
-            if (value == true && networkOk && envOk)
+            if (value == false && networkOk && envOk)
             {
-                return new CodexSettingsStatus(GuardState.On, true, FileMissing: false, EnvUpToDate: true)
+                return new CodexSettingsStatus(GuardState.On, false, FileMissing: false, EnvUpToDate: true)
                 {
                     NetworkProxyUpToDate = true,
                 };
@@ -80,11 +88,11 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 parts.Add("config.toml not found");
             }
-            else if (value != true)
+            else if (value != false)
             {
                 parts.Add(value switch
                 {
-                    false => $"{KeyName} = false (expected true)",
+                    true => $"{KeyName} = true (expected false)",
                     _ => $"{DottedKey} is not set",
                 });
             }
@@ -146,6 +154,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
         return Locate(SplitLines(text)).Value;
     }
 
+    /// <summary>Whether a config.toml carries the maintained Codex shape: the flag off and the managed-proxy block.</summary>
+    internal static bool ConfigUpToDate(string? text) => FindValue(text) == false && NetworkProxyUpToDate(text);
+
     /// <summary>
     /// The flag line inserted/updated in a config.toml text: an existing key is rewritten in place
     /// (both the section form and the top-level dotted form), otherwise the key is inserted into
@@ -156,7 +167,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
     {
         var newline = existing is not null && existing.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         var lines = SplitLines(existing ?? "");
-        var flagLine = $"{KeyName} = true";
+        var flagLine = $"{KeyName} = {FlagValue}";
         var location = Locate(lines);
 
         if (location.KeyIndex >= 0)
@@ -176,7 +187,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
         {
             // features.other = ... already defines the table by dotted keys; the flag joins them,
             // after the sibling's complete value (a multi-line array or string must not be split)
-            lines.Insert(AfterValue(StructuralLines(lines), location.DottedSiblingIndex), $"{DottedKey} = true");
+            lines.Insert(AfterValue(StructuralLines(lines), location.DottedSiblingIndex), $"{DottedKey} = {FlagValue}");
         }
         else
         {
@@ -706,17 +717,17 @@ public sealed class CodexSettingsGuard(AppConfig config)
         return line;
     }
 
-    /// <summary>`features = { ... }` with the flag set to true: an existing value is rewritten, otherwise the key leads the table.</summary>
+    /// <summary>`features = { ... }` with the flag set to false: an existing value is rewritten, otherwise the key leads the table.</summary>
     private static string SetInlineFlag(string line)
     {
         if (InlineFlag.IsMatch(line))
         {
-            return InlineFlag.Replace(line, $"{KeyName} = true", 1);
+            return InlineFlag.Replace(line, $"{KeyName} = {FlagValue}", 1);
         }
 
         var brace = line.IndexOf('{', line.IndexOf('=') + 1);
         var rest = line[(brace + 1)..].TrimStart();
-        var insertion = rest.StartsWith('}') ? $" {KeyName} = true " : $" {KeyName} = true, ";
+        var insertion = rest.StartsWith('}') ? $" {KeyName} = {FlagValue} " : $" {KeyName} = {FlagValue}, ";
         return line[..(brace + 1)] + insertion + line[(brace + 1)..].TrimStart();
     }
 
@@ -791,8 +802,8 @@ public sealed class CodexSettingsGuard(AppConfig config)
     }
 
     /// <summary>
-    /// The line with its value replaced by `true`; the key spelling, the spacing around '=' and
+    /// The line with its value replaced by `false`; the key spelling, the spacing around '=' and
     /// an inline comment are kept (the desktop app's own style stays recognizable).
     /// </summary>
-    private static string ReplaceValue(string line) => ReplaceValueWith(line, "true");
+    private static string ReplaceValue(string line) => ReplaceValueWith(line, FlagValue);
 }

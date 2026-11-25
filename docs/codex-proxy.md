@@ -39,25 +39,30 @@ though it is not an address. Refresh the file before every launch: a WSL codex s
 to the WSL gateway address (below), which is unreachable from Windows once WSL is down — with a
 stale address the core would silently stop reaching anything.
 
-## config.toml: respect_system_proxy
+## config.toml: respect_system_proxy must be off
 
 `%USERPROFILE%\.codex\config.toml` (owned by the app itself; a `[features]` section is typically
 absent until added):
 
 ```toml
 [features]
-respect_system_proxy = true
+respect_system_proxy = false
 ```
 
-The flag is belt-and-braces for a system-proxy layer, never a transport of its own: upstream it
-is not reliably honoured — on macOS CLI and Desktop keep connecting directly
-([openai/codex#39237](https://github.com/openai/codex/issues/39237)), on Windows there are open
-reports of the WebSocket transport timing out with it
-([openai/codex#29958](https://github.com/openai/codex/issues/29958)) — so connectivity must rest
-on the `.env` below in every setup; with the system proxy off the flag changes nothing. The app
-rewrites the file on its own, so the edit must be surgical: every other line survives byte for byte, the
+The flag must stay **false** (or absent — false is the default). With `true` Codex resolves the
+system proxy first; when the system proxy is disabled the route resolves to direct and the client
+calls `no_proxy()`, so the proxy env of `.env` is **ignored**. The core then goes direct: login
+fails with `Token exchange failed: error sending request for url
+(https://auth.openai.com/oauth/token)` (`is_connect=true` in the log), and the desktop's
+account/workspace lookup fails (`authenticatedAccountPresent=false`; the workspace routes answer
+432 "Workspace routing is unavailable"). With `false` the core keeps reqwest's default proxy
+behavior, which reads `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` from `.env` — that is the transport
+this setup relies on. Do not turn the flag on "just in case": on a machine without a system proxy
+it silently disables the `.env` layer.
+
+The app rewrites the file on its own, so the edit must be surgical: every other line survives byte for byte, the
 newline style is kept, the key is inserted into an existing `[features]` section (or one is
-appended), and the top-level dotted spelling `features.respect_system_proxy = true` is an
+appended), and the top-level dotted spelling `features.respect_system_proxy = false` is an
 equivalent form.
 
 ## config.toml: the managed proxy of the sandbox
@@ -158,11 +163,12 @@ refreshes the `.env` back to the loopback form before every launch, so the two d
 fight over the file. (The sed above is the minimal shape: it rewrites existing lines only. The
 application's version of the same merge also adds missing keys and preserves foreign lines.)
 
-The guard also maintains the managed-proxy block in the distro's own
-`~/.codex/config.toml` (`[features.network_proxy]` plus the allow-everything domain entry),
-so the codex core running inside WSL gets the same sandbox path as the Windows one: its
-managed proxy chains to the gateway address the snippet exported. A `features` inline table or
-dotted `features.network_proxy.*` keys make that distro's sync fail with the reason instead of
+The guard also maintains the flag `respect_system_proxy = false` and the managed-proxy block in
+the distro's own `~/.codex/config.toml` (`[features.network_proxy]` plus the allow-everything
+domain entry), so the codex core running inside WSL gets the same transport as the Windows one:
+the flag off makes it read the proxy env the snippet exported, and its managed proxy chains to
+the gateway address the snippet exported. A `features` inline table or dotted
+`features.network_proxy.*` keys make that distro's sync fail with the reason instead of
 rewriting the file.
 
 ## Updates
@@ -180,10 +186,11 @@ manifest — ask for it through the live proxy when in doubt.
   shows live responses instead of send errors.
 - The transport, in one command: the bundled core's `codex doctor` (the `app\resources\codex.exe`
   of the installed package) prints a `Connectivity` section with the proxy env vars it loaded, the
-  `respect system proxy` state and a live Responses WebSocket handshake. `HTTP 101 Switching
-  Protocols` next to a failed DNS lookup is the clean result under a local ban: the handshake went
-  through the proxy, and the system resolver never saw the blocked name. This WebSocket is the
-  transport that silently times out with only a system proxy configured
+  `respect system proxy` state and a live Responses WebSocket handshake. The state must read
+  `disabled`: with `enabled` the core is on the system-proxy path and `.env` is not the transport.
+  `HTTP 101 Switching Protocols` next to a failed DNS lookup is the clean result under a local ban:
+  the handshake went through the proxy, and the system resolver never saw the blocked name. This
+  WebSocket is the transport that silently times out with only a system proxy configured
   ([openai/codex#63294](https://github.com/openai/codex/issues/63294)); a failed handshake while
   the env vars are listed means the proxy is not reachable, and missing env vars mean the `.env`
   layer is not reaching the core.
@@ -200,5 +207,6 @@ manifest — ask for it through the live proxy when in doubt.
 
 `pnr codex launch` does the whole sequence (chain check → `.env` refresh → the package-context
 start with the flags and the env, restart offer for a running copy); the guard's settings sync
-writes the config.toml flag and network-proxy block and the `.env` (including
-`NODE_USE_ENV_PROXY`); `pnr guard wsl sync` installs the profile.d layer.
+writes the config.toml flag **off**, the network-proxy block and the `.env` (including
+`NODE_USE_ENV_PROXY`); `pnr guard wsl sync` installs the profile.d layer and the same flag and
+block into the distro's `config.toml`.

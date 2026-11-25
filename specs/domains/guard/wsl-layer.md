@@ -4,8 +4,8 @@
 
 The optional in-distro half of the guard: a boot-layer runner wired into `/etc/wsl.conf`, a
 startup script that refreshes the proxy address at every distro start, a Codex proxy-env
-snippet, the managed-proxy block of the distro's Codex `config.toml`, and the Claude settings/env
-sync into every configured distro.
+snippet, the `respect_system_proxy = false` flag and the managed-proxy block of the distro's
+Codex `config.toml`, and the Claude settings/env sync into every configured distro.
 
 ## Key Files
 
@@ -54,20 +54,23 @@ shell start (fixed address or `ip route show default`); the port is baked as
 gateway form atomically when the file holds the Windows loopback form (the launcher restores it
 before every launch).
 
-**Codex config.toml** (the distro user, `~/.codex/config.toml`): the same
-`[features.network_proxy]` block the Windows guard maintains (`enabled = true`,
-`allow_upstream_proxy = true`, `enable_socks5 = false`, `[features.network_proxy.domains]`
-`"*" = "allow"`), written surgically with the shared `CodexSettingsGuard` editor and the
-`pnr-bak` backup helper. It turns on the Linux core's managed proxy for sandboxed commands and
-lets that proxy use the env the snippet exported as its upstream. The permission profile still
-decides whether the sandbox has network. A file with the `features` inline table or dotted
-`features.network_proxy.*` keys is refused (the distro fails with the reason, nothing is
-rewritten); a missing file is created with the block alone.
+**Codex config.toml** (the distro user, `~/.codex/config.toml`): the flag
+`[features] respect_system_proxy = false` and the same `[features.network_proxy]` block the
+Windows guard maintains (`enabled = true`, `allow_upstream_proxy = true`, `enable_socks5 = false`,
+`[features.network_proxy.domains]` `"*" = "allow"`), written surgically with the shared
+`CodexSettingsGuard` editor and the `pnr-bak` backup helper. The flag off keeps the Linux core on
+reqwest's default proxy behavior, so it reads the env the snippet exported; `true` would resolve
+the system proxy first and, with the system proxy off, disable env routing. The network block
+turns on the Linux core's managed proxy for sandboxed commands and lets that proxy use the same
+env as its upstream. The permission profile still decides whether the sandbox has network. A file
+with the `features` inline table or dotted `features.network_proxy.*` keys is refused (the distro
+fails with the reason, nothing is rewritten); a missing file is created with the flag and the
+block.
 
 **Per-distro sync/status**: a distro reads `On` only when every enabled check matches —
 script port/host == expected, `settings.json` proxy env fully in sync, Codex env file with the
-expected port/host/NO_PROXY, the Codex `config.toml` network-proxy block present and current,
-and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the configured user, boot wiring
+expected port/host/NO_PROXY, the Codex `config.toml` flag off and network-proxy block present and
+current, and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the configured user, boot wiring
 `AlreadyOurs`, zero privacy/attribution drift). An unknown gateway -> `Partial`. Sync skips
 not-installed/not-running distros with a reason and isolates per-distro failures.
 
@@ -92,6 +95,9 @@ not-installed/not-running distros with a reason and isolates per-distro failures
   each other's writes).
 - The boot pass always ensures the runner file itself, even in the `AlreadyOurs` case.
 - Ordinary distro shells never see the proxy env (only Codex's do).
+- The distro `config.toml` carries `respect_system_proxy = false` together with the network
+  block: the env exported by the snippet is the transport, and the distro has no system proxy
+  to fall back to.
 
 ## Related Specs
 

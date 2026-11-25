@@ -747,7 +747,7 @@ public class GuardTests : IDisposable
 
         var lines = File.ReadAllLines(config.Codex.SettingsPath);
         Assert.Contains("[features]", lines);
-        Assert.Contains("respect_system_proxy = true", lines);
+        Assert.Contains("respect_system_proxy = false", lines);
         Assert.Contains("[features.network_proxy]", lines);
         Assert.Contains("allow_upstream_proxy = true", lines);
         Assert.Contains("[features.network_proxy.domains]", lines);
@@ -772,7 +772,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\nrespect_system_proxy = true\nfoo = \"bar\"\n\n[other]\nkey = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            "[features]\nrespect_system_proxy = false\nfoo = \"bar\"\n\n[other]\nkey = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
             File.ReadAllText(config.Codex.SettingsPath));
     }
 
@@ -780,7 +780,7 @@ public class GuardTests : IDisposable
     public void CodexSettingsSyncUpdatesTheFlagInPlaceKeepingStyle()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Codex.SettingsPath, "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n");
+        File.WriteAllText(config.Codex.SettingsPath, "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n");
         var guard = new CodexSettingsGuard(config);
         Assert.Equal(GuardState.Partial, guard.Read().State);
 
@@ -788,7 +788,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n\r\n[features.network_proxy]\r\nenabled = true\r\nallow_upstream_proxy = true\r\nenable_socks5 = false\r\n\r\n[features.network_proxy.domains]\r\n\"*\" = \"allow\"\r\n",
+            "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n\r\n[features.network_proxy]\r\nenabled = true\r\nallow_upstream_proxy = true\r\nenable_socks5 = false\r\n\r\n[features.network_proxy.domains]\r\n\"*\" = \"allow\"\r\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the inline comment and the CRLF style survive
         Assert.Equal(GuardState.On, guard.Read().State);
     }
@@ -797,50 +797,50 @@ public class GuardTests : IDisposable
     public void CodexSettingsSyncRewritesTheDottedFlagAndIgnoresStrings()
     {
         var config = CodexConfig();
-        var toml = "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n";
+        var toml = "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n";
         File.WriteAllText(config.Codex.SettingsPath, toml);
         var guard = new CodexSettingsGuard(config);
 
-        // the lines inside the multi-line string are not structure: the effective value is the dotted key's false
+        // the lines inside the multi-line string are not structure: the effective value is the dotted key's true
         Assert.Equal(GuardState.Partial, guard.Read().State);
 
         var result = guard.Sync();
 
         Assert.True(result.Written);
         Assert.Equal(
-            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the dotted key is rewritten, the string is untouched
         Assert.Equal(GuardState.On, guard.Read().State);
     }
 
     [Theory]
     // a trailing comment on the table header
-    [InlineData("[features] # tweaks\nother = 1\n", "[features] # tweaks\nrespect_system_proxy = true\nother = 1\n")]
-    [InlineData("[features]# tweaks\nrespect_system_proxy = false\n", "[features]# tweaks\nrespect_system_proxy = true\n")]
+    [InlineData("[features] # tweaks\nother = 1\n", "[features] # tweaks\nrespect_system_proxy = false\nother = 1\n")]
+    [InlineData("[features]# tweaks\nrespect_system_proxy = true\n", "[features]# tweaks\nrespect_system_proxy = false\n")]
     // the table as an inline table
-    [InlineData("features = { other = 1 }\n", "features = { respect_system_proxy = true, other = 1 }\n")]
-    [InlineData("features = {}\n", "features = { respect_system_proxy = true }\n")]
-    [InlineData("features = { respect_system_proxy = false, other = 1 }\n", "features = { respect_system_proxy = true, other = 1 }\n")]
+    [InlineData("features = { other = 1 }\n", "features = { respect_system_proxy = false, other = 1 }\n")]
+    [InlineData("features = {}\n", "features = { respect_system_proxy = false }\n")]
+    [InlineData("features = { respect_system_proxy = true, other = 1 }\n", "features = { respect_system_proxy = false, other = 1 }\n")]
     // the table defined by top-level dotted keys
-    [InlineData("features.other = true\n[desktop]\nx = 1\n", "features.other = true\nfeatures.respect_system_proxy = true\n[desktop]\nx = 1\n")]
+    [InlineData("features.other = true\n[desktop]\nx = 1\n", "features.other = true\nfeatures.respect_system_proxy = false\n[desktop]\nx = 1\n")]
     // a multi-line value of the dotted sibling is not split: the flag goes after its last line
-    [InlineData("features.list = [\n  \"a\",\n  \"b]\",\n]\n\n[desktop]\nx = 1\n", "features.list = [\n  \"a\",\n  \"b]\",\n]\nfeatures.respect_system_proxy = true\n\n[desktop]\nx = 1\n")]
-    [InlineData("features.nested = [[1, 2],\n  [3]] # done\nother = 2\n", "features.nested = [[1, 2],\n  [3]] # done\nfeatures.respect_system_proxy = true\nother = 2\n")]
-    [InlineData("features.text = \"\"\"\nline [\n\"\"\"\n", "features.text = \"\"\"\nline [\n\"\"\"\nfeatures.respect_system_proxy = true\n")]
+    [InlineData("features.list = [\n  \"a\",\n  \"b]\",\n]\n\n[desktop]\nx = 1\n", "features.list = [\n  \"a\",\n  \"b]\",\n]\nfeatures.respect_system_proxy = false\n\n[desktop]\nx = 1\n")]
+    [InlineData("features.nested = [[1, 2],\n  [3]] # done\nother = 2\n", "features.nested = [[1, 2],\n  [3]] # done\nfeatures.respect_system_proxy = false\nother = 2\n")]
+    [InlineData("features.text = \"\"\"\nline [\n\"\"\"\n", "features.text = \"\"\"\nline [\n\"\"\"\nfeatures.respect_system_proxy = false\n")]
     // a key-like line inside another key's multi-line array is not a sibling
-    [InlineData("x = [\n  \"features.y = 1\",\n]\n", "x = [\n  \"features.y = 1\",\n]\n\n[features]\nrespect_system_proxy = true\n")]
+    [InlineData("x = [\n  \"features.y = 1\",\n]\n", "x = [\n  \"features.y = 1\",\n]\n\n[features]\nrespect_system_proxy = false\n")]
     // a longer key ending in the flag's name is not the flag
-    [InlineData("features = { no_respect_system_proxy = false }\n", "features = { respect_system_proxy = true, no_respect_system_proxy = false }\n")]
-    [InlineData("features = { a.respect_system_proxy = false }\n", "features = { respect_system_proxy = true, a.respect_system_proxy = false }\n")]
-    [InlineData("features = { \"respect_system_proxy\" = false }\n", "features = { respect_system_proxy = true }\n")]
+    [InlineData("features = { no_respect_system_proxy = false }\n", "features = { respect_system_proxy = false, no_respect_system_proxy = false }\n")]
+    [InlineData("features = { a.respect_system_proxy = false }\n", "features = { respect_system_proxy = false, a.respect_system_proxy = false }\n")]
+    [InlineData("features = { \"respect_system_proxy\" = false }\n", "features = { respect_system_proxy = false }\n")]
     // a """ inside a comment opens no string, so the real header after it is still seen
-    [InlineData("# a \"\"\" b\n[features]\nother = 1\n", "# a \"\"\" b\n[features]\nrespect_system_proxy = true\nother = 1\n")]
+    [InlineData("# a \"\"\" b\n[features]\nother = 1\n", "# a \"\"\" b\n[features]\nrespect_system_proxy = false\nother = 1\n")]
     public void CodexSettingsApplyRecognizesEveryFormOfTheFeaturesTable(string existing, string expected)
     {
         var applied = CodexSettingsGuard.Apply(existing);
 
         Assert.Equal(expected, applied);
-        Assert.Equal(true, CodexSettingsGuard.FindValue(applied));
+        Assert.Equal(false, CodexSettingsGuard.FindValue(applied));
         Assert.Equal(applied, CodexSettingsGuard.Apply(applied)); // idempotent
     }
 
@@ -859,10 +859,10 @@ public class GuardTests : IDisposable
     public void CodexNetworkProxyBlockIsAddedAndIdempotent()
     {
         var applied = CodexSettingsGuard.ApplyNetworkProxy(
-            "[features]\nrespect_system_proxy = true\nforeign = 1\n");
+            "[features]\nrespect_system_proxy = false\nforeign = 1\n");
 
         Assert.Equal(
-            "[features]\nrespect_system_proxy = true\nforeign = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            "[features]\nrespect_system_proxy = false\nforeign = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
             applied);
         Assert.True(CodexSettingsGuard.NetworkProxyUpToDate(applied));
         Assert.Equal(applied, CodexSettingsGuard.ApplyNetworkProxy(applied)); // idempotent
@@ -914,7 +914,7 @@ public class GuardTests : IDisposable
     public void CodexStatusRequiresTheNetworkBlock()
     {
         var config = CodexConfig();
-        File.WriteAllText(config.Codex.SettingsPath, "[features]\nrespect_system_proxy = true\n");
+        File.WriteAllText(config.Codex.SettingsPath, "[features]\nrespect_system_proxy = false\n");
         CodexEnvFile.Write(config);
         var guard = new CodexSettingsGuard(config);
 
@@ -923,7 +923,7 @@ public class GuardTests : IDisposable
         Assert.Equal(GuardState.Partial, partial.State);
         Assert.False(partial.NetworkProxyUpToDate);
         Assert.Contains("features.network_proxy", partial.Detail);
-        Assert.DoesNotContain("is not set", partial.Detail); // the flag itself is fine
+        Assert.DoesNotContain("respect_system_proxy", partial.Detail); // the flag itself is fine
 
         guard.Sync();
         var on = guard.Read();
@@ -947,7 +947,7 @@ public class GuardTests : IDisposable
             new[]
             {
                 "[features]",
-                "respect_system_proxy = true",
+                "respect_system_proxy = false",
                 "",
                 "[features.network_proxy]",
                 "enabled = true",
@@ -1226,9 +1226,9 @@ public class GuardTests : IDisposable
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n"
         + CodexConfigInSync;
 
-    /// <summary>The managed-proxy block of the distro config.toml as the probe reads it back.</summary>
+    /// <summary>The flag and managed-proxy block of the distro config.toml as the probe reads it back.</summary>
     private const string CodexConfigInSync =
-        "CODEXCFG=present\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\nCODEXCFG=END\n";
+        "CODEXCFG=present\n[features]\nrespect_system_proxy = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\nCODEXCFG=END\n";
 
     /// <summary>The NO_PROXY export of the Codex snippet as the probe reads it back (no bypass domains configured).</summary>
     private const string CodexNoProxyLine = "    export NO_PROXY='localhost,127.0.0.1,.local'\n";
@@ -1563,6 +1563,7 @@ public class GuardTests : IDisposable
         var status = await guard.ReadAsync(CancellationToken.None);
 
         Assert.Equal(GuardState.Partial, status.Distros[0].State);
+        Assert.Contains("codex config.toml does not set respect_system_proxy = false", status.Distros[0].Reason);
         Assert.Contains("codex config.toml has no network_proxy block", status.Distros[0].Reason);
     }
 
@@ -1587,6 +1588,7 @@ public class GuardTests : IDisposable
         var body = Encoding.UTF8.GetString(Convert.FromBase64String(
             ExtractBase64Payload(script.Script, "CFG=\"$HOME/.codex/config.toml\"")));
         Assert.Contains("trust_level = \"trusted\"", body); // the foreign project entry survives
+        Assert.Contains("respect_system_proxy = false", body);
         Assert.Contains("[features.network_proxy]", body);
         Assert.Contains("allow_upstream_proxy = true", body);
         Assert.Contains("\"*\" = \"allow\"", body);

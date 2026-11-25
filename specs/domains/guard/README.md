@@ -51,7 +51,7 @@ Layer verdicts:
 | Local ban | hosts block present+current AND NRPT > 0 AND firewall > 0, all current with config | any layer present but missing/stale | nothing present |
 | Egress policy | `egressProxyUrl` = expected AND `disableWslSessions=0` | set but wrong | no url |
 | Claude settings | full proxy env in sync AND zero privacy/attribution drift | any drift | file absent; app disabled in config |
-| Codex settings | `respect_system_proxy=true` AND `.env` up to date | one of the two missing/wrong | both absent; app disabled in config |
+| Codex settings | `respect_system_proxy=false`, the network_proxy block and `.env` up to date | any of the three missing/wrong | both files absent; app disabled in config |
 | WSL | every enabled check of every active distro matches | mixed / unknown gateway | layer off / nothing active |
 | SystemProxy | enabled AND ours AND no PAC/AutoDetect override | enabled otherwise | disabled |
 

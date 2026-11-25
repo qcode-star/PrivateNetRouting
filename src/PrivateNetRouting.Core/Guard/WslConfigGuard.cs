@@ -315,9 +315,10 @@ public sealed class WslConfigGuard(
             var envOk = !config.Wsl.SyncCodex
                 || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expected.Host
                     && read.ProxyEnvNoProxy == expected.NoProxy);
-            // the Codex network layer inside the distro: the managed-proxy block the sync maintains
-            // in ~/.codex/config.toml, so sandboxed commands chain through the exported proxy env
-            var codexConfigOk = !config.Wsl.SyncCodex || CodexSettingsGuard.NetworkProxyUpToDate(read.CodexConfigText);
+            // the Codex layer inside the distro: the flag off (so the core keeps reqwest's env proxy
+            // behavior and reads the exported proxy env) and the managed-proxy block that chains
+            // sandboxed commands through that env
+            var codexConfigOk = !config.Wsl.SyncCodex || CodexSettingsGuard.ConfigUpToDate(read.CodexConfigText);
             // the rest of what the Claude pass maintains: the privacy/attribution keys and NO_PROXY of
             // settings.json, the user the startup script serves, and the boot wiring that runs it —
             // a missing [boot] command leaves the script dead even though the file is there
@@ -594,10 +595,10 @@ public sealed class WslConfigGuard(
             envBackup = envWritten ? FindBackupName(envOutput) : null;
         }
 
-        // Codex config.toml of the distro: the managed-proxy block that makes the sandboxed
-        // command traffic go through Codex's own proxy and then the exported upstream (the
+        // Codex config.toml of the distro: the flag off and the managed-proxy block that make the
+        // sandboxed command traffic go through Codex's own proxy and then the exported upstream (the
         // gateway address from the profile.d snippet). Foreign lines survive, the file belongs to
-        // the distro user, and a shape the editor cannot extend is a per-distro failure.
+        // the distro user, and a shape the network editor cannot extend is a per-distro failure.
         var codexConfigWritten = false;
         string? codexConfigBackup = null;
         if (config.Wsl.SyncCodex)
@@ -605,7 +606,7 @@ public sealed class WslConfigGuard(
             string updated;
             try
             {
-                updated = CodexSettingsGuard.ApplyNetworkProxy(read.CodexConfigText);
+                updated = CodexSettingsGuard.ApplyNetworkProxy(CodexSettingsGuard.Apply(read.CodexConfigText));
             }
             catch (InvalidDataException ex)
             {
@@ -913,6 +914,13 @@ public sealed class WslConfigGuard(
                     var cfgEnd = Array.IndexOf(lines, "CODEXCFG=END", i + 1);
                     codexConfig = string.Join('\n', lines[(i + 1)..(cfgEnd > 0 ? cfgEnd : lines.Length)])
                         .TrimStart('\uFEFF');
+                    // the probe lines lose the file's final newline; config.toml is written with
+                    // one and Apply keeps it, so reconstruct it here to compare like with like
+                    if (codexConfig.Length > 0)
+                    {
+                        codexConfig += "\n";
+                    }
+
                     i = cfgEnd > 0 ? cfgEnd : lines.Length;
                     break;
                 case "CODEXCFG=missing":
@@ -1575,6 +1583,13 @@ public sealed class WslConfigGuard(
         else if (proxyEnvExpected && read.ProxyEnvNoProxy != expected.NoProxy)
         {
             parts.Add("codex proxy env NO_PROXY differs from the config");
+        }
+
+        if (proxyEnvExpected && CodexSettingsGuard.FindValue(read.CodexConfigText) != false)
+        {
+            parts.Add(CodexSettingsGuard.FindValue(read.CodexConfigText) is { } flag
+                ? $"codex config.toml sets respect_system_proxy = {flag.ToString().ToLowerInvariant()} (expected false)"
+                : "codex config.toml does not set respect_system_proxy = false");
         }
 
         if (proxyEnvExpected && !CodexSettingsGuard.NetworkProxyUpToDate(read.CodexConfigText))

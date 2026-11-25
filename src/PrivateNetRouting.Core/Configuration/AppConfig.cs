@@ -241,7 +241,8 @@ public sealed class CodexConfig
 
     /// <summary>
     /// config.toml of Codex (desktop and CLI) — the settings sync adds
-    /// `[features] respect_system_proxy = true` there; surgical edits, .pnr-bak-* backups.
+    /// `[features] respect_system_proxy = false` there (the .env proxy env is the transport);
+    /// surgical edits, .pnr-bak-* backups.
     /// </summary>
     public string SettingsPath { get; set; } = @"%USERPROFILE%\.codex\config.toml";
 

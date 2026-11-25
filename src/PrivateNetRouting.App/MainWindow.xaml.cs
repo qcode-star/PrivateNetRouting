@@ -698,7 +698,7 @@ public partial class MainWindow : Window
             GuardState.Off => Loc.S("Main.Guard.Settings.Codex.NoFile"),
             GuardState.Partial => string.Join("; ", new[]
             {
-                snapshot.CodexSettings.Enabled is true
+                snapshot.CodexSettings.Enabled is false
                     ? null
                     : Loc.F(
                         "Main.Guard.Settings.Codex.FlagFmt",

@@ -18,7 +18,7 @@ Layers, from policy to packet (each is independently observable in the guard sta
 | hosts block | managed block between config markers in the hosts file | finite known names |
 | NRPT | one rule for all subtree apexes (`guard.nrptRuleName`) | wildcard DNS trees |
 | Firewall | outbound Block rules by subnet, grouped (`guard.firewallGroup`) | direct-by-IP paths |
-| Settings sync | proxy env + privacy keys in `settings.json`; proxy env in Codex `.env`; `respect_system_proxy` in `config.toml` | the CLI cores inside both apps |
+| Settings sync | proxy env + privacy keys in `settings.json`; proxy env in Codex `.env`; `respect_system_proxy = false` in `config.toml` (the env is the transport) | the CLI cores inside both apps |
 | WSL layer | startup script + profile.d snippet per distro | the CLI cores inside WSL |
 | WinINET | system proxy on/off with save/restore | other Windows apps (opt-in) |
 

@@ -35,9 +35,15 @@ JSON — comments of the original are not kept). A non-object `env`/root is a ha
 
 | Table | Keys | Value |
 |---|---|---|
-| `[features]` | `respect_system_proxy` | `true` |
+| `[features]` | `respect_system_proxy` | `false` |
 | `[features.network_proxy]` | `enabled`, `allow_upstream_proxy`, `enable_socks5` | `true`, `true`, `false` |
 | `[features.network_proxy.domains]` | `"*"` | `"allow"` |
+
+The flag is maintained **off**: with `true` Codex resolves the system proxy first and, when the
+system proxy is disabled, pins the route to direct (`no_proxy()`), so the proxy env of `.env` is
+ignored — login token exchange (`auth.openai.com/oauth/token`) and the desktop account/workspace
+requests then go direct and fail. With `false` the core keeps reqwest's default proxy behavior,
+which reads `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` from `.env`; that is the transport.
 
 The network-proxy block turns on Codex's own managed proxy for the commands a permission profile
 lets out to the network, and `allow_upstream_proxy` makes that proxy use the proxy env of
@@ -91,6 +97,8 @@ written or created, its status reads `Off` with "not synced", and its half has n
 - Both apps' proxy values always name the AppProxyEndpoint — never a hardcoded port.
 - The guard never edits `[permissions]` or `default_permissions`: whether the Codex sandbox has
   network is the app's decision; the network block only chains traffic that the profile allows.
+- `respect_system_proxy` is always `false`: the `.env` proxy env is the transport. `true` switches
+  the core to the system proxy and, with the system proxy off, disables env routing altogether.
 - The sync is the same shape on Windows and in the WSL layer (shared manifest): the WSL layer
   writes the Codex `.env` and the same `[features.network_proxy]` block into the distro's
   `~/.codex/config.toml` (see [WSL layer](wsl-layer.md)).
