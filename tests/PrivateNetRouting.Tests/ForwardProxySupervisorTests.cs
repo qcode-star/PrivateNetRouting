@@ -103,7 +103,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         Action<int>? kill = null,
         string exePath = @"C:\app\pnr.exe",
         IProxyStopChannel? channel = null,
-        Func<int, bool>? alive = null) =>
+        Func<int, bool>? alive = null,
+        ProfileContext? profile = null) =>
         new(
             config,
             inner,
@@ -115,7 +116,8 @@ public sealed class ForwardProxySupervisorTests : IDisposable
             kill,
             () => exePath,
             stopChannel: channel,
-            processAlive: alive ?? (_ => true));
+            processAlive: alive ?? (_ => true),
+            profile: profile);
 
     [Fact]
     public async Task Start_InProcess_WhenDetachedOffAndPortFree()
@@ -202,6 +204,83 @@ public sealed class ForwardProxySupervisorTests : IDisposable
         Assert.Equal(@"""C:\app with space\pnr.exe"" --proxy-worker --listen 127.0.0.1:18081", spawn.CommandLine);
         Assert.Null(spawn.Stdout);
         Assert.EndsWith("forward-proxy.err.log", spawn.Stderr);
+        Assert.Equal(0, inner.StartCount);
+        Assert.True(supervisor.IsRunning);
+    }
+
+    [Fact]
+    public async Task Start_Detached_CarriesTheProfileInTheWorkerCommandLine()
+    {
+        var inner = new FakeProxyInstance();
+        var ports = new FakePortProbe();
+        var spawns = new List<string>();
+        var supervisor = Make(
+            new ForwardProxyConfig { Detached = true },
+            inner,
+            ports,
+            new FakeTcpTable(),
+            new FakeFinderById(),
+            spawn: (commandLine, _, _) =>
+            {
+                spawns.Add(commandLine);
+                ports.Listening = true;
+                return 4242;
+            },
+            profile: AppProfile.Resolve("codex"));
+
+        await supervisor.StartAsync(CancellationToken.None);
+
+        Assert.Equal(
+            @"""C:\app\pnr.exe"" --proxy-worker --listen 127.0.0.1:18081 --profile codex",
+            Assert.Single(spawns));
+    }
+
+    /// <summary>
+    /// A named profile never adopts a listener of another profile (that would route its clients
+    /// through the wrong chain silently): a busy port with a foreign worker is an explicit error.
+    /// </summary>
+    [Fact]
+    public async Task Start_NamedProfile_RefusesAListenerOfAnotherProfile()
+    {
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18081] = [new TcpListenerEntry(IPAddress.Loopback, 18081, 91, "pnr.exe")];
+        var processes = new FakeFinderById();
+        processes.CommandLineById[91] = @"""C:\app\pnr.exe"" --proxy-worker --listen 127.0.0.1:18081 --profile other";
+        var supervisor = Make(
+            new ForwardProxyConfig(),
+            new FakeProxyInstance(),
+            ports,
+            tcp,
+            processes,
+            profile: AppProfile.Resolve("codex"));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => supervisor.StartAsync(CancellationToken.None));
+
+        Assert.Contains("another process", error.Message);
+        Assert.Contains("codex", error.Message);
+    }
+
+    /// <summary>The same profile's worker is the normal handover from a previous run: it is adopted.</summary>
+    [Fact]
+    public async Task Start_NamedProfile_AdoptsItsOwnWorker()
+    {
+        var ports = new FakePortProbe { Listening = true };
+        var tcp = new FakeTcpTable();
+        tcp.Listeners[18081] = [new TcpListenerEntry(IPAddress.Loopback, 18081, 92, "pnr.exe")];
+        var processes = new FakeFinderById();
+        processes.CommandLineById[92] = @"""C:\app\pnr.exe"" --proxy-worker --listen 127.0.0.1:18081 --profile codex";
+        var inner = new FakeProxyInstance();
+        var supervisor = Make(
+            new ForwardProxyConfig(),
+            inner,
+            ports,
+            tcp,
+            processes,
+            profile: AppProfile.Resolve("codex"));
+
+        await supervisor.StartAsync(CancellationToken.None);
+
         Assert.Equal(0, inner.StartCount);
         Assert.True(supervisor.IsRunning);
     }

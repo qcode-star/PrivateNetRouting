@@ -39,11 +39,15 @@ public static class GuardAggregate
         return judged.Count == 0 ? null : WslConfigGuard.Aggregate(judged);
     }
 
-    /// <summary>The layers that vote, in card order.</summary>
+    /// <summary>The layers that vote, in card order. A layer this profile does not manage has no vote.</summary>
     private static IEnumerable<GuardState> Votes(GuardSnapshot snapshot)
     {
         yield return snapshot.Ban.State;
-        yield return snapshot.Policy.State;
+        if (snapshot.Policy.Managed)
+        {
+            yield return snapshot.Policy.State;
+        }
+
         if (SettingsLayer(snapshot) is { } settings)
         {
             yield return settings;

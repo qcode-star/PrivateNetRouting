@@ -23,6 +23,9 @@ own configuration; every other byte of those files belongs to the app and must s
 Written on demand: `pnr guard settings sync` / the GUI guards card / the WSL sync; refreshed by
 the Codex launcher before every launch; rewritten by the browser launch (Firefox `user.js`
 only). Nothing is written for an app disabled in the config (`claude.enabled`/`codex.enabled`).
+With two profiles each file has one writer — the Claude profile owns Claude's files, the Codex
+profile owns Codex's — so one file never carries two proxy endpoints
+([Profiles](../domains/configuration/profiles.md)).
 
 ## Data Flow Across Boundary
 

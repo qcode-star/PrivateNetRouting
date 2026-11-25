@@ -15,6 +15,11 @@ do not control, so a change here is a breaking change for every client.
 | DoH (RFC 8484) | forward proxy -> resolvers | `http(s)://IP[:port]/dns-query` | `DnsClient`, `DnsWire` |
 | HTTP (plain GET) | updater -> feed/manifest | vendor update endpoints | `UpdateFeedUrlFinder`, `CodexVersionManifest` |
 
+Each profile is its own client set: the default profile uses the documented ports, a second
+profile must give its `forwardProxy.listen` (and, in the tailscale mode, its own
+`stateDir`/`socket`/listeners) a distinct value — two profiles on one port would point one
+app's traffic at the other profile's chain ([Profiles](../domains/configuration/profiles.md)).
+
 ## Initialization
 
 The proxy answers on the configured listener from `ForwardProxyService.StartAsync`; upstream

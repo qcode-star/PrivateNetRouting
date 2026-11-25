@@ -214,8 +214,9 @@
 
                             <!-- Idle auto-stop: a detached background worker — it keeps working after
                                  the application is closed, stops the WSL Claude host and the chain on
-                                 idle, and switches itself off after firing. The flag re-arms it
-                                 automatically after every chain raise (watchdog.autoStart). -->
+                                 idle, and switches itself off after firing. The one checkbox both
+                                 starts/stops it now and keeps it armed after every chain raise
+                                 (watchdog.autoStart). -->
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource Main.IdleStop}"
                                        Style="{StaticResource Text.Note}" VerticalAlignment="Center" Margin="0,0,12,0"
                                        ToolTip="{DynamicResource Main.IdleStop.Note}"/>
@@ -225,15 +226,11 @@
                                        ToolTip="{DynamicResource Main.IdleStop.Note}"/>
                             <StackPanel Grid.Row="3" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
                                         HorizontalAlignment="Right">
-                                <CheckBox x:Name="AutoStartBox" Content="{DynamicResource Main.IdleStop.AutoStart}"
-                                          VerticalAlignment="Center" Margin="0,0,12,0"
-                                          ToolTip="{DynamicResource Main.IdleStop.AutoStart.Note}"
-                                          Checked="OnAutoStartToggled" Unchecked="OnAutoStartToggled"/>
-                                <Button Content="{Binding IdleStopAction}" MinWidth="86"
-                                        Style="{StaticResource GhostButton}" Click="OnIdleStopToggled"
-                                        IsEnabled="{Binding CanIdleStop}"
-                                        ToolTipService.ShowOnDisabled="True"
-                                        ToolTip="{DynamicResource Main.IdleStop.Gate}"/>
+                                <CheckBox x:Name="IdleStopBox" Content="{DynamicResource Main.IdleStop.Enabled}"
+                                          VerticalAlignment="Center"
+                                          ToolTip="{DynamicResource Main.IdleStop.Enabled.Note}"
+                                          IsEnabled="{Binding CanIdleStop}"
+                                          Checked="OnIdleStopEnabledToggled" Unchecked="OnIdleStopEnabledToggled"/>
                             </StackPanel>
                         </Grid>
                         </StackPanel>
@@ -326,10 +323,10 @@
                                        Style="{StaticResource Text.Caption}" VerticalAlignment="Center" Margin="0,0,16,10"/>
                             <StackPanel Grid.Row="1" Grid.Column="4" Orientation="Horizontal" Margin="0,0,0,10">
                                 <Button x:Name="PolicyOnButton" Content="{DynamicResource Main.Guard.Button.On}" MinWidth="72"
-                                        Style="{StaticResource AccentGhostButton}" Click="OnGuardPolicyOn" IsEnabled="{Binding CanGuard}"/>
+                                        Style="{StaticResource AccentGhostButton}" Click="OnGuardPolicyOn" IsEnabled="{Binding CanPolicy}"/>
                                 <Button x:Name="PolicyOffButton" Content="{DynamicResource Main.Guard.Button.Off}" MinWidth="72"
                                         Margin="6,0,0,0" Style="{StaticResource GhostButton}" Click="OnGuardPolicyOff"
-                                        IsEnabled="{Binding CanGuard}"/>
+                                        IsEnabled="{Binding CanPolicy}"/>
                             </StackPanel>
 
                             <!-- app settings: env in Claude Code settings.json + the system-proxy flag in Codex config.toml -->

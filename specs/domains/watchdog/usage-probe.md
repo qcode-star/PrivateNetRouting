@@ -13,10 +13,12 @@ proxy, connections to the chain egress listener, and the activity marker's fresh
 
 `GetInUseReason(idleWindow)` checks in order, first hit wins:
 
-1. **Processes** — `FindByNameContains("claude")` count, plus processes matching
+1. **Processes** — only the profile's enabled apps: when `claude.enabled`, the
+   `FindByNameContains("claude")` count; when `codex.enabled`, processes matching
    `codex.processName` filtered by the Codex install-folder command-line marker (a foreign app
    sharing the process-name spelling is not counted; an empty marker falls back to the name).
-   Any > 0 -> busy with that reason.
+   Any > 0 -> busy with that reason. A disabled app's processes belong to the other profile's
+   chain and are not counted.
 2. **Connections to the application proxy endpoint** — established count on the local port
    (local-end), or by remote endpoint when the applications endpoint is external and
    non-loopback (`CountToRemote`).
@@ -43,6 +45,8 @@ Connection counting is listener-side only (`LocalEndPoint.Port`, Established sta
 - A marker stamped in the future beyond the tolerance window proves nothing.
 - The marker signal is absent (not "idle") in shapes where no local proxy runs.
 - A foreign process that merely shares a name spelling never keeps the chain alive.
+- An app disabled in the config is not counted: two profiles run side by side, and one app must
+  not keep the other profile's chain alive ([Profiles](../configuration/profiles.md)).
 
 ## Related Specs
 

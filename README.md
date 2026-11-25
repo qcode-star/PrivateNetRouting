@@ -220,6 +220,28 @@ distros listed in `wsl.distros` in the user config — nothing is discovered aut
 must match `wsl --list` exactly. With the default `wsl.mode=auto` the layer turns on when at least
 one configured distro is installed; an empty list keeps it off.
 
+### Profiles: two configs at once
+
+Two applications that need two different chains can run side by side as two profiles. A profile
+is a named config file plus its own process tree; `--profile <name>` selects
+`%APPDATA%\PrivateNetRouting\profiles\<name>.json`, no option keeps the default
+`appsettings.json`. Each profile has its own chain, forward-proxy port, logs, locks, idle
+stopper, window title and tray icon; the GUI single-instance identity is per profile.
+
+```powershell
+pnr --profile codex config init          # create the profile (refused if it is missing)
+PrivateNetRouting.App.exe --profile codex
+pnr --profile codex chain up
+```
+
+The second profile's config gives it its own `forwardProxy.listen`, `logging.directory` and
+`forwardProxy.activityMarkerPath` (a tailscale-mode profile also needs its own `stateDir`,
+`socket` and listeners). The apps are split by `claude.enabled`/`codex.enabled` and the WSL
+halves by `wsl.syncClaude`/`wsl.syncCodex`; the machine-wide Claude policy and the WinINET
+switch have one owning profile via `guard.managePolicy`/`guard.manageSystemProxy` (the other
+shows them as not managed). The local ban stays one shared block. Details:
+[docs/profiles.md](docs/profiles.md) and `specs/domains/configuration/profiles.md`.
+
 ## Modules
 
 | Module | What it does |

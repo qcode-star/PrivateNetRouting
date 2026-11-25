@@ -33,8 +33,9 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExe}
-; A running GUI holds this mutex — the installer offers to close it instead of failing on locked files.
-AppMutex=Local\PrivateNetRouting.SingleInstance
+; Every running GUI holds one of these: AnyInstance — any profile; SingleInstance — the default
+; profile (also held by builds that predate profiles, so an upgrade over one is still noticed).
+AppMutex=Local\PrivateNetRouting.AnyInstance,Local\PrivateNetRouting.SingleInstance
 CloseApplications=yes
 
 [Files]

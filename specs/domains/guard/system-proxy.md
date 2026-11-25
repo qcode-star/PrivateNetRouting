@@ -54,6 +54,9 @@ both forms.
 - A foreign manual proxy (not the address this installation writes) is never disabled or
   overwritten.
 - PAC and auto-detection stay untouched in every operation.
+- The switch is per user and single-valued: a profile with `guard.manageSystemProxy=false`
+  reports it as not managed and `pnr guard sysproxy on|off` refuses — one profile owns it
+  ([Profiles](../configuration/profiles.md)).
 
 ## Related Specs
 

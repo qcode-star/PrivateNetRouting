@@ -41,6 +41,49 @@ public class UsageProbeEdgeTests
         Assert.Equal("codex processes: 1", probe.GetInUseReason(TimeSpan.FromMinutes(10)));
     }
 
+    /// <summary>
+    /// A profile owns one app: the other app's processes belong to the other profile's chain and
+    /// must not keep this one alive (both apps run side by side in the two-profile setup).
+    /// </summary>
+    [Fact]
+    public void OnlyTheEnabledAppsProcessesKeepTheChain()
+    {
+        var both = new MixedFinder();
+
+        var none = new ClaudeUsageProbe(
+            both,
+            new Counter(0, 0),
+            proxyPort: 18091,
+            activityMarkerPath: null,
+            codexProcessName: "ChatGPT",
+            codexCommandLineMarker: CodexMarker,
+            countClaude: false,
+            countCodex: false);
+        Assert.Null(none.GetInUseReason(TimeSpan.FromMinutes(10)));
+
+        var claudeOnly = new ClaudeUsageProbe(
+            both,
+            new Counter(0, 0),
+            proxyPort: 18091,
+            activityMarkerPath: null,
+            codexProcessName: "ChatGPT",
+            codexCommandLineMarker: CodexMarker,
+            countClaude: true,
+            countCodex: false);
+        Assert.Equal("claude processes: 1", claudeOnly.GetInUseReason(TimeSpan.FromMinutes(10)));
+
+        var codexOnly = new ClaudeUsageProbe(
+            both,
+            new Counter(0, 0),
+            proxyPort: 18091,
+            activityMarkerPath: null,
+            codexProcessName: "ChatGPT",
+            codexCommandLineMarker: CodexMarker,
+            countClaude: false,
+            countCodex: true);
+        Assert.Equal("codex processes: 1", codexOnly.GetInUseReason(TimeSpan.FromMinutes(10)));
+    }
+
     [Fact]
     public void ExternalProxyClientsAreCountedByTheRemoteEndpoint()
     {
@@ -90,6 +133,19 @@ public class UsageProbeEdgeTests
 
         public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) =>
             namePart.Equals("claude", StringComparison.OrdinalIgnoreCase) ? [] : named;
+
+        public FoundProcess? FindById(int processId) => null;
+    }
+
+    /// <summary>Both apps are running: one Claude-named process and one Codex package process.</summary>
+    private sealed class MixedFinder : IProcessFinder
+    {
+        public IReadOnlyList<FoundProcess> Find(string processName, string commandLineContains) => [];
+
+        public IReadOnlyList<FoundProcess> FindByNameContains(string namePart) =>
+            namePart.Equals("claude", StringComparison.OrdinalIgnoreCase)
+                ? [new FoundProcess(21, @"""C:\Program Files\Claude\Claude.exe""")]
+                : [new FoundProcess(22, @"""C:\Program Files\WindowsApps\OpenAI.Codex_1.0_x64\app\ChatGPT.exe""")];
 
         public FoundProcess? FindById(int processId) => null;
     }

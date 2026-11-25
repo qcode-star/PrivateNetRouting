@@ -35,7 +35,7 @@ internal enum WslBootPlan
     AdoptForeignCommand,
 }
 
-/// <summary>Status of one distro from wsl.distros.</summary>
+/// <summary>Status of one distro from wsl.distros. Sync — at least one half of the layer is enabled for this profile (a profile may own only its app's half).</summary>
 public sealed record WslDistroStatus(
     string Distro,
     bool Sync,
@@ -283,14 +283,16 @@ public sealed class WslConfigGuard(
         string? expectedProxy,
         CancellationToken ct)
     {
+        // the row's "sync off" means both halves are off: a profile may own only one app's layer
+        var anySync = config.Wsl.SyncClaude || config.Wsl.SyncCodex;
         if (!installed.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not installed", Inactive: true);
+            return new WslDistroStatus(distro.Name, anySync, GuardState.Unknown, null, null, "distro is not installed", Inactive: true);
         }
 
         if (!running.Contains(distro.Name, StringComparer.OrdinalIgnoreCase))
         {
-            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, "distro is not running", Inactive: true);
+            return new WslDistroStatus(distro.Name, anySync, GuardState.Unknown, null, null, "distro is not running", Inactive: true);
         }
 
         try
@@ -298,7 +300,7 @@ public sealed class WslConfigGuard(
             var read = await ReadInsideAsync(distro, ct);
             if (config.Wsl.SyncClaude && !read.ScriptPresent)
             {
-                return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Off, null, read.SettingsProxy, "startup script not found");
+                return new WslDistroStatus(distro.Name, anySync, GuardState.Off, null, read.SettingsProxy, "startup script not found");
             }
 
             // a layer that is not synced cannot be stale: its signals are ignored
@@ -335,7 +337,7 @@ public sealed class WslConfigGuard(
                 var okWithoutProxy = portOk && envOk && codexConfigOk && keysOk;
                 return new WslDistroStatus(
                     distro.Name,
-                    config.Wsl.SyncClaude,
+                    anySync,
                     GuardState.Partial,
                     read.ScriptPort,
                     read.SettingsProxy,
@@ -354,7 +356,7 @@ public sealed class WslConfigGuard(
             var ok = portOk && proxyOk && envOk && codexConfigOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,
-                config.Wsl.SyncClaude,
+                anySync,
                 ok ? GuardState.On : GuardState.Partial,
                 read.ScriptPort,
                 read.SettingsProxy,
@@ -364,7 +366,7 @@ public sealed class WslConfigGuard(
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException or System.ComponentModel.Win32Exception)
         {
-            return new WslDistroStatus(distro.Name, config.Wsl.SyncClaude, GuardState.Unknown, null, null, $"failed to read: {ex.Message}");
+            return new WslDistroStatus(distro.Name, anySync, GuardState.Unknown, null, null, $"failed to read: {ex.Message}");
         }
     }
 

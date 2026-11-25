@@ -115,9 +115,18 @@ Application modes (the owner's decision):
   drawn in the chain card, then Claude/browser starts with proxy settings;
 - **console** (`pnr`, a separate exe): the headless commands.
 
+Profiles (the owner's decision): one process tree per profile,
+`--profile <name>` → `%APPDATA%\PrivateNetRouting\profiles\<name>.json` (no option — the default
+`appsettings.json`). Each profile has its own chain, proxy port, logs, locks, watchdog, window
+and tray; the GUI single-instance identity is per profile. The machine-wide guard values
+(policy, WinINET) have one owning profile via `guard.managePolicy`/`guard.manageSystemProxy`;
+the ban stays one shared block. See [profiles](specs/domains/configuration/profiles.md) and
+[ADR-007](specs/decisions/007-profiles.md).
+
 Ports per the owner's decision: **18081** (forward proxy, the address for
 the client), **18082** (daemon HTTP), **18083** (daemon SOCKS5). Every module takes its addresses/ports/names from the
-config; they change only by explicitly editing the user config.
+config; they change only by explicitly editing the user config. A second profile must use its
+own forward-proxy port (and its own tailscale state/socket in the tailscale mode).
 
 | Module | What it does | Spec | Implementation |
 |---|---|---|---|
@@ -185,7 +194,9 @@ WPF app and the CLI have no automated coverage: for changes in them, build and e
 window/command, and keep logic in Core so it stays testable.
 
 The user config is `%APPDATA%\PrivateNetRouting\appsettings.json` (created on first launch from the
-default values); logs are in `%LOCALAPPDATA%\PrivateNetRouting\logs\`.
+default values) for the default profile, `%APPDATA%\PrivateNetRouting\profiles\<name>.json` for
+`--profile <name>` (created explicitly by `pnr --profile <name> config init`); logs are in
+`%LOCALAPPDATA%\PrivateNetRouting\logs\` (a second profile should use its own subdirectory).
 
 ## Specifications
 
@@ -273,6 +284,8 @@ branches or straight into `main` (a personal repository, the main thing is not t
 - `docs/claude-proxy.md`, `docs/codex-proxy.md` — the sanitized hands-on guides: putting Claude
   Desktop/Claude Code and the Codex desktop app through the local forward proxy, on Windows and
   inside WSL (mechanics only, placeholders instead of environment values).
+- `docs/profiles.md` — the sanitized two-profile recipe: a named config, its own ports/logs/
+  marker, the app and WSL halves split between profiles, guard ownership.
 - `docs/testing.md` — the hands-on testing guide: GUI automation on a locked session (UIA +
   PrintWindow recipes, what works unattended and what does not) and the socks5-for-tailnet
   test setup; read it before a test session instead of rediscovering the methods.

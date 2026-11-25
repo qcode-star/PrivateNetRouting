@@ -49,10 +49,14 @@ public sealed class DiagnosticsService(
     Func<CancellationToken, Task<(LocalBanStatus Ban, EgressPolicyStatus Policy)>> guardCore,
     LogStore logs,
     TimeProvider? time = null,
-    Func<IPAddress?>? wslGateway = null)
+    Func<IPAddress?>? wslGateway = null,
+    ProfileContext? profile = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Func<IPAddress?> _wslGateway = wslGateway ?? WslGateway.FindIpv4;
+
+    /// <summary>The profile whose stopper the watchdog section reports (one profile owns one stopper).</summary>
+    private readonly string _profile = (profile ?? ProfileContext.Default).Name;
 
     /// <summary>
     /// The whole summary runs under one deadline: the state poll and the detailed probe are two live
@@ -299,19 +303,21 @@ public sealed class DiagnosticsService(
 
     private static DiagSection GuardsSection(LocalBanStatus ban, EgressPolicyStatus policy)
     {
-        var policyLine = policy.State switch
-        {
-            GuardState.On => new DiagLine(
-                "egress policy",
-                $"egressProxyUrl={policy.CurrentUrl}, disableWslSessions={policy.DisableWslSessions}",
-                DiagMark.Good),
-            GuardState.Off => new DiagLine("egress policy", "not set (Claude may go direct)", DiagMark.Bad),
-            GuardState.Partial => new DiagLine(
-                "egress policy",
-                $"{policy.CurrentUrl} (expected {policy.ExpectedUrl})",
-                DiagMark.Warn),
-            _ => new DiagLine("egress policy", policy.Detail ?? "unknown", DiagMark.Neutral),
-        };
+        var policyLine = !policy.Managed
+            ? new DiagLine("egress policy", policy.Detail ?? "not managed by this profile", DiagMark.Neutral)
+            : policy.State switch
+            {
+                GuardState.On => new DiagLine(
+                    "egress policy",
+                    $"egressProxyUrl={policy.CurrentUrl}, disableWslSessions={policy.DisableWslSessions}",
+                    DiagMark.Good),
+                GuardState.Off => new DiagLine("egress policy", "not set (Claude may go direct)", DiagMark.Bad),
+                GuardState.Partial => new DiagLine(
+                    "egress policy",
+                    $"{policy.CurrentUrl} (expected {policy.ExpectedUrl})",
+                    DiagMark.Warn),
+                _ => new DiagLine("egress policy", policy.Detail ?? "unknown", DiagMark.Neutral),
+            };
 
         var banLine = ban.State switch
         {
@@ -333,7 +339,7 @@ public sealed class DiagnosticsService(
     /// </summary>
     private DiagSection WatchdogSection()
     {
-        var pids = WatchdogSupervisor.FindStopperPids(processes);
+        var pids = WatchdogSupervisor.FindStopperPids(processes, profile: _profile);
         var line = pids.Count > 0
             ? new DiagLine("idle supervisor", $"running (pid {string.Join(", ", pids)})", DiagMark.Good)
             : new DiagLine("idle supervisor", "not running - the chain will not stop on its own", DiagMark.Warn);

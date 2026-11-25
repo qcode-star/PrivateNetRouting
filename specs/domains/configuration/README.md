@@ -4,13 +4,15 @@
 
 The single source of every tunable: `AppConfig` — a POCO tree with coded defaults, loaded from
 the user config, validated once, and read by every module at composition. Also owns the
-"applications proxy endpoint" derivation (`AppProxyEndpoint`), the chain/elevation enums, and
-the UI language resolution.
+"applications proxy endpoint" derivation (`AppProxyEndpoint`), the chain/elevation enums, the
+UI language resolution and the named profiles (`--profile <name>`, see
+[Profiles](profiles.md)).
 
 ## Key Files
 
 - `src/PrivateNetRouting.Core/Configuration/AppConfig.cs` — the model: `AppConfig` + section classes + coded defaults
 - `src/PrivateNetRouting.Core/Configuration/AppConfigValidator.cs` — one validation pass with per-key messages
+- `src/PrivateNetRouting.Core/Configuration/AppProfile.cs` — the `--profile` option, name validation, config path and `ProfileContext`
 - `src/PrivateNetRouting.Core/Configuration/AppProxyEndpoint.cs` — `IsSkipped`/`Address`/`Url`/`EndPoint`/`Port`
 - `src/PrivateNetRouting.Core/Configuration/ChainMode.cs` — `Tailscale`/`Socks5`/`Http` + parser (unknown -> `Tailscale`)
 - `src/PrivateNetRouting.Core/Configuration/DaemonElevation.cs` — `Auto`/`Never`/`Always` + parser (unknown -> `Auto`)
@@ -29,7 +31,16 @@ public sealed class AppConfig {
     public ForwardProxyConfig ForwardProxy; public ChainConfig Chain;
     public WslConfig Wsl; public WatchdogConfig Watchdog;
     public BrowserConfig Browser; public GuardConfig Guard;
+    public ProfileConfig Profile;            // profile.name — display only
     // computed unions: BanHosts, BanTrees, FirewallSubnets (Claude ∪ Codex)
+}
+
+public static class AppProfile {
+    // --profile <name> anywhere in the arguments; no option — the default config
+    public static string? ParseName(IReadOnlyList<string> args);
+    public static IReadOnlyList<string> WithoutOption(IReadOnlyList<string> args);
+    public static ProfileContext Resolve(string? name);   // identity + profiles\<name>.json
+    public static void EnsureConfigured(ProfileContext profile);
 }
 
 public static class AppProxyEndpoint {
@@ -43,10 +54,11 @@ public static class AppProxyEndpoint {
 ## Flow
 
 ```
-LoadOrCreate (%APPDATA%\PrivateNetRouting\appsettings.json; created from code defaults,
+profile = AppProfile.Resolve(AppProfile.ParseName(args))       (--profile <name>; default otherwise)
+LoadOrCreate (profile.ConfigPath; created from code defaults only for the default profile,
                saved unexpanded) -> env-var expansion (path keys only) -> validate
--> ProxyRuntime.FromConfig(config)   (composition captures a listed subset)
--> reads at runtime; UI writes via AppConfigStore.Update (see store.md)
+-> ProxyRuntime.FromConfig(config, profile: profile)   (composition captures a listed subset)
+-> reads at runtime; UI writes via AppConfigStore.Update(mutate, profile.ConfigPath) (see store.md)
 ```
 
 `AppProxyEndpoint`: the local forward proxy's `listen` address in the default shapes; the
@@ -65,6 +77,8 @@ external upstream itself in the skipped shapes (`chain.socks5.upstream` for sock
   elevation -> auto, log level -> info, egress -> forward-proxy).
 - The validator names the offending key in its message and refuses null sections, bad
   endpoints (of the active mode only), non-inert tailscale paths, and non-positive timings.
+- A named profile is a config file that must exist: only the default profile is created on
+  first launch. `profile.name` is display only — the identity comes from `--profile`.
 
 ## Configuration
 
@@ -87,5 +101,6 @@ inventory with defaults is documented per module:
 ## Related Specs
 
 - [Configuration store](store.md) — load/save/patch/reload semantics
+- [Profiles](profiles.md) — `--profile`, the identity and the isolation rules
 - [Host <-> Core](../../contracts/host-core.md) — who composes from this config
 - [Security model](../../architecture/security-model.md) — what may and may not live in it

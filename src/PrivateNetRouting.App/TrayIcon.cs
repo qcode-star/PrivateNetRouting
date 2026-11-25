@@ -17,6 +17,9 @@ internal sealed class TrayIcon : IDisposable
 {
     private const string AppTitle = "PrivateNetRouting";
 
+    /// <summary>What the tooltip and the balloon show: the product name, plus the profile's display name.</summary>
+    private readonly string _title;
+
     private readonly WinForms.NotifyIcon _notifyIcon;
     private readonly WinForms.ContextMenuStrip _menu;
     private readonly WinForms.ToolStripMenuItem _openItem;
@@ -45,8 +48,9 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>The user chose "Exit with full chain stop" — bring the chain down, then terminate.</summary>
     public event Action? ExitAndStopChainRequested;
 
-    public TrayIcon()
+    public TrayIcon(string? profileDisplayName = null)
     {
+        _title = string.IsNullOrWhiteSpace(profileDisplayName) ? AppTitle : $"{AppTitle} — {profileDisplayName}";
         _openItem = new WinForms.ToolStripMenuItem();
         _openItem.Click += (_, _) => OpenRequested?.Invoke();
         _chainUpItem = new WinForms.ToolStripMenuItem();
@@ -72,7 +76,7 @@ internal sealed class TrayIcon : IDisposable
         _notifyIcon = new WinForms.NotifyIcon
         {
             Icon = AppIcons.TrayIcon,
-            Text = AppTitle,
+            Text = _title,
             ContextMenuStrip = _menu,
             Visible = true,
         };
@@ -84,7 +88,7 @@ internal sealed class TrayIcon : IDisposable
 
     /// <summary>A notification (balloon) on behalf of the application — for example, about a found update.</summary>
     public void ShowNotice(string text) =>
-        _notifyIcon.ShowBalloonTip(10_000, AppTitle, text, WinForms.ToolTipIcon.Info);
+        _notifyIcon.ShowBalloonTip(10_000, _title, text, WinForms.ToolTipIcon.Info);
 
     /// <summary>
     /// Enablement of the action items, straight from the main window's view model (the same

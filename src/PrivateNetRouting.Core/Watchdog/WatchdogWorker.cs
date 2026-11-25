@@ -39,10 +39,12 @@ public static class WatchdogWorker
         return chain.IsStopped ? "the chain is not up, there is nothing to watch" : null;
     }
 
-    public static async Task<int> RunAsync(CancellationToken stop)
+    public static async Task<int> RunAsync(IReadOnlyList<string>? args, CancellationToken stop)
     {
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config, "watchdog-worker.log");
+        var profile = AppProfile.Resolve(AppProfile.ParseName(args ?? []));
+        AppProfile.EnsureConfigured(profile);
+        var config = AppConfigStore.LoadOrCreate(profile.ConfigPath);
+        await using var runtime = ProxyRuntime.FromConfig(config, "watchdog-worker.log", profile);
         runtime.Log.Info($"watchdog worker: started (pid {Environment.ProcessId}, interval {config.Watchdog.CheckSeconds}s)");
         try
         {

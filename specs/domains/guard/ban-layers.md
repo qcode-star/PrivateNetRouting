@@ -64,6 +64,9 @@ if any layer stayed.
 - Every ban change ends with the full live probe triple — including a removal.
 - The application maintains one ban per `guard.*` identifiers; a foreign rule with another
   name is never touched.
+- Profiles do not create parallel bans: both carry the same identifiers and lists, the last
+  apply is idempotent, and either profile's enable/disable acts on the one shared ban
+  ([Profiles](../configuration/profiles.md)).
 
 ## Related Specs
 

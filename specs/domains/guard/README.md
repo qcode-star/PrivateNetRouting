@@ -72,6 +72,11 @@ open; all blocked = blocked; otherwise null ("not checked").
 - The elevated helper pins system locations (PowerShell, hosts file) regardless of config.
 - `GuardAggregate` treats SystemProxy as non-voting; a layer with no verdict has no vote;
   Unknown dominates; all voting layers on = all-on.
+- A profile owns the machine-wide values by config: `guard.managePolicy=false` /
+  `guard.manageSystemProxy=false` make the layer display-only — not judged, not voted, never
+  applied or removed (the GUI disables the policy buttons, the CLI refuses, the elevated
+  combined action skips the policy). The ban is shared by design: one set of identifiers, the
+  same lists in every profile; either profile may toggle it for the machine ([Profiles](../configuration/profiles.md)).
 
 ## Configuration
 
@@ -84,6 +89,8 @@ parallel one):
 | `hostsBeginMarker` / `hostsEndMarker` / `hostsComment` | managed-block markers | exact-line matches |
 | `nrptRuleName` / `nrptComment` | rule identifiers | DisplayName of the one NRPT rule |
 | `firewallGroup` | rule identifier | Group of the firewall Block rules |
+| `managePolicy` | `true` | false — another profile owns the machine-wide Claude policy |
+| `manageSystemProxy` | `true` | false — another profile owns the per-user WinINET switch |
 | `banProbes` | 2 probe names | inside ban trees, outside hosts lists |
 
 The name lists themselves (`claude.banHosts/banTrees/firewallSubnets`, same for `codex`) live

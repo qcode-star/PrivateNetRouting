@@ -58,6 +58,8 @@ public interface IClaudeUsageProbe
 /// <param name="codexCommandLineMarker">Fragment of the Codex image path (its MSIX install folder): the process name alone is shared with unrelated applications (the ChatGPT desktop app); empty — the name decides.</param>
 /// <param name="externalProxyAddress">Address of the external applications proxy (the skipped shapes): its clients are counted by the remote end; null — the proxy is local and the port decides.</param>
 /// <param name="egressPort">Local port of the chain's own egress listener (chain.tailscale.socksListen); 0 — the mode has no local egress to guard (socks5).</param>
+/// <param name="countClaude">Whether Claude processes keep the chain alive (claude.enabled); a profile owns one app, and the other app's processes are the other profile's business.</param>
+/// <param name="countCodex">Whether Codex processes keep the chain alive (codex.enabled).</param>
 public sealed class ClaudeUsageProbe(
     IProcessFinder processes,
     IEstablishedConnectionCounter connections,
@@ -66,7 +68,9 @@ public sealed class ClaudeUsageProbe(
     string codexProcessName = "",
     int egressPort = 0,
     string codexCommandLineMarker = "",
-    IPAddress? externalProxyAddress = null) : IClaudeUsageProbe
+    IPAddress? externalProxyAddress = null,
+    bool countClaude = true,
+    bool countCodex = true) : IClaudeUsageProbe
 {
     private static readonly TimeSpan FutureMarkerTolerance = TimeSpan.FromMinutes(5);
 
@@ -76,13 +80,16 @@ public sealed class ClaudeUsageProbe(
         // otherwise the chain is kept (the probe is retried on the next tick)
         var failures = new List<string>();
         var processParts = new List<string>();
-        var claudeCount = Count("claude processes", () => processes.FindByNameContains("claude").Count, failures);
-        if (claudeCount > 0)
+        if (countClaude)
         {
-            processParts.Add($"claude processes: {claudeCount}");
+            var claudeCount = Count("claude processes", () => processes.FindByNameContains("claude").Count, failures);
+            if (claudeCount > 0)
+            {
+                processParts.Add($"claude processes: {claudeCount}");
+            }
         }
 
-        if (codexProcessName.Length > 0)
+        if (countCodex && codexProcessName.Length > 0)
         {
             var codexCount = Count("codex processes", () => CodexProcesses().Count, failures);
             if (codexCount > 0)

@@ -49,6 +49,91 @@ public static class ProcessMatch
 
     private static bool IsBoundaryAfter(char c) => char.IsWhiteSpace(c) || c is '"' or '\'';
 
+    /// <summary>
+    /// Splits a Windows command line the way the C runtime does (CommandLineToArgvW): the program
+    /// name ends at the first unquoted space and takes no escapes; in the arguments 2n backslashes
+    /// before a quote are n backslashes and a quote toggle, 2n+1 — n backslashes and a literal quote.
+    /// </summary>
+    public static IReadOnlyList<string> SplitArguments(string commandLine)
+    {
+        var result = new List<string>();
+        var i = 0;
+        var text = commandLine;
+
+        // the program name
+        var name = new System.Text.StringBuilder();
+        var quoted = false;
+        while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+        {
+            if (text[i] == '"')
+            {
+                quoted = !quoted;
+            }
+            else
+            {
+                name.Append(text[i]);
+            }
+
+            i++;
+        }
+
+        if (name.Length > 0)
+        {
+            result.Add(name.ToString());
+        }
+
+        while (true)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i]))
+            {
+                i++;
+            }
+
+            if (i >= text.Length)
+            {
+                return result;
+            }
+
+            var argument = new System.Text.StringBuilder();
+            quoted = false;
+            while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+            {
+                var backslashes = 0;
+                while (i < text.Length && text[i] == '\\')
+                {
+                    backslashes++;
+                    i++;
+                }
+
+                if (i < text.Length && text[i] == '"')
+                {
+                    argument.Append('\\', backslashes / 2);
+                    if (backslashes % 2 == 1)
+                    {
+                        argument.Append('"');
+                    }
+                    else
+                    {
+                        quoted = !quoted;
+                    }
+
+                    i++;
+                }
+                else
+                {
+                    argument.Append('\\', backslashes);
+                    if (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
+                    {
+                        argument.Append(text[i]);
+                        i++;
+                    }
+                }
+            }
+
+            result.Add(argument.ToString());
+        }
+    }
+
     /// <summary>Processes of the given image name whose command line carries <paramref name="value"/> as an argument value.</summary>
     public static IReadOnlyList<FoundProcess> FindByArgument(this IProcessFinder finder, string processName, string value) =>
         finder.Find(processName, value)

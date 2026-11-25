@@ -28,7 +28,7 @@ internal static class HeadlessHost
 
         if (args.Contains(WatchdogSupervisor.WorkerMarker, StringComparer.OrdinalIgnoreCase))
         {
-            exitCode = Run(() => WatchdogWorker.RunAsync(CancellationToken.None));
+            exitCode = Run(() => WatchdogWorker.RunAsync(args, CancellationToken.None));
             return true;
         }
 

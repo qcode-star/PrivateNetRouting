@@ -101,6 +101,12 @@ public partial class MainWindow : Window
         MaxHeight = SystemParameters.WorkArea.Height; // past the cap the body scrolls instead of growing
         _runtime = runtime;
         _viewModel = new MainViewModel(runtime) { ConfigPath = configPath };
+        // the profile's display name distinguishes two windows of the same product
+        if (runtime.Profile.DisplayName(runtime.Config) is { } profileName)
+        {
+            Title = $"{Title} — {profileName}";
+        }
+
         DataContext = _viewModel;
         _externalUpstream = runtime.Config.Chain.EffectiveMode != ChainMode.Tailscale;
         _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
@@ -115,7 +121,7 @@ public partial class MainWindow : Window
         UpstreamListenersLabel.Text = Loc.S(_externalUpstream ? "Main.EgressListeners" : "Main.TailscaleListeners");
         _rail.Reset(RailStage.Unknown);
         _viewModel.Refresh();
-        SyncAutoStartBox();
+        SyncIdleStopBox();
         _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
         _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
         ApplyCardLayout();
@@ -313,7 +319,7 @@ public partial class MainWindow : Window
         ApplyCardLayout();
         try
         {
-            await AppConfigStore.UpdateAsync(config => config.Ui.GuardsCardExpanded = _guardsCardExpanded);
+            await AppConfigStore.UpdateAsync(config => config.Ui.GuardsCardExpanded = _guardsCardExpanded, _viewModel.ConfigPath);
         }
         catch (Exception ex)
         {
@@ -339,7 +345,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await AppConfigStore.UpdateAsync(config => config.Ui.ChainCardExpanded = expanded);
+            await AppConfigStore.UpdateAsync(config => config.Ui.ChainCardExpanded = expanded, _viewModel.ConfigPath);
         }
         catch (Exception ex)
         {
@@ -663,13 +669,16 @@ public partial class MainWindow : Window
 
         BanDetail.ToolTip = staleHosts ? Loc.S("Main.Guard.Ban.Stale") : null;
 
-        PolicyDetail.Text = snapshot.Policy.State switch
-        {
-            GuardState.On => Loc.F("Main.Guard.Policy.DetailFmt", snapshot.Policy.CurrentUrl),
-            GuardState.Off => Loc.S("Main.Guard.Policy.Off"),
-            GuardState.Partial => Loc.F("Main.Guard.Policy.OtherFmt", snapshot.Policy.CurrentUrl, snapshot.Policy.ExpectedUrl),
-            _ => snapshot.Policy.Detail ?? Loc.S("Main.Guard.Unknown"),
-        };
+        PolicyDetail.Text = !snapshot.Policy.Managed
+            ? Loc.S("Main.Guard.Policy.NotManaged")
+            : snapshot.Policy.State switch
+            {
+                GuardState.On => Loc.F("Main.Guard.Policy.DetailFmt", snapshot.Policy.CurrentUrl),
+                GuardState.Off => Loc.S("Main.Guard.Policy.Off"),
+                GuardState.Partial => Loc.F("Main.Guard.Policy.OtherFmt", snapshot.Policy.CurrentUrl, snapshot.Policy.ExpectedUrl),
+                _ => snapshot.Policy.Detail ?? Loc.S("Main.Guard.Unknown"),
+            };
+        _viewModel.SetPolicyManaged(snapshot.Policy.Managed);
 
         // one row, both applications: Claude Code env and the Codex layer (config.toml flag + .env)
         // an application off in the config is named as such, not judged by its files
@@ -1224,31 +1233,47 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Idle auto-stop toggle: Start spawns the detached worker (it outlives the application and
-    /// switches itself off after the idle stop — rule #4: the background process exists only
-    /// after this explicit action), Stop kills the identified stoppers. The row status is read
-    /// back from the process list, not from our intention.
+    /// The idle stopper's single control (watchdog.autoStart): checked — the stopper runs now (over
+    /// a live chain) and is re-armed by the orchestrator after every successful raise; unchecked —
+    /// it is stopped. Start spawns the detached worker (it outlives the application and switches
+    /// itself off after the idle stop — rule #4: the background process exists only after this
+    /// explicit action), Stop kills the identified stoppers. The row status is read back from the
+    /// process list, not from our intention.
     /// </summary>
-    private async void OnIdleStopToggled(object sender, RoutedEventArgs e)
+    private async void OnIdleStopEnabledToggled(object sender, RoutedEventArgs e)
     {
-        if (_idleStopBusy)
+        if (_autoStartSyncing || _idleStopBusy)
         {
             return;
         }
 
+        // the shared config follows the click at once, in click order: an await in between would let
+        // a quick on→off finish its writes out of order and leave the other value in memory
+        var enabled = IdleStopBox.IsChecked == true;
+        _runtime.Config.Watchdog.AutoStart = enabled;
         _idleStopBusy = true;
         _viewModel.SetIdleStopBusy(true);
         try
         {
-            if (_viewModel.IdleStopRunning)
+            await AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = enabled, _viewModel.ConfigPath);
+            if (!enabled)
             {
                 await _runtime.WatchdogControl.StopAsync(CancellationToken.None);
                 _viewModel.SetCheckResult("Main.IdleStop.StoppedManual");
             }
-            else
+            else if (_viewModel.IdleStopRunning)
+            {
+                _viewModel.SetCheckResult("Main.IdleStop.StartedFmt", _runtime.Config.Watchdog.CheckSeconds);
+            }
+            else if (_lastChainState?.IsFullyUp == true)
             {
                 await _runtime.WatchdogControl.StartAsync(CancellationToken.None);
                 _viewModel.SetCheckResult("Main.IdleStop.StartedFmt", _runtime.Config.Watchdog.CheckSeconds);
+            }
+            else
+            {
+                // a chain that is down cannot host a stopper: the choice stands, the next raise arms it
+                _viewModel.SetCheckResult("Main.IdleStop.Armed");
             }
         }
         catch (Exception ex)
@@ -1274,7 +1299,7 @@ public partial class MainWindow : Window
         try
         {
             var running = await Task.Run(() => _runtime.WatchdogControl.IsRunning(), CancellationToken.None);
-            _viewModel.UpdateIdleStop(running);
+            _viewModel.UpdateIdleStop(running, _runtime.Config.Watchdog.AutoStart);
         }
         catch (Exception)
         {
@@ -1282,37 +1307,11 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// The auto-start flag (watchdog.autoStart): when on, the chain orchestrator re-arms the
-    /// stopper itself after every successful raise. The choice is persisted to the user config
-    /// and applied to the shared config object, so the next raise sees it immediately.
-    /// </summary>
-    private async void OnAutoStartToggled(object sender, RoutedEventArgs e)
-    {
-        if (_autoStartSyncing)
-        {
-            return;
-        }
-
-        // the shared config follows the click at once, in click order: an await in between would let
-        // a quick on→off finish its writes out of order and leave the other value in memory
-        var enabled = AutoStartBox.IsChecked == true;
-        _runtime.Config.Watchdog.AutoStart = enabled;
-        try
-        {
-            await AppConfigStore.UpdateAsync(config => config.Watchdog.AutoStart = enabled);
-        }
-        catch (Exception ex)
-        {
-            _viewModel.SetCheckResult("Main.ErrorFmt", ex.Message);
-        }
-    }
-
     /// <summary>The checkbox follows the config: on window construction and after a config reload.</summary>
-    private void SyncAutoStartBox()
+    private void SyncIdleStopBox()
     {
         _autoStartSyncing = true;
-        AutoStartBox.IsChecked = _runtime.Config.Watchdog.AutoStart;
+        IdleStopBox.IsChecked = _runtime.Config.Watchdog.AutoStart;
         _autoStartSyncing = false;
     }
 
@@ -1341,7 +1340,7 @@ public partial class MainWindow : Window
         try
         {
             _runtime.ReloadConfig();
-            SyncAutoStartBox();
+            SyncIdleStopBox();
             _chainCardExpanded = _runtime.Config.Ui.ChainCardExpanded;
             _guardsCardExpanded = _runtime.Config.Ui.GuardsCardExpanded;
             ApplyCardLayout();
@@ -2138,7 +2137,7 @@ public partial class MainWindow : Window
         try
         {
             Loc.Apply(preference);
-            await AppConfigStore.UpdateAsync(config => config.Ui.Language = preference);
+            await AppConfigStore.UpdateAsync(config => config.Ui.Language = preference, _viewModel.ConfigPath);
         }
         catch (Exception ex)
         {
@@ -2177,7 +2176,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _idleStopRunning;
     private bool _idleStopBusy;
     private string _idleStopState = "…";
-    private string _idleStopAction = "";
     private Brush _idleStopBrush = Theme.TextMuted;
     private string _chainSummary = "…";
     private Brush _chainStateBrush = Theme.TextMuted;
@@ -2195,8 +2193,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _externalUpstream = runtime.Config.Chain.EffectiveMode != ChainMode.Tailscale;
         _skipProxy = AppProxyEndpoint.IsSkipped(runtime.Config);
         Loc.LanguageChanged += OnLanguageChanged;
-        // until the first liveness poll — the same word the not-running state uses
-        IdleStopAction = Loc.S("Main.IdleStop.Button.Start");
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -2269,13 +2265,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _idleStopState, value);
     }
 
-    /// <summary>The toggle button word: Start when no stopper is running, Stop when one is.</summary>
-    public string IdleStopAction
-    {
-        get => _idleStopAction;
-        private set => SetField(ref _idleStopAction, value);
-    }
-
     public Brush IdleStopBrush
     {
         get => _idleStopBrush;
@@ -2283,13 +2272,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
-    /// The toggle grays out while its operation runs; Start is offered only over a live chain —
-    /// the stopper exists to stop the chain, a stopped chain takes its stopper down (the
-    /// orchestrator's chain-stopped hook). Stop stays available whenever a stopper is running,
-    /// and an unknown state keeps the gate open — the same convention as the chain buttons.
+    /// The one checkbox grays out only while its operation runs: it is the persisted preference
+    /// (watchdog.autoStart), and a chain that is down turns the next raise into the start — the
+    /// handler starts the stopper only over a live chain and otherwise keeps the choice.
     /// </summary>
-    public bool CanIdleStop =>
-        !_idleStopBusy && (_idleStopRunning || _lastChainState is null || _lastChainState.IsFullyUp);
+    public bool CanIdleStop => !_idleStopBusy;
 
     /// <summary>Formatted from key+args on every read — survives a language change.</summary>
     public string CheckResult => _checkResultKey is null ? _checkResultLiteral ?? "" : Loc.F(_checkResultKey, _checkResultArgs);
@@ -2427,6 +2414,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private bool _guardsKnown;
 
+    private bool _policyManaged = true;
+
+    /// <summary>
+    /// The policy buttons: off when another profile owns the one machine-wide policy value
+    /// (guard.managePolicy=false in this profile's config).
+    /// </summary>
+    public bool CanPolicy => CanGuard && _policyManaged;
+
     /// <summary>
     /// The combined guard action follows the state it flips, so it waits for the first status read
     /// (and for a readable one: after a failed read nobody knows whether "enable" or "disable" is meant).
@@ -2439,6 +2434,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CanGuard = !busy;
         OnPropertyChanged(nameof(CanGuard));
         OnPropertyChanged(nameof(CanGuardAll));
+        OnPropertyChanged(nameof(CanPolicy));
+    }
+
+    public void SetPolicyManaged(bool managed)
+    {
+        if (_policyManaged == managed)
+        {
+            return;
+        }
+
+        _policyManaged = managed;
+        OnPropertyChanged(nameof(CanPolicy));
     }
 
     public void SetGuardsKnown(bool known)
@@ -2581,18 +2588,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private static string WithUser(string upstream, string user) =>
         string.IsNullOrEmpty(user) ? upstream : $"{user}@{upstream}";
 
-    /// <summary>Liveness word of the idle stopper, from the process list; the button word follows the state.</summary>
-    public void UpdateIdleStop(bool running)
+    /// <summary>
+    /// Liveness word of the idle stopper, from the process list: running — the worker exists;
+    /// enabled but not running — the choice stands and the next chain raise arms it; off — not wanted.
+    /// </summary>
+    public void UpdateIdleStop(bool running, bool enabled)
     {
         _idleStopRunning = running;
-        IdleStopState = running ? Loc.S("Main.IdleStop.Running") : Loc.S("Main.IdleStop.Off");
+        IdleStopState = running
+            ? Loc.S("Main.IdleStop.Running")
+            : enabled ? Loc.S("Main.IdleStop.Armed") : Loc.S("Main.IdleStop.Off");
         IdleStopBrush = running ? Theme.Ok : Theme.TextSecondary;
-        IdleStopAction = running ? Loc.S("Main.IdleStop.Button.Stop") : Loc.S("Main.IdleStop.Button.Start");
         OnPropertyChanged(nameof(IdleStopRunning));
         OnPropertyChanged(nameof(CanIdleStop));
     }
 
-    /// <summary>A failed liveness search: the state word goes unknown, the last belief and the button stay.</summary>
+    /// <summary>A failed liveness search: the state word goes unknown, the last belief stays.</summary>
     public void SetIdleStopUnknown()
     {
         IdleStopState = Loc.S("Main.State.Unknown");
@@ -2626,7 +2637,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CheckResult));
         OnPropertyChanged(nameof(UpdateBadgeToolTip));
         OnPropertyChanged(nameof(CodexUpdateBadgeToolTip));
-        UpdateIdleStop(_idleStopRunning);
+        UpdateIdleStop(_idleStopRunning, _runtime.Config.Watchdog.AutoStart);
         if (_chainOperationRunning)
         {
             ChainSummary = Loc.S("Main.Chain.Busy");

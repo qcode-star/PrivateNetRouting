@@ -310,7 +310,7 @@ public sealed class ElevatedRunner(
     private static readonly TimeSpan StaleResultAge = TimeSpan.FromDays(1);
 
     private readonly Func<string, string, int> _executor =
-        executor ?? ((command, resultFile) => ElevatedChainCommands.Execute(command, resultFile));
+        executor ?? ((command, resultFile) => ElevatedChainCommands.Execute(command, resultFile, configPath));
 
     /// <summary>The config this process runs with — handed to the helper, which may run as another account.</summary>
     private readonly string _configPath = configPath ?? AppConfigStore.GetDefaultConfigPath();

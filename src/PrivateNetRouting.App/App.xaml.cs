@@ -34,6 +34,13 @@ public partial class App : Application
     private const string LaunchEventName = @"Local\PrivateNetRouting.Launch";
     private const string LaunchBrowserEventName = @"Local\PrivateNetRouting.LaunchBrowser";
 
+    /// <summary>
+    /// A profile-agnostic marker held by every GUI instance: the installer's AppMutex points at
+    /// it, so an upgrade sees a running profile window as well.
+    /// </summary>
+    private const string AnyInstanceMutexName = @"Local\PrivateNetRouting.AnyInstance";
+
+    private Mutex? _anyInstance;
     private Mutex? _singleInstance;
     private EventWaitHandle? _activate;
     private EventWaitHandle? _launchSignal;
@@ -41,13 +48,31 @@ public partial class App : Application
     private readonly List<RegisteredWaitHandle> _subscriptions = [];
     private ProxyRuntime? _runtime;
     private TrayIcon? _tray;
+    private ProfileContext _profile = ProfileContext.Default;
     private bool _exiting;
     private bool _exitStarted;
+
+    /// <summary>The profile scopes the OS-level names; the default profile keeps the long-standing ones.</summary>
+    private static string ScopedName(string name, ProfileContext profile) =>
+        profile.NameSuffix is { } suffix ? $"{name}.{suffix}" : name;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         InstallGlobalExceptionHandlers();
+
+        // the profile must be known before the mutex and its events exist: they are its identity
+        try
+        {
+            Loc.Apply(AppLanguage.Resolve("auto", CultureInfo.CurrentUICulture));
+            _profile = AppProfile.Resolve(AppProfile.ParseName(e.Args));
+        }
+        catch (ArgumentException ex)
+        {
+            MessageBox.Show(ex.Message, Loc.S("App.Error.Title"), MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(2);
+            return;
+        }
 
         var launchOnStart = e.Args.Contains("--launch", StringComparer.OrdinalIgnoreCase);
         var launchBrowserOnStart = e.Args.Contains("--launch-browser", StringComparer.OrdinalIgnoreCase);
@@ -56,11 +81,11 @@ public partial class App : Application
         // lands while the first one is still starting finds the event and its signal is kept for
         // the first instance's wait (a named event lives while any handle to it is open, and the
         // first instance holds its handles from before it owns the mutex)
-        _activate = CreateSignal(ActivateEventName);
-        _launchSignal = CreateSignal(LaunchEventName);
-        _launchBrowserSignal = CreateSignal(LaunchBrowserEventName);
+        _activate = CreateSignal(ScopedName(ActivateEventName, _profile));
+        _launchSignal = CreateSignal(ScopedName(LaunchEventName, _profile));
+        _launchBrowserSignal = CreateSignal(ScopedName(LaunchBrowserEventName, _profile));
 
-        _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var firstInstance);
+        _singleInstance = new Mutex(initiallyOwned: true, ScopedName(MutexName, _profile), out var firstInstance);
         if (!firstInstance)
         {
             // hand the verb over to the running instance: a shortcut launch must start Claude or
@@ -87,6 +112,9 @@ public partial class App : Application
             return;
         }
 
+        // profile-agnostic: the installer's AppMutex waits for any GUI, whichever profile it runs
+        _anyInstance = new Mutex(initiallyOwned: false, AnyInstanceMutexName);
+
         // the callbacks only queue work to the dispatcher, which runs it after OnStartup has
         // finished — the main window exists by then
         _subscriptions.Add(Subscribe(_activate, ActivateMainWindow));
@@ -112,16 +140,19 @@ public partial class App : Application
             // the system language first: a startup error below has to be readable even when the
             // config (and with it the configured language) cannot be loaded
             Loc.Apply(AppLanguage.Resolve("auto", CultureInfo.CurrentUICulture));
-            config = AppConfigStore.LoadOrCreate();
+            // a named profile is created explicitly (pnr --profile <name> config init): a silent
+            // default twin would collide with the running profile's ports and logs
+            AppProfile.EnsureConfigured(_profile);
+            config = AppConfigStore.LoadOrCreate(_profile.ConfigPath);
             Loc.Apply(AppLanguage.Resolve(config.Ui.Language, CultureInfo.CurrentUICulture));
-            _runtime = ProxyRuntime.FromConfig(config);
+            _runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         }
         catch (Exception ex)
         {
             // a malformed config or endpoint: without this the shortcut would just "do nothing"
             LogUnhandled("startup", ex);
             MessageBox.Show(
-                Loc.F("App.Error.StartupFmt", ex.Message, AppConfigStore.GetDefaultConfigPath()),
+                Loc.F("App.Error.StartupFmt", ex.Message, _profile.ConfigPath),
                 Loc.S("App.Error.Title"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -133,7 +164,7 @@ public partial class App : Application
         // upstream is down), so an auto-start would only produce a guaranteed-failing CONNECT
         // check; the proxy comes up as part of the chain (chain up / launches / update)
 
-        var window = new MainWindow(_runtime, AppConfigStore.GetDefaultConfigPath(), config.Ui.Language);
+        var window = new MainWindow(_runtime, _profile.ConfigPath, config.Ui.Language);
         MainWindow = window;
         window.Closing += (_, e2) =>
         {
@@ -155,7 +186,7 @@ public partial class App : Application
         }
 #endif
 
-        _tray = new TrayIcon();
+        _tray = new TrayIcon(_runtime.Profile.DisplayName(config));
         _tray.ShowLaunchClaude(config.Claude.Enabled);
         _tray.OpenRequested += ActivateMainWindow;
         _tray.ChainUpRequested += () => _ = window.ChainUpAsync();
@@ -484,6 +515,7 @@ public partial class App : Application
         // the mutex goes first, the events last: a launch signalled while this instance still
         // owned the mutex finds the event alive
         _singleInstance?.Dispose();
+        _anyInstance?.Dispose();
         _activate?.Dispose();
         _launchSignal?.Dispose();
         _launchBrowserSignal?.Dispose();

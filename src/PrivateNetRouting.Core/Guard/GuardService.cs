@@ -164,6 +164,16 @@ public sealed class GuardService(
                 // off of this installation clears it, so it is ours, not "left alone"
                 sysProxyStatus = sysProxyStatus with { Ours = true };
             }
+
+            if (!config.Guard.ManageSystemProxy)
+            {
+                // one user, one switch: another profile owns it, this one only reports it
+                sysProxyStatus = sysProxyStatus with
+                {
+                    Managed = false,
+                    Detail = "guard.manageSystemProxy=false - not managed by this profile",
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -239,6 +249,15 @@ public sealed class GuardService(
                 : values.EgressProxyUrl == expected && values.DisableWslSessions == 0
                     ? new EgressPolicyStatus(GuardState.On, values.EgressProxyUrl, expected, values.DisableWslSessions)
                     : new EgressPolicyStatus(GuardState.Partial, values.EgressProxyUrl, expected, values.DisableWslSessions);
+            if (!config.Guard.ManagePolicy)
+            {
+                // read for display only: another profile owns the one machine-wide value
+                policyStatus = policyStatus with
+                {
+                    Managed = false,
+                    Detail = "guard.managePolicy=false - not managed by this profile",
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -266,7 +285,7 @@ public sealed class GuardService(
         return
         [
             new(GuardKind.LocalBan, ban.State, ban.Detail ?? $"hosts: {ban.HostsEntries} names{(ban.HostsCurrent || ban.HostsEntries == 0 ? "" : " (stale list)")}; NRPT: {ban.NrptRules} rule(s) on {ban.NrptNamespaces.Count} namespaces{(ban.NrptCurrent ? "" : " (stale list)")}; firewall: {ban.FirewallRules} rule(s) on {ban.FirewallSubnets.Count} subnets{(ban.FirewallCurrent ? "" : " (stale list)")}"),
-            new(GuardKind.EgressPolicy, policy.State, policy.Detail ?? (policy.State == GuardState.On
+            new(GuardKind.EgressPolicy, policy.Managed ? policy.State : GuardState.Off, policy.Detail ?? (policy.State == GuardState.On
                 ? $"egressProxyUrl={policy.CurrentUrl}, disableWslSessions={policy.DisableWslSessions}"
                 : policy.State == GuardState.Off
                     ? "policy is not set"
@@ -296,11 +315,13 @@ public sealed class GuardService(
                     $"{d.Distro}: {Word(d.State)}{(d.Sync ? "" : " (sync off)")} (claude script {(d.ScriptPort?.ToString() ?? "-")}, codex proxy env {(d.ProxyEnvPresent ? d.ProxyEnvPort?.ToString() ?? "present" : "missing")}){(d.Reason.Length > 0 ? $" - {d.Reason}" : "")}"))
                 + (wsl.Warning is null ? "" : (wsl.Distros.Count == 0 && wsl.Reason.Length > 0 ? "; " : "") + wsl.Warning)),
             new(GuardKind.SystemProxy,
-                sysProxy.Detail is not null
-                    ? GuardState.Unknown
-                    : !sysProxy.Enabled
-                        ? GuardState.Off
-                        : sysProxy.Ours && sysProxy.Overridden is null ? GuardState.On : GuardState.Partial,
+                !sysProxy.Managed
+                    ? GuardState.Off
+                    : sysProxy.Detail is not null
+                        ? GuardState.Unknown
+                        : !sysProxy.Enabled
+                            ? GuardState.Off
+                            : sysProxy.Ours && sysProxy.Overridden is null ? GuardState.On : GuardState.Partial,
                 sysProxy.Detail ?? (!sysProxy.Enabled
                     ? "disabled"
                     : sysProxy.Ours
@@ -349,6 +370,12 @@ public sealed class GuardService(
     /// <summary>Enabling/disabling the managed policy (UAC); a control read follows.</summary>
     public async Task<string> PolicyAsync(bool enable, CancellationToken ct)
     {
+        if (!config.Guard.ManagePolicy)
+        {
+            throw new InvalidOperationException(
+                "guard.managePolicy=false - this profile does not manage the machine-wide Claude policy");
+        }
+
         var command = enable ? GuardElevatedCommands.PolicyOn : GuardElevatedCommands.PolicyOff;
         var result = await elevated.RunAsync(command, ct);
         if (!result.Ok)
@@ -607,6 +634,12 @@ public sealed class GuardService(
     public Task<string> SetSystemProxyAsync(bool enable, CancellationToken ct) =>
         Task.Run(() =>
         {
+            if (!config.Guard.ManageSystemProxy)
+            {
+                throw new InvalidOperationException(
+                    "guard.manageSystemProxy=false - this profile does not manage the per-user system proxy");
+            }
+
             if (enable)
             {
                 var server = SystemProxyServer(config);

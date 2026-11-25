@@ -26,6 +26,13 @@ A ban is **on** only when all three local layers are present and current with th
 (mismatch = `Partial`, never silently "on"); after every apply/remove the guard runs live
 probes (DNS, direct, proxied) — see [Guard](../domains/guard/README.md).
 
+Profiles ([Profiles](../domains/configuration/profiles.md)) do not multiply this surface: the
+hosts block, NRPT rule and firewall group stay one shared ban with one set of identifiers and
+the same lists in every profile; the HKLM policy and the WinINET switch are single-valued, so
+`guard.managePolicy`/`guard.manageSystemProxy` give each exactly one owning profile (the other
+reads it and says "not managed by this profile"). The settings files and the two WSL halves are
+split by app, so each file has one writer.
+
 ## Proxy Refusal Rules (defense in depth)
 
 The forward proxy refuses before any dial, answering `403 Forbidden`

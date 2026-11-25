@@ -27,6 +27,13 @@ public sealed class ProxyRuntime : IAsyncDisposable
     public AppConfig Config { get; }
 
     /// <summary>
+    /// The profile this runtime runs: its identity scopes the OS-level names (the worker
+    /// command lines, the watchdog stopper search) and its config path goes to the elevated
+    /// helper and to the settings writes (Reload, the browser profile).
+    /// </summary>
+    public ProfileContext Profile { get; }
+
+    /// <summary>
     /// The proxy server itself (in-process); the console mode and the worker start it directly.
     /// Null in the skipped shapes (the http mode, or socks5 with forwardProxy.enabled=false):
     /// there is no local proxy.
@@ -95,8 +102,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
 
     private readonly List<FileLog> _allLogs;
 
-    private ProxyRuntime(AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService? proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
+    private ProxyRuntime(ProfileContext profile, AppConfig config, FileLog log, DohEndpointPool? pool, ForwardProxyService? proxy, ForwardProxySupervisor proxyControl, ChainSupervisor chain, FileLog chainLog, ClaudeLauncher launcher, FileLog launcherLog, CodexLauncher codexLauncher, FileLog codexLauncherLog, BrowserLauncher browser, BrowserProfileService browserProfile, FileLog browserLog, WatchdogService watchdog, FileLog watchdogLog, WatchdogSupervisor watchdogControl, ClaudeUpdater updater, FileLog updaterLog, CodexUpdater codexUpdater, FileLog codexUpdaterLog, HttpClient updaterHttp, GuardService guard, FileLog guardLog, DiagnosticsService diagnostics, LogStore logs, AppUpdateChecker appUpdate, FileLog appUpdateLog, List<FileLog> allLogs)
     {
+        Profile = profile;
         Config = config;
         Log = log;
         DohPool = pool;
@@ -128,8 +136,9 @@ public sealed class ProxyRuntime : IAsyncDisposable
         _allLogs = allLogs;
     }
 
-    public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log")
+    public static ProxyRuntime FromConfig(AppConfig config, string logFileName = "forward-proxy.log", ProfileContext? profile = null)
     {
+        profile ??= ProfileContext.Default;
         var fp = config.ForwardProxy;
         FileLog NewLog(string fileName) =>
             new(Path.Combine(config.Logging.Directory, fileName), config.Logging.EffectiveLevel, config.Logging.MaxBytes, config.Logging.Keep);
@@ -221,11 +230,12 @@ public sealed class ProxyRuntime : IAsyncDisposable
             skipped: skipProxy,
             skippedAppsEndpoint: skipProxy ? AppProxyEndpoint.Address(config) : null,
             skippedReason: skipProxy ? SkipReason(config) : null,
-            stopChannel: new NamedEventProxyStopChannel());
+            stopChannel: new NamedEventProxyStopChannel(),
+            profile: profile);
         var watchdogLog = NewLog("watchdog.log");
-        var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog);
+        var watchdogControl = new WatchdogSupervisor(config.Watchdog, processes, watchdogLog, profile: profile);
         var chainLog = NewLog("chain.log");
-        var elevated = new ElevatedRunner(config.Chain.Tailscale, chainLog);
+        var elevated = new ElevatedRunner(config.Chain.Tailscale, chainLog, configPath: profile.ConfigPath);
         var chain = new ChainSupervisor(
             config.Chain,
             proxyControl,
@@ -273,7 +283,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
             chain,
             browserLog,
             processes);
-        var browserProfile = new BrowserProfileService(config, new WScriptShortcutFactory(), browserLog);
+        var browserProfile = new BrowserProfileService(
+            config,
+            new WScriptShortcutFactory(),
+            browserLog,
+            persist: mutate => AppConfigStore.Update(mutate, profile.ConfigPath));
 
         IWslAppHost? wslHost = config.Wsl.Distros.Count == 0
             ? null
@@ -304,7 +318,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
             // any connection to the same port number elsewhere); a loopback one is ours by port
             skipProxy && !IPAddress.IsLoopback(AppProxyEndpoint.EndPoint(config).Address)
                 ? AppProxyEndpoint.EndPoint(config).Address
-                : null);
+                : null,
+            // a profile owns one app: the other app's processes belong to the other profile's
+            // chain and must not keep this one alive (or vice versa)
+            countClaude: config.Claude.Enabled,
+            countCodex: config.Codex.Enabled);
         var watchdog = new WatchdogService(config.Watchdog, usage, wslHost, chain, watchdogLog);
 
         var updaterLog = NewLog("updater.log");
@@ -361,7 +379,11 @@ public sealed class ProxyRuntime : IAsyncDisposable
             new CodexSettingsGuard(config),
             new WslConfigGuard(config, new WslProcessRunner()),
             new WinInetSystemProxyStore(),
-            new ElevatedRunner(config.Chain.Tailscale, guardLog, executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile)),
+            new ElevatedRunner(
+                config.Chain.Tailscale,
+                guardLog,
+                executor: (command, resultFile) => GuardElevatedCommands.Execute(command, resultFile, profile.ConfigPath),
+                configPath: profile.ConfigPath),
             guardLog,
             ct => ChainHealthAsync(config, ct));
 
@@ -381,9 +403,10 @@ public sealed class ProxyRuntime : IAsyncDisposable
             processes,
             ct => ChainProbeAsync(config, ct),
             guard.GetCoreStatusAsync,
-            logs);
+            logs,
+            profile: profile);
 
-        return new ProxyRuntime(config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserProfile, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
+        return new ProxyRuntime(profile, config, log, pool, proxy, proxyControl, chain, chainLog, launcher, launcherLog, codexLauncher, codexLauncherLog, browser, browserProfile, browserLog, watchdog, watchdogLog, watchdogControl, updater, updaterLog, codexUpdater, codexUpdaterLog, updaterHttp, guard, guardLog, diagnostics, logs, appUpdate, appUpdateLog, allLogs);
     }
 
     private static async Task<bool> ChainHealthAsync(AppConfig config, CancellationToken ct) =>
@@ -469,7 +492,7 @@ public sealed class ProxyRuntime : IAsyncDisposable
         Chain.HandOverProxyAsync(ProxyControl.DetachAsync, TimeSpan.FromSeconds(Config.ForwardProxy.HandoverLockWaitSeconds), ct);
 
     /// <summary>Re-reads the user config into the shared AppConfig object (the chain card "Reload" button).</summary>
-    public void ReloadConfig() => ConfigNeedsRestart = AppConfigStore.ReloadInto(Config);
+    public void ReloadConfig() => ConfigNeedsRestart = AppConfigStore.ReloadInto(Config, Profile.ConfigPath);
 
     /// <summary>
     /// Whether the user file holds values this process cannot apply without a restart: the

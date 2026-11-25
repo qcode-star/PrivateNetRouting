@@ -21,7 +21,8 @@ public sealed class WatchdogSupervisor(
     Func<string, string?, string, int?>? spawnWorker = null,
     Action<int>? killProcess = null,
     Func<string?>? currentExePath = null,
-    Func<TimeSpan, CancellationToken, Task>? delay = null)
+    Func<TimeSpan, CancellationToken, Task>? delay = null,
+    ProfileContext? profile = null)
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on stop.</summary>
     public const string WorkerMarker = "--watchdog-worker";
@@ -31,6 +32,8 @@ public sealed class WatchdogSupervisor(
 
     /// <summary>Executables of this installation that can host the worker (the GUI exe and the CLI exe); WMI names carry the extension.</summary>
     public static readonly IReadOnlyList<string> WorkerHostNames = ["PrivateNetRouting.App.exe", CliProcessName];
+
+    private readonly ProfileContext _profile = profile ?? ProfileContext.Default;
 
     private readonly Func<string, string?, string, int?> _spawnWorker =
         spawnWorker ?? ((commandLine, stdoutPath, stderrPath) => ProcessOps.StartViaCmd(commandLine, stdoutPath, stderrPath)?.Id ?? 0);
@@ -50,27 +53,40 @@ public sealed class WatchdogSupervisor(
     /// Pids of the running stoppers: our executables with the worker marker, plus the CLI form. A
     /// static helper — diagnostics reads the same truth. The WMI lookup is a substring prefilter;
     /// the command line is then split into arguments and must carry the marker as an argument of its
-    /// own (the GUI exe takes it anywhere, pnr — as its first argument) or be `pnr watchdog` —
-    /// `pnr logs show watchdog` is not a stopper. The stopper's executable must also live in this
-    /// installation: another installation's worker carries the same image name and marker.
+    /// own (the GUI exe takes it anywhere, pnr — as its first argument after the global options) or
+    /// be `pnr watchdog` — `pnr logs show watchdog` is not a stopper. The stopper's executable must
+    /// also live in this installation, and the stopper must belong to the same profile: another
+    /// profile's stopper carries the same image name and marker.
     /// </summary>
-    public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder, string? ourDirectory = null) =>
-        FindStoppers(finder, ourDirectory).Select(stopper => stopper.Pid).ToList();
+    public static IReadOnlyList<int> FindStopperPids(IProcessFinder finder, string? ourDirectory = null, string? profile = null) =>
+        FindStoppers(finder, ourDirectory, profile).Select(stopper => stopper.Pid).ToList();
 
     /// <summary>The running stoppers (as FindStopperPids) with their form: the foreground `pnr watchdog` or a detached worker.</summary>
-    public static IReadOnlyList<RunningStopper> FindStoppers(IProcessFinder finder, string? ourDirectory = null) =>
+    public static IReadOnlyList<RunningStopper> FindStoppers(IProcessFinder finder, string? ourDirectory = null, string? profile = null) =>
         WorkerHostNames.SelectMany(name => finder.Find(name, WorkerMarker).Select(p => (Name: name, Process: p)))
             .Concat(finder.Find(CliProcessName, CliCommand).Select(p => (Name: CliProcessName, Process: p)))
             .Where(found => IsStopperCommandLine(found.Name, found.Process.CommandLine))
             .Where(found => IsOurInstallation(found.Process.CommandLine, ourDirectory ?? Path.GetDirectoryName(Environment.ProcessPath)))
+            .Where(found => BelongsToProfile(found.Process.CommandLine, profile))
             .DistinctBy(found => found.Process.Id)
             .Select(found => new RunningStopper(found.Process.Id, IsForegroundCommandLine(found.Name, found.Process.CommandLine)))
             .ToList();
 
+    /// <summary>
+    /// The stopper belongs to the profile: its command line names them (a worker spawned by a
+    /// profile) or carries none (the default profile). This is what keeps one profile's Stop, the
+    /// chain-stopped hook and the GUI status off another profile's stopper.
+    /// </summary>
+    internal static bool BelongsToProfile(string commandLine, string? profile)
+    {
+        var owner = AppProfile.NameFromArguments(SplitArguments(commandLine)) ?? AppProfile.DefaultName;
+        return string.Equals(owner, profile ?? AppProfile.DefaultName, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>The foreground CLI form: `pnr watchdog` (the CLI with the worker marker is a detached worker).</summary>
     internal static bool IsForegroundCommandLine(string processName, string commandLine)
     {
-        var arguments = SplitArguments(commandLine);
+        var arguments = AppProfile.WithoutOption(SplitArguments(commandLine));
         return string.Equals(processName, CliProcessName, StringComparison.OrdinalIgnoreCase)
             && arguments.Count >= 2
             && arguments[1] == CliCommand;
@@ -95,7 +111,9 @@ public sealed class WatchdogSupervisor(
 
     internal static bool IsStopperCommandLine(string processName, string commandLine)
     {
-        var arguments = SplitArguments(commandLine);
+        // the global --profile option may stand before the verb; the identity checks below look
+        // at the arguments the dispatcher actually sees
+        var arguments = AppProfile.WithoutOption(SplitArguments(commandLine));
         if (arguments.Count < 2)
         {
             return false;
@@ -103,7 +121,7 @@ public sealed class WatchdogSupervisor(
 
         if (string.Equals(processName, CliProcessName, StringComparison.OrdinalIgnoreCase))
         {
-            // the CLI dispatches on its first argument, exactly
+            // the CLI dispatches on its first argument after the global options, exactly
             return arguments[1] == WorkerMarker || arguments[1] == CliCommand;
         }
 
@@ -111,95 +129,15 @@ public sealed class WatchdogSupervisor(
         return arguments.Skip(1).Any(argument => string.Equals(argument, WorkerMarker, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Splits a Windows command line the way the C runtime does (CommandLineToArgvW): the program
-    /// name ends at the first unquoted space and takes no escapes; in the arguments 2n backslashes
-    /// before a quote are n backslashes and a quote toggle, 2n+1 — n backslashes and a literal quote.
-    /// </summary>
-    internal static IReadOnlyList<string> SplitArguments(string commandLine)
-    {
-        var result = new List<string>();
-        var i = 0;
-        var text = commandLine;
+    /// <summary>Splits a command line the way the C runtime does — the one parser of the assembly (see <see cref="ProcessMatch.SplitArguments"/>).</summary>
+    internal static IReadOnlyList<string> SplitArguments(string commandLine) => ProcessMatch.SplitArguments(commandLine);
 
-        // the program name
-        var name = new System.Text.StringBuilder();
-        var quoted = false;
-        while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
-        {
-            if (text[i] == '"')
-            {
-                quoted = !quoted;
-            }
-            else
-            {
-                name.Append(text[i]);
-            }
+    public IReadOnlyList<int> FindStopperPids() =>
+        FindStopperPids(processes, Path.GetDirectoryName(_currentExePath()), _profile.Name);
 
-            i++;
-        }
-
-        if (name.Length > 0)
-        {
-            result.Add(name.ToString());
-        }
-
-        while (true)
-        {
-            while (i < text.Length && char.IsWhiteSpace(text[i]))
-            {
-                i++;
-            }
-
-            if (i >= text.Length)
-            {
-                return result;
-            }
-
-            var argument = new System.Text.StringBuilder();
-            quoted = false;
-            while (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
-            {
-                var backslashes = 0;
-                while (i < text.Length && text[i] == '\\')
-                {
-                    backslashes++;
-                    i++;
-                }
-
-                if (i < text.Length && text[i] == '"')
-                {
-                    argument.Append('\\', backslashes / 2);
-                    if (backslashes % 2 == 1)
-                    {
-                        argument.Append('"');
-                    }
-                    else
-                    {
-                        quoted = !quoted;
-                    }
-
-                    i++;
-                }
-                else
-                {
-                    argument.Append('\\', backslashes);
-                    if (i < text.Length && (quoted || !char.IsWhiteSpace(text[i])))
-                    {
-                        argument.Append(text[i]);
-                        i++;
-                    }
-                }
-            }
-
-            result.Add(argument.ToString());
-        }
-    }
-
-    public IReadOnlyList<int> FindStopperPids() => FindStopperPids(processes, Path.GetDirectoryName(_currentExePath()));
-
-    /// <summary>The running stoppers of this installation with their form.</summary>
-    public IReadOnlyList<RunningStopper> FindStoppers() => FindStoppers(processes, Path.GetDirectoryName(_currentExePath()));
+    /// <summary>The running stoppers of this installation and this profile with their form.</summary>
+    public IReadOnlyList<RunningStopper> FindStoppers() =>
+        FindStoppers(processes, Path.GetDirectoryName(_currentExePath()), _profile.Name);
 
     public bool IsRunning() => FindStopperPids().Count > 0;
 
@@ -237,8 +175,10 @@ public sealed class WatchdogSupervisor(
         var workerErrorLog = Path.Combine(
             Path.GetDirectoryName(log.FilePath) ?? AppContext.BaseDirectory,
             "watchdog.err.log");
-        // (command line, stdout -> NUL, stderr)
-        var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker}", null, workerErrorLog);
+        // (command line, stdout -> NUL, stderr); a named profile's worker carries its name, so the
+        // stopper search of one profile never claims (or kills) another profile's stopper
+        var profileArgument = _profile.IsDefault ? "" : $" {AppProfile.Option} {_profile.Name}";
+        var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker}{profileArgument}", null, workerErrorLog);
         log.Info($"watchdog: worker spawned via cmd, pid={pid}");
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(config.WorkerStartWaitSeconds);

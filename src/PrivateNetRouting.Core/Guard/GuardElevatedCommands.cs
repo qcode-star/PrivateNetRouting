@@ -198,19 +198,34 @@ public static class GuardElevatedCommands
         }
         catch (BanPartiallyRemovedException ex) when (!enable)
         {
-            var removed = ApplyPolicy(config, policy, enable);
+            var removed = PolicyPart(config, policy, enable);
             throw new BanPartiallyRemovedException($"{removed}; {ex.Message}", ex.InnerException ?? ex);
         }
 
-        var policyDetail = ApplyPolicy(config, policy, enable);
-        return $"{ban}; {policyDetail}";
+        return $"{ban}; {PolicyPart(config, policy, enable)}";
     }
+
+    /// <summary>
+    /// The policy half of the combined action: a profile that does not manage the machine-wide
+    /// value skips it (the other profile owns it) instead of failing the whole action.
+    /// </summary>
+    private static string PolicyPart(AppConfig config, IEgressPolicyStore policy, bool enable) =>
+        config.Guard.ManagePolicy
+            ? ApplyPolicy(config, policy, enable)
+            : "policy skipped (guard.managePolicy=false)";
 
     private static string ApplyPolicy(AppConfig config, bool enable) =>
         ApplyPolicy(config, new RegistryEgressPolicyStore(), enable);
 
     internal static string ApplyPolicy(AppConfig config, IEgressPolicyStore policy, bool enable)
     {
+        if (!config.Guard.ManagePolicy)
+        {
+            // defense in depth: the explicit policy commands never touch a value another profile owns
+            throw new InvalidOperationException(
+                "guard.managePolicy=false - this profile does not manage the machine-wide Claude policy");
+        }
+
         if (enable)
         {
             var url = ClaudeEnvValues.WindowsProxyUrl(config);

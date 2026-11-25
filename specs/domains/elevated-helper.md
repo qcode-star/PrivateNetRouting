@@ -55,7 +55,9 @@ Verb="runas"`, hidden window. A declined UAC (`Win32Exception`) becomes
 "NAME=value"]…`. `--env` carries only the asking user's `APPDATA`/`LOCALAPPDATA`/`USERPROFILE`
 (validated: absolute, no cmd metacharacters/`%`, no trailing backslash, exact names — anything
 else is dropped/refused) so the helper expands paths as the asking user, not as the
-administrator.
+administrator. `--config` is the running profile's config path (the default profile's
+`appsettings.json` or `profiles\<name>.json`), so the elevated action applies exactly the
+profile that asked ([Profiles](../domains/configuration/profiles.md)).
 
 **Result file**: under the pinned `%ProgramData%\PrivateNetRouting\elevated` directory, name
 shape `<command>=<8-hex-nonce>.result`; content `ok <detail>` / `fail <message>`, written

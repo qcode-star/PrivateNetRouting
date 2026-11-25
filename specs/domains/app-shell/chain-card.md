@@ -40,7 +40,9 @@ expands the card and collapses it back on success; the choice persists in
 process); the upstream row (daemon listeners + TCP-table state, or the upstream with its user
 — never the password — and a reachability word); the config path with open/reload actions
 (a reload that changed `forwardProxy`/`chain` or a captured value says "restart applies it");
-the idle stopper state with the auto-start checkbox and start/stop toggle.
+the idle stopper with its single enabled checkbox (checked starts the stopper over a live chain
+and keeps it armed after every raise; unchecked stops it; a chain that is down shows "waiting
+for the chain" until the next raise).
 
 **Launch row**: the Claude pair (launch + update with its coral dot) pinned left, the shared
 "Browser" button centered (leaning to the freed side when one app is disabled), the Codex pair

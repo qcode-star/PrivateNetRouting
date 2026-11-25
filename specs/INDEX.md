@@ -24,6 +24,7 @@ update rules live in [META.md](META.md).
 | Change the WSL layer (boot, scripts, snippets) | [WSL layer](domains/guard/wsl-layer.md) |
 | Change the WinINET system proxy | [System proxy](domains/guard/system-proxy.md) |
 | Add/change a config key or the config store | [Configuration](domains/configuration/README.md), [Configuration store](domains/configuration/store.md) |
+| Run two configs/profiles side by side | [Profiles](domains/configuration/profiles.md), [ADR-007](decisions/007-profiles.md) |
 | Change logging / rotation | [Logging](domains/logging.md) |
 | Change diagnostics output | [Diagnostics](domains/diagnostics.md) |
 | Change the app self-update | [App update](domains/app-update.md) |
@@ -51,7 +52,7 @@ CLI ----------+--> ProxyRuntime --------+
                   +-- Guard (ban | settings-sync | wsl-layer | system-proxy)
                   +-- Watchdog (usage-probe | wsl-app-stoppers)
                   +-- Diagnostics / Logging / ActivityMarker / AppUpdate
-                  +-- Configuration (model | store)
+                  +-- Configuration (model | store | profiles)
 ```
 
 ## Architecture
@@ -75,7 +76,7 @@ CLI ----------+--> ProxyRuntime --------+
 | Watchdog | [README](domains/watchdog/README.md), [Usage probe](domains/watchdog/usage-probe.md), [WSL app stoppers](domains/watchdog/wsl-app-stoppers.md) |
 | Updater | [README](domains/updater/README.md), [Claude MSIX](domains/updater/claude-msix.md), [Codex Store](domains/updater/codex-store.md) |
 | Guard | [README](domains/guard/README.md), [Ban layers](domains/guard/ban-layers.md), [Settings sync](domains/guard/settings-sync.md), [WSL layer](domains/guard/wsl-layer.md), [System proxy](domains/guard/system-proxy.md) |
-| Configuration | [README](domains/configuration/README.md), [Store](domains/configuration/store.md) |
+| Configuration | [README](domains/configuration/README.md), [Store](domains/configuration/store.md), [Profiles](domains/configuration/profiles.md) |
 | Logging | [logging.md](domains/logging.md) |
 | Diagnostics | [diagnostics.md](domains/diagnostics.md) |
 | App self-update | [app-update.md](domains/app-update.md) |
@@ -101,3 +102,4 @@ Template: [`_template.md`](decisions/_template.md) (copy for a new ADR — see [
 | [004](decisions/004-three-layer-ban.md) | Three-layer local ban plus managed policy |
 | [005](decisions/005-chain-mode-shapes.md) | Chain mode shapes behind one orchestrator |
 | [006](decisions/006-detached-processes-no-autostart.md) | Detached processes, no services, no autostart |
+| [007](decisions/007-profiles.md) | Profiles — one process tree per config |

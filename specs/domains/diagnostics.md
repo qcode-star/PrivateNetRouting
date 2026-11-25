@@ -36,8 +36,10 @@ public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSec
   summary built by `pnr status` never prints its own pid for the GUI's or a worker's listener.
 - **health**: the CONNECT roundtrip `OK in N ms (first response line)` / `failed in N ms: …`;
   skipped when no probe is wanted.
-- **guards**: egress policy + local ban core (without WSL/settings).
-- **watchdog**: idle stopper running (`pid …`) or not.
+- **guards**: egress policy + local ban core (without WSL/settings); an unmanaged policy says
+  "not managed by this profile".
+- **watchdog**: this profile's idle stopper running (`pid …`) or not — the stopper search is
+  profile-scoped ([Profiles](configuration/profiles.md)).
 - **logs**: directory + file count.
 
 A fully stopped chain answers the short "normal" message instead (rendered by the consumers):

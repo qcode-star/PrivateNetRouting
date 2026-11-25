@@ -56,8 +56,12 @@ references keep working; `Wsl`/`Browser`/`Guard`/`Ui`/top-level scalars are repl
 - Every content change goes through the diff + patch path first; comments and layout survive
   ordinary UI writes.
 - The restart note is derived from what actually differs, not from "the file changed".
-- The config path is always `%APPDATA%\PrivateNetRouting\appsettings.json` unless a helper is
-  given `--config` explicitly.
+- The config path is the selected profile's: `%APPDATA%\PrivateNetRouting\appsettings.json` for
+  the default profile, `%APPDATA%\PrivateNetRouting\profiles\<name>.json` for `--profile <name>`
+  (the helper receives it as `--config`). A named profile is never created implicitly by a load —
+  only `config init` creates it.
+- Every writer of a profile's config (GUI settings, reload, browser profile persist, helper)
+  uses that profile's path; two profiles write two different files.
 
 ## Related Specs
 

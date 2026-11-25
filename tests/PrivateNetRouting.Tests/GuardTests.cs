@@ -2236,6 +2236,23 @@ public class GuardTests : IDisposable
         Assert.False(GuardAggregate.AllOn(Snapshot(GuardState.On, GuardState.On, GuardState.On, GuardState.Off, off)));
     }
 
+    /// <summary>A policy another profile owns has no vote: the card is not kept "partial" by it.</summary>
+    [Fact]
+    public void AnUnmanagedPolicyDoesNotVote()
+    {
+        var snapshot = new GuardSnapshot(
+            new LocalBanStatus(GuardState.On, 0, true, 0, [], 0, []),
+            new EgressPolicyStatus(GuardState.Partial, null, "", null) { Managed = false },
+            new ClaudeSettingsStatus(GuardState.On, null, null, "", "", false),
+            new CodexSettingsStatus(GuardState.On, null, false, true),
+            WslConfigStatus.LayerOff("no distros configured"),
+            new SystemProxyStatus(false, null, null),
+            []);
+
+        Assert.True(GuardAggregate.AllOn(snapshot));
+        Assert.Equal(GuardState.On, GuardAggregate.Summary(snapshot));
+    }
+
     [Fact]
     public async Task WslWriteScriptsVerifyEveryWriteAndNeverOverwriteAfterAFailedBackup()
     {
@@ -2986,6 +3003,47 @@ public class GuardTests : IDisposable
         await Assert.ThrowsAsync<IOException>(() => service.PolicyAsync(false, CancellationToken.None));
     }
 
+    /// <summary>
+    /// One machine-wide policy value, one owner: a profile that does not manage it refuses the
+    /// action (the GUI disables the buttons, the CLI prints the refusal) and never touches HKLM.
+    /// </summary>
+    [Fact]
+    public async Task PolicyAndSystemProxyActionsAreRefusedWhenTheProfileDoesNotManageThem()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-unmanaged");
+        config.Guard.ManagePolicy = false;
+        config.Guard.ManageSystemProxy = false;
+        var policy = new FakeEgressPolicyStore();
+        var sysProxy = new FakeSystemProxyStore();
+        var elevated = new FakeElevatedRunner();
+        var service = MakeService(config, policy, new FakeBanSystemOps(), sysProxy, elevated, out _);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.PolicyAsync(enable: true, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.PolicyAsync(enable: false, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetSystemProxyAsync(enable: true, CancellationToken.None));
+
+        Assert.Empty(elevated.Commands);
+        Assert.Null(policy.AppliedUrl);
+        Assert.False(policy.Removed);
+        Assert.Null(sysProxy.EnabledWith);
+    }
+
+    [Fact]
+    public async Task StatusReportsThePolicyAsNotManaged()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-status-unmanaged");
+        config.Guard.ManagePolicy = false;
+        var policy = new FakeEgressPolicyStore { Values = new EgressPolicyValues(true, "http://127.0.0.1:18081", 0) };
+        var service = MakeService(config, policy, new FakeBanSystemOps(), new FakeSystemProxyStore(), new FakeElevatedRunner(), out _);
+
+        var (_, policyStatus) = await service.GetCoreStatusAsync(CancellationToken.None);
+
+        Assert.False(policyStatus.Managed);
+        Assert.Contains("not managed", policyStatus.Detail);
+    }
+
     [Fact]
     public async Task AllRunsOneCombinedElevatedCommandWithLiveChecks()
     {
@@ -3614,6 +3672,34 @@ public class GuardTests : IDisposable
         Assert.Equal(["nrpt-on", "fw-on", "flush", "nrpt-off", "fw-off", "flush"], ops.Calls);
         Assert.True(policy.Removed);
         Assert.Contains("removed", offDetail);
+    }
+
+    /// <summary>
+    /// The same combined action in a profile that does not manage the policy: the ban still runs,
+    /// the machine-wide value is neither written nor removed (the other profile owns it).
+    /// </summary>
+    [Fact]
+    public void ElevatedAllSkipsThePolicyWhenTheProfileDoesNotManageIt()
+    {
+        var config = new AppConfig();
+        config.Guard.HostsFile = Path.Combine(_tempDir, "hosts-all-elev-skip");
+        File.WriteAllText(config.Guard.HostsFile, "127.0.0.1 localhost\r\n");
+        config.Guard.BanProbes = ["probe.invalid"];
+        config.Guard.ManagePolicy = false;
+        var ops = new FakeBanSystemOps();
+        var policy = new FakeEgressPolicyStore();
+        using var log = new FileLog(Path.Combine(_tempDir, "elev-all-skip.log"));
+
+        var onDetail = GuardElevatedCommands.ApplyAll(config, log, ops, policy, enable: true);
+
+        Assert.Equal(["nrpt-on", "fw-on", "flush"], ops.Calls);
+        Assert.Null(policy.AppliedUrl);
+        Assert.Contains("policy skipped", onDetail);
+
+        var offDetail = GuardElevatedCommands.ApplyAll(config, log, ops, policy, enable: false);
+
+        Assert.False(policy.Removed);
+        Assert.Contains("policy skipped", offDetail);
     }
 
     public void Dispose()

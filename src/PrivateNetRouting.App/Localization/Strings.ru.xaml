@@ -72,13 +72,11 @@
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Автостоп</s:String>
     <s:String x:Key="Main.IdleStop.Note">Останавливает Claude в WSL и цепочку, когда ни Claude, ни Codex не используются. Живёт отдельным фоновым процессом: работает и после закрытия приложения, а после срабатывания выключается сам.</s:String>
-    <s:String x:Key="Main.IdleStop.AutoStart">автозапуск</s:String>
-    <s:String x:Key="Main.IdleStop.AutoStart.Note">Запускать автостоп автоматически после каждого поднятия цепочки.</s:String>
+    <s:String x:Key="Main.IdleStop.Enabled">включён</s:String>
+    <s:String x:Key="Main.IdleStop.Enabled.Note">Включён — автостоп запускается сразу (при поднятой цепочке) и взводится заново после каждого поднятия цепочки; выключен — остановлен.</s:String>
     <s:String x:Key="Main.IdleStop.Running">запущен</s:String>
-    <s:String x:Key="Main.IdleStop.Off">не запущен</s:String>
-    <s:String x:Key="Main.IdleStop.Button.Start">Запустить</s:String>
-    <s:String x:Key="Main.IdleStop.Button.Stop">Остановить</s:String>
-    <s:String x:Key="Main.IdleStop.Gate">Автостоп включается только при поднятой цепочке: он останавливает её, когда Claude и Codex простаивают, а остановленная цепочка выключает его сама.</s:String>
+    <s:String x:Key="Main.IdleStop.Armed">ждёт цепочку</s:String>
+    <s:String x:Key="Main.IdleStop.Off">выключен</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">автостоп запущен: проверка каждые {0} с, работает в фоне</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">автостоп остановлен</s:String>
 
@@ -208,6 +206,7 @@
     <s:String x:Key="Main.Guard.Policy.DetailFmt">egressProxyUrl = {0}</s:String>
     <s:String x:Key="Main.Guard.Policy.Off">политика не задана (Claude может пойти напрямую)</s:String>
     <s:String x:Key="Main.Guard.Policy.OtherFmt">{0} (ожидалось {1})</s:String>
+    <s:String x:Key="Main.Guard.Policy.NotManaged">не управляется этим профилем (guard.managePolicy=false)</s:String>
     <s:String x:Key="Main.Guard.Policy.OnDone">Политика задана: Claude всегда идёт через прокси.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Политика снята.</s:String>
     <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>

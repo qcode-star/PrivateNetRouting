@@ -57,18 +57,24 @@ refuses ("nothing to watch"). Spawn is serialized by `watchdog.spawn.lock` (fail
 
 **Liveness/identity**: read from process command lines (WMI prefilter, then exact argument
 splitting): the GUI/worker form by the `--watchdog-worker` marker, `pnr.exe` by `watchdog` as
-the first argument (`pnr logs show watchdog` is not a stopper); the executable directory must
-be this installation's. Stop kills only re-identified pids (pid-reuse guard), spares the
-calling stopper.
+the first argument after the global options (`pnr logs show watchdog` is not a stopper); the
+executable directory must be this installation's, and the profile must match (`--profile` in
+the command line; a default-profile worker carries none) — one profile's stop, chain-stopped
+hook or status never touches another profile's stopper. Stop kills only re-identified pids
+(pid-reuse guard), spares the calling stopper.
 
 **autoStart** (`watchdog.autoStart`, default on): after every successful chain raise the
 orchestrator's hook re-arms the stopper fire-and-forget (tracked so a CLI can await it before
 exit). The chain-stopped hook takes the stopper down (the calling stopper spares itself and
-exits).
+exits). In the GUI the flag is the idle stopper's single checkbox: checked starts the stopper
+now (over a live chain) and keeps it armed; unchecked stops it; a down chain shows "waiting for
+the chain" until the next raise. The CLI uses `pnr watchdog` (foreground) for the same
+lifecycle.
 
 ## Invariants
 
-- The stopper cannot be armed over a down chain (GUI Start disabled; `pnr watchdog` refuses).
+- The stopper cannot run over a down chain: the GUI checkbox keeps the choice but starts
+  nothing (the next raise arms it), and `pnr watchdog` refuses.
 - Exactly one stopper survives any race; the survivor is deterministic (the pid tie-break).
 - The WSL pass never boots a distro — only already running ones are visited.
 - A completed chain stop takes the stopper down through the chain-stopped hook.

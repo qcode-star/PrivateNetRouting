@@ -63,7 +63,14 @@ public sealed record EgressPolicyStatus(
     string? CurrentUrl,
     string ExpectedUrl,
     int? DisableWslSessions,
-    string? Detail = null);
+    string? Detail = null)
+{
+    /// <summary>
+    /// guard.managePolicy: false — this profile does not own the machine-wide policy. The layer is
+    /// read for display but never judged, never voted and never written/removed.
+    /// </summary>
+    public bool Managed { get; init; } = true;
+}
 
 /// <summary>
 /// Windows settings.json of Claude Code: the proxy env plus the maintained privacy/attribution
@@ -87,6 +94,9 @@ public sealed record ClaudeSettingsStatus(
 public sealed record SystemProxyStatus(bool Enabled, string? Server, string? Override, string? Detail = null)
 {
     public bool Ours { get; init; }
+
+    /// <summary>guard.manageSystemProxy: false — this profile does not own the per-user switch.</summary>
+    public bool Managed { get; init; } = true;
 
     /// <summary>A PAC script is configured (AutoConfigURL): WinINET prefers it to the manual proxy.</summary>
     public bool PacScript { get; init; }

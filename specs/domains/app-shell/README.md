@@ -2,9 +2,10 @@
 
 ## Purpose
 
-The WPF host: single-instance process with a tray icon, the main window (chain card, guards
-card, launch row), the update/diagnostics/profile windows, and the windowless roles (detached
-proxy worker, idle stopper, elevated helper commands) that run before WPF starts.
+The WPF host: one single-instance process per profile with a tray icon, the main window (chain
+card, guards card, launch row), the update/diagnostics/profile windows, and the windowless roles
+(detached proxy worker, idle stopper, elevated helper commands) that run before WPF starts.
+Profiles: [Profiles](../configuration/profiles.md).
 
 ## Key Files
 
@@ -31,10 +32,12 @@ public sealed class TrayIcon : IDisposable;// WinForms NotifyIcon menu + balloon
 Program.Main
   -> HeadlessHost.TryRun(args):   --proxy-worker | --watchdog-worker | --elevated-*
        (thread-pool, no Application, no dispatcher) -> exit code
-  -> new App(): 3 named events created BEFORE the mutex Local\PrivateNetRouting.SingleInstance
+  -> new App(): --profile resolved (the identity) -> 3 named events created BEFORE the mutex
+       (default names, or `.<profile>` for a named profile);
+       every instance also holds Local\PrivateNetRouting.AnyInstance (the installer's AppMutex)
        first instance:  subscribe events (activation/launch verbs), build MainWindow,
                         wire tray, run 3 startup update checks (fire-and-forget)
-       second instance: signal the matching event, Shutdown()
+       second instance: signal the matching (profile-scoped) event, Shutdown()
   -> Close/minimize hides to the tray (ShutdownMode=OnExplicitShutdown)
   -> real exit: tray menu only (or Windows session end)
 ```
@@ -59,8 +62,11 @@ chain, no UAC.
 
 ## Invariants
 
-- The 3 named events are created before the mutex (a racing second instance always finds
-  them); `OnExit` disposes the mutex before the events.
+- The 3 named events are created before the (profile-scoped) mutex (a racing second instance
+  always finds them); `OnExit` disposes the mutexes before the events.
+- Two profiles are two GUI processes: their mutexes/events differ, their titles and tray
+  tooltips read `<product> — <profile display>`, and the installer sees any of them through
+  `AnyInstance`.
 - Closing or minimizing the window never stops the proxy or the idle stopper.
 - The tray is a WinForms `NotifyIcon` referenced for that alone (global usings removed to
   avoid WPF name conflicts).

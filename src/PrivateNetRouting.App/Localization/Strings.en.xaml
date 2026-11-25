@@ -72,13 +72,11 @@
     <!-- Idle auto-stop: a detached background worker -->
     <s:String x:Key="Main.IdleStop">Idle stop</s:String>
     <s:String x:Key="Main.IdleStop.Note">Stops Claude in WSL and the chain when neither Claude nor Codex is in use. Lives as a separate background process: it keeps working after the application is closed and switches itself off after firing.</s:String>
-    <s:String x:Key="Main.IdleStop.AutoStart">auto-start</s:String>
-    <s:String x:Key="Main.IdleStop.AutoStart.Note">Arm the idle stopper automatically after every chain bring-up.</s:String>
+    <s:String x:Key="Main.IdleStop.Enabled">enabled</s:String>
+    <s:String x:Key="Main.IdleStop.Enabled.Note">On — the idle stopper runs now (over a live chain) and is armed again after every chain raise; off — it is stopped.</s:String>
     <s:String x:Key="Main.IdleStop.Running">running</s:String>
-    <s:String x:Key="Main.IdleStop.Off">not running</s:String>
-    <s:String x:Key="Main.IdleStop.Button.Start">Start</s:String>
-    <s:String x:Key="Main.IdleStop.Button.Stop">Stop</s:String>
-    <s:String x:Key="Main.IdleStop.Gate">The idle stopper arms only over a live chain: it stops the chain when Claude and Codex go idle, and a stopped chain takes it down itself.</s:String>
+    <s:String x:Key="Main.IdleStop.Armed">waiting for the chain</s:String>
+    <s:String x:Key="Main.IdleStop.Off">off</s:String>
     <s:String x:Key="Main.IdleStop.StartedFmt">idle stop is on: checking every {0}s, runs in the background</s:String>
     <s:String x:Key="Main.IdleStop.StoppedManual">idle stop is off</s:String>
 
@@ -208,6 +206,7 @@
     <s:String x:Key="Main.Guard.Policy.DetailFmt">egressProxyUrl = {0}</s:String>
     <s:String x:Key="Main.Guard.Policy.Off">policy is not set (Claude may go direct)</s:String>
     <s:String x:Key="Main.Guard.Policy.OtherFmt">{0} (expected {1})</s:String>
+    <s:String x:Key="Main.Guard.Policy.NotManaged">not managed by this profile (guard.managePolicy=false)</s:String>
     <s:String x:Key="Main.Guard.Policy.OnDone">Egress policy is set: Claude always goes through the proxy.</s:String>
     <s:String x:Key="Main.Guard.Policy.OffDone">Egress policy is removed.</s:String>
     <s:String x:Key="Main.Guard.Settings">settings.json + config.toml</s:String>

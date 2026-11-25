@@ -63,6 +63,8 @@ public sealed class AppConfig
 
     public GuardConfig Guard { get; set; } = new();
 
+    public ProfileConfig Profile { get; set; } = new();
+
     /// <summary>Hosts names of the local ban: the union of the Claude and Codex lists.</summary>
     [JsonIgnore]
     public IReadOnlyList<string> BanHosts => Claude.BanHosts.Concat(Codex.BanHosts).ToArray();
@@ -74,6 +76,17 @@ public sealed class AppConfig
     /// <summary>Firewall outbound Block subnets: the union of the Claude and Codex lists.</summary>
     [JsonIgnore]
     public IReadOnlyList<string> FirewallSubnets => Claude.FirewallSubnets.Concat(Codex.FirewallSubnets).ToArray();
+}
+
+/// <summary>
+/// The profile's human name, shown after the product name in the window title and the tray
+/// tooltip. The identity and the file location come from the <c>--profile</c> argument
+/// (<see cref="AppProfile"/>); this value is display only. Empty — the typed argument for a named
+/// profile, nothing for the default one.
+/// </summary>
+public sealed class ProfileConfig
+{
+    public string Name { get; set; } = "";
 }
 
 /// <summary>WPF application UI settings. The CLI is always English and never reads them.</summary>
@@ -622,6 +635,20 @@ public sealed class GuardConfig
 
     /// <summary>Group of the firewall rules — by it the rules are identified and removed.</summary>
     public string FirewallGroup { get; set; } = "ai-direct-ban";
+
+    /// <summary>
+    /// Whether this profile manages the machine-wide Claude policy
+    /// (<c>HKLM\SOFTWARE\Policies\Claude\egressProxyUrl</c>). One machine, one value: in a
+    /// two-profile setup exactly one profile may keep it on — the other reports the layer as
+    /// not managed and never applies or removes it.
+    /// </summary>
+    public bool ManagePolicy { get; set; } = true;
+
+    /// <summary>
+    /// Whether this profile manages the per-user WinINET system proxy. One user, one switch:
+    /// like <see cref="ManagePolicy"/>, only one profile in a multi-profile setup may own it.
+    /// </summary>
+    public bool ManageSystemProxy { get; set; } = true;
 
     /// <summary>
     /// Live ban probes: each name must be inside the ban trees but absent from the hosts lists —

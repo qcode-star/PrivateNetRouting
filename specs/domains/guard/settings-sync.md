@@ -102,6 +102,9 @@ written or created, its status reads `Off` with "not synced", and its half has n
 - The sync is the same shape on Windows and in the WSL layer (shared manifest): the WSL layer
   writes the Codex `.env` and the same `[features.network_proxy]` block into the distro's
   `~/.codex/config.toml` (see [WSL layer](wsl-layer.md)).
+- One writer per file: the profiles split the apps (`claude.enabled`/`codex.enabled`), so the
+  Claude profile writes only Claude's files and the Codex profile only Codex's; one file never
+  receives two profiles' proxy endpoints ([Profiles](../configuration/profiles.md)).
 
 ## Related Specs
 

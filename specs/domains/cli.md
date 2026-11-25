@@ -24,14 +24,20 @@ internal sealed class SyncProgress<T> : IProgress<T>;   // marshals Core progres
 
 ```
 Main(args):
+  global:  --profile <name>    (anywhere; default — the default config); stripped before dispatch
   hidden:  --proxy-worker      -> ProxyWorker.RunAsync        (Ctrl+C-linked token)
            --watchdog-worker   -> WatchdogWorker.RunAsync
            --elevated-*        -> ElevatedChainCommands / GuardElevatedCommands
                                  (--result-file required; --config, --env NAME=value)
   visible: version | help | proxy | chain | check | status | logs
            | launch | browser | codex | update | watchdog | guard | config
-  every verb: AppConfigStore.LoadOrCreate() -> await using ProxyRuntime.FromConfig(config)
+  every verb: LoadConfig() (profile path; a named profile must exist)
+              -> await using ProxyRuntime.FromConfig(config, profile: <profile>)
 ```
+
+`--profile` selects the config file and every per-profile resource (logs, locks, ports, the
+stopper identity); `pnr config init --profile <name>` creates a missing named profile, `config
+path` prints its path ([Profiles](configuration/profiles.md)).
 
 | Verb | What it does | Exit codes |
 |---|---|---|

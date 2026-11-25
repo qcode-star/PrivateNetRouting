@@ -20,7 +20,11 @@ public static class ProxyWorker
 
     public static async Task<int> RunAsync(CancellationToken stop, IReadOnlyList<string>? args = null)
     {
-        var config = AppConfigStore.LoadOrCreate();
+        // the worker of a profile reads that profile's config (the spawn line carries --profile);
+        // the listen override still wins over what the file says
+        var profile = AppProfile.Resolve(AppProfile.ParseName(args ?? []));
+        AppProfile.EnsureConfigured(profile);
+        var config = AppConfigStore.LoadOrCreate(profile.ConfigPath);
         var listenOverride = ParseListenOverride(args);
         if (listenOverride is not null)
         {
@@ -37,7 +41,7 @@ public static class ProxyWorker
             return 0; // the skipped socks5 shape: no local proxy exists, the applications point at the external endpoint
         }
 
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: profile);
         runtime.Log.Info($"proxy worker: starting (pid {Environment.ProcessId})");
         if (runtime.ProxyService is null)
         {

@@ -25,9 +25,26 @@ internal static class Program
     /// <summary>Cancelled by the first Ctrl+C; the long-running commands take their token from here.</summary>
     private static readonly CancellationTokenSource Interrupt = new();
 
+    /// <summary>The profile this command runs (--profile &lt;name&gt;; the default config without it).</summary>
+    private static ProfileContext _profile = ProfileContext.Default;
+
     private static async Task<int> Main(string[] args)
     {
-        var first = args.FirstOrDefault() ?? "help";
+        string? profileName;
+        try
+        {
+            profileName = AppProfile.ParseName(args);
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine($"error: {ex.Message}");
+            return 2;
+        }
+
+        _profile = AppProfile.Resolve(profileName);
+        // the dispatchers below see the arguments without the global option
+        var rest = AppProfile.WithoutOption(args).ToArray();
+        var first = rest.FirstOrDefault() ?? "help";
         if (first == ForwardProxySupervisor.WorkerMarker)
         {
             using var stop = new CancellationTokenSource();
@@ -43,12 +60,12 @@ internal static class Program
         // the marker (WatchdogSupervisor.WorkerHostNames), so the CLI hosts the worker too
         if (first == WatchdogSupervisor.WorkerMarker)
         {
-            return await Task.Run(() => WatchdogWorker.RunAsync(CancellationToken.None));
+            return await Task.Run(() => WatchdogWorker.RunAsync(args, CancellationToken.None));
         }
 
         if (ElevatedHelperArguments.IsHelperCommand(first))
         {
-            var resultFile = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ResultFileOption);
+            var resultFile = ElevatedHelperArguments.ParseOption(rest, ElevatedHelperArguments.ResultFileOption);
             if (resultFile is null)
             {
                 Console.Error.WriteLine($"error: {first} is an internal helper command and requires {ElevatedHelperArguments.ResultFileOption}");
@@ -56,8 +73,8 @@ internal static class Program
             }
 
             // the config of the user who asked: this process may run as another account (over-the-shoulder UAC)
-            var configPath = ElevatedHelperArguments.ParseOption(args, ElevatedHelperArguments.ConfigOption);
-            var profileEnvironment = ElevatedHelperArguments.ParseOptions(args, ElevatedHelperArguments.EnvOption);
+            var configPath = ElevatedHelperArguments.ParseOption(rest, ElevatedHelperArguments.ConfigOption);
+            var profileEnvironment = ElevatedHelperArguments.ParseOptions(rest, ElevatedHelperArguments.EnvOption);
             return GuardElevatedCommands.IsCommand(first)
                 ? GuardElevatedCommands.Execute(first, resultFile, configPath, profileEnvironment)
                 : ElevatedChainCommands.Execute(first, resultFile, configPath, profileEnvironment);
@@ -90,18 +107,18 @@ internal static class Program
             {
                 "--version" or "version" => Version(),
                 "help" or "--help" or "-h" or "-?" or "/?" => Help(),
-                "proxy" => await RunProxyAsync(args.Skip(1).ToList()),
-                "chain" => await RunChainAsync(args.Skip(1).ToList()),
-                "check" => await RunCheckAsync(args.Skip(1).ToList()),
-                "status" => await RunStatusAsync(args.Skip(1).ToList()),
-                "logs" => RunLogsCommand(args.Skip(1).ToList()),
-                "launch" => await RunLaunchAsync(args.Skip(1).ToList()),
-                "browser" => await RunBrowserAsync(args.Skip(1).ToList()),
-                "codex" => await RunCodexAsync(args.Skip(1).ToList()),
-                "update" => await RunUpdateAsync(args.Skip(1).ToList()),
-                "watchdog" => await RunWatchdogAsync(args.Skip(1).ToList()),
-                "guard" => await RunGuardAsync(args.Skip(1).ToList()),
-                "config" => ConfigCommand(args.Skip(1).ToList()),
+                "proxy" => await RunProxyAsync(rest.Skip(1).ToList()),
+                "chain" => await RunChainAsync(rest.Skip(1).ToList()),
+                "check" => await RunCheckAsync(rest.Skip(1).ToList()),
+                "status" => await RunStatusAsync(rest.Skip(1).ToList()),
+                "logs" => RunLogsCommand(rest.Skip(1).ToList()),
+                "launch" => await RunLaunchAsync(rest.Skip(1).ToList()),
+                "browser" => await RunBrowserAsync(rest.Skip(1).ToList()),
+                "codex" => await RunCodexAsync(rest.Skip(1).ToList()),
+                "update" => await RunUpdateAsync(rest.Skip(1).ToList()),
+                "watchdog" => await RunWatchdogAsync(rest.Skip(1).ToList()),
+                "guard" => await RunGuardAsync(rest.Skip(1).ToList()),
+                "config" => ConfigCommand(rest.Skip(1).ToList()),
                 _ => UnknownCommand(first),
             };
         }
@@ -138,7 +155,7 @@ internal static class Program
             }
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         if (AppProxyEndpoint.IsSkipped(config))
         {
             Console.WriteLine(config.Chain.EffectiveMode == ChainMode.Http
@@ -158,7 +175,7 @@ internal static class Program
         if (detached)
         {
             config.ForwardProxy.Detached = true; // the flag overrides the config — for this run only
-            await using var runtime = ProxyRuntime.FromConfig(config);
+            await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
             await runtime.ProxyControl.StartAsync(CancellationToken.None);
             Console.WriteLine($"forward proxy: listening on {string.Join(", ", runtime.ProxyControl.ListenerEndpoints)} (detached worker)");
             Console.WriteLine($"log: {runtime.Log.FilePath}");
@@ -171,7 +188,7 @@ internal static class Program
         }
 
         config.ForwardProxy.Detached = false; // the foreground mode overrides the config — for this run only
-        await using var consoleRuntime = ProxyRuntime.FromConfig(config);
+        await using var consoleRuntime = ProxyRuntime.FromConfig(config, profile: _profile);
         try
         {
             // through the supervisor, not the raw service: only that start registers the proxy stop
@@ -211,8 +228,8 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        var config = LoadConfig();
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
@@ -338,11 +355,11 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         var fp = config.ForwardProxy;
         var endpoint = AppProxyEndpoint.EndPoint(config);
         Console.WriteLine($"CONNECT-roundtrip {endpoint} -> {fp.HealthCheckHost}:{fp.HealthCheckPort}...");
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var alive = await runtime.CheckHealthAsync(TimeSpan.FromSeconds(20));
         Console.WriteLine(alive ? "chain is alive" : "chain is not responding");
         return alive ? 0 : 2;
@@ -361,13 +378,20 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        var config = LoadConfig();
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var summary = await runtime.Diagnostics.GetSummaryAsync(Interrupt.Token);
         if (summary.ChainStopped)
         {
-            Console.WriteLine($"chain ({AppProxyEndpoint.Address(config)}) is stopped — normal while Claude and Codex are not needed.");
-            Console.WriteLine("Raise it: the Claude shortcut, pnr launch, or pnr chain up.");
+            var apps = (config.Claude.Enabled, config.Codex.Enabled) switch
+            {
+                (true, true) => "Claude and Codex are",
+                (true, false) => "Claude is",
+                (false, true) => "Codex is",
+                _ => "no app is",
+            };
+            Console.WriteLine($"chain ({AppProxyEndpoint.Address(config)}) is stopped — normal while {apps} not needed.");
+            Console.WriteLine("Raise it: the window's launch button, pnr launch, pnr codex launch, or pnr chain up.");
             return 0;
         }
 
@@ -393,7 +417,7 @@ internal static class Program
     {
         var action = rest.FirstOrDefault() ?? "list";
         rest = rest.Skip(1).ToList();
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         var store = new LogStore(config.Logging.Directory);
 
         switch (action)
@@ -548,14 +572,14 @@ internal static class Program
             }
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         if (!config.Claude.Enabled)
         {
             Console.Error.WriteLine("Claude is disabled in config (claude.enabled=false)");
             return 1;
         }
 
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
@@ -628,8 +652,8 @@ internal static class Program
             options = options with { Url = url };
         }
 
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        var config = LoadConfig();
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         if (!runtime.Browser.IsConfigured)
         {
             Console.Error.WriteLine(
@@ -749,14 +773,14 @@ internal static class Program
             }
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         if (!config.Codex.Enabled)
         {
             Console.Error.WriteLine("Codex is disabled in config (codex.enabled=false)");
             return 1;
         }
 
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var progress = new SyncProgress<ChainStep>(step =>
             Console.WriteLine($"[{step.Status,-7}] {step.Component}: {step.Detail}"));
 
@@ -807,14 +831,14 @@ internal static class Program
             }
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         if (!config.Codex.Enabled)
         {
             Console.Error.WriteLine("Codex is disabled in config (codex.enabled=false)");
             return 1;
         }
 
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var check = await runtime.CodexUpdater.CheckAsync(Interrupt.Token);
         Console.WriteLine($"installed: {check.Installed.Version} (package {check.Installed.Name})");
         if (check.StoreUnavailable)
@@ -852,6 +876,15 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>The apps whose processes keep this profile's chain alive (the same gate as the probe).</summary>
+    private static string UsageScope(AppConfig config) => (config.Claude.Enabled, config.Codex.Enabled) switch
+    {
+        (true, true) => "Claude and Codex usage",
+        (true, false) => "Claude usage",
+        (false, true) => "Codex usage",
+        _ => "no app usage (both apps are disabled)",
+    };
+
     private static async Task<int> RunWatchdogAsync(List<string> rest)
     {
         if (RejectExtraArguments("pnr watchdog", rest, 0))
@@ -859,8 +892,8 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        var config = LoadConfig();
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
 
         // the stopper exists to stop a live chain: over a down one it would only wait forever
         // (the usage probe sees the running Claude and never reports idle)
@@ -880,7 +913,7 @@ internal static class Program
             return 0;
         }
 
-        Console.WriteLine($"watchdog: checking Claude and Codex usage every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
+        Console.WriteLine($"watchdog: checking {UsageScope(config)} every {config.Watchdog.CheckSeconds}s; Ctrl+C to stop");
         if (config.Wsl.Distros.Count == 0)
         {
             Console.WriteLine("watchdog: no distros configured (wsl.distros), the WSL step will be skipped on idle");
@@ -963,14 +996,14 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
+        var config = LoadConfig();
         if (!config.Claude.Enabled)
         {
             Console.Error.WriteLine("Claude is disabled in config (claude.enabled=false)");
             return 1;
         }
 
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
         var progress = new SyncProgress<UpdateProgress>(p =>
             Console.WriteLine(p.TotalBytes > 0 && p.Phase == UpdatePhase.Download
                 ? $"  download {ByteSize.Format(p.DoneBytes)} of {ByteSize.Format(p.TotalBytes)}"
@@ -1078,8 +1111,8 @@ internal static class Program
             return 1;
         }
 
-        var config = AppConfigStore.LoadOrCreate();
-        await using var runtime = ProxyRuntime.FromConfig(config);
+        var config = LoadConfig();
+        await using var runtime = ProxyRuntime.FromConfig(config, profile: _profile);
 
         switch (action)
         {
@@ -1216,22 +1249,39 @@ internal static class Program
                         continue;
                     }
 
-                    var codexWritten = new List<string>();
+                    var written = new List<string>();
+                    if (distro.SettingsWritten)
+                    {
+                        written.Add("settings.json");
+                    }
+
+                    if (distro.ScriptWritten)
+                    {
+                        written.Add("startup script");
+                    }
+
+                    if (distro.BootRunnerWritten || distro.UserCommandWritten)
+                    {
+                        written.Add("boot layer");
+                    }
+
+                    if (distro.WslConfWritten)
+                    {
+                        written.Add("/etc/wsl.conf");
+                    }
+
                     if (distro.ProxyEnvWritten)
                     {
-                        codexWritten.Add("env");
+                        written.Add("codex env");
                     }
 
                     if (distro.CodexConfigWritten)
                     {
-                        codexWritten.Add("config");
+                        written.Add("codex config");
                     }
 
-                    var codexPart = codexWritten.Count > 0 ? $"+ codex {string.Join("+", codexWritten)} " : "";
-                    Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten || distro.ProxyEnvWritten
-                        || distro.BootRunnerWritten || distro.UserCommandWritten || distro.WslConfWritten
-                        || distro.CodexConfigWritten
-                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {codexPart}written"
+                    Console.WriteLine(written.Count > 0
+                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, written: {string.Join(", ", written)}"
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                     if (distro.ClaudeDirChowned)
                     {
@@ -1293,11 +1343,12 @@ internal static class Program
         switch (action)
         {
             case "path":
-                Console.WriteLine(AppConfigStore.GetDefaultConfigPath());
+                Console.WriteLine(_profile.ConfigPath);
                 return 0;
             case "init":
-                var config = AppConfigStore.LoadOrCreate();
-                Console.WriteLine(AppConfigStore.GetDefaultConfigPath());
+                // the one command that creates a named profile: LoadConfig would refuse a missing one
+                var config = AppConfigStore.LoadOrCreate(_profile.ConfigPath);
+                Console.WriteLine(_profile.ConfigPath);
                 Console.WriteLine(config.ForwardProxy.Enabled
                     ? "created (or already present) with default values"
                     : "created (or already present); forward proxy is disabled");
@@ -1306,6 +1357,16 @@ internal static class Program
                 Console.Error.WriteLine($"unknown action: {action} (path | init)");
                 return 1;
         }
+    }
+
+    /// <summary>
+    /// The config of this command's profile: a named profile must exist (it is created explicitly
+    /// by `config init`), so a missing file is a clear error rather than a silent default-ports twin.
+    /// </summary>
+    private static AppConfig LoadConfig()
+    {
+        AppProfile.EnsureConfigured(_profile);
+        return AppConfigStore.LoadOrCreate(_profile.ConfigPath);
     }
 
     private static string? ParseOption(string[] args, string name)
@@ -1377,6 +1438,11 @@ internal static class Program
         Console.WriteLine("""
             pnr — PrivateNetRouting headless mode
 
+            Global option (anywhere among the arguments):
+              --profile <name>       run with %APPDATA%\PrivateNetRouting\profiles\<name>.json
+                                     instead of the default config; the profile must exist
+                                     (pnr --profile <name> config init creates it)
+
             pnr proxy [--detached]
                                  run the forward proxy in this console (Ctrl+C to stop);
                                  --detached starts the detached worker instead and
@@ -1436,9 +1502,10 @@ internal static class Program
                                  then chain if needed, fragment download, publisher
                                  check and Add-AppxPackage; --install-from installs a
                                  downloaded file and excludes --check/--download-only
-            pnr watchdog         idle auto-stop supervisor: check Claude and Codex usage
-                                 every watchdog.checkSeconds, on idle stop the WSL host
-                                 and the chain (Ctrl+C to stop; starts nothing by itself)
+            pnr watchdog         idle auto-stop supervisor: check the usage of the enabled apps
+                                 (claude.enabled/codex.enabled) every watchdog.checkSeconds, on
+                                 idle stop the WSL host and the chain (Ctrl+C to stop; starts
+                                 nothing by itself)
             pnr guard status [--live]
                                  guard states, read-only: local ban (hosts/NRPT/firewall),
                                  egress policy, Claude settings.json env, Codex config.toml,
@@ -1456,8 +1523,8 @@ internal static class Program
                                  the boot runner in /etc/wsl.conf
             pnr guard sysproxy on|off
                                  system WinINET proxy on the app's forward proxy (no UAC)
-            pnr config path      user config path
-            pnr config init      create the default config if missing
+            pnr config path      config path of the profile
+            pnr config init      create the config of the profile if missing
             pnr --version        print the version
             """);
         return 0;

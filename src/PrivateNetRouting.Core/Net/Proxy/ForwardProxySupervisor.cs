@@ -34,10 +34,13 @@ public sealed class ForwardProxySupervisor(
     string? skippedAppsEndpoint = null,
     string? skippedReason = null,
     IProxyStopChannel? stopChannel = null,
-    Func<int, bool>? processAlive = null) : IProxyControl, IProxyStatistics
+    Func<int, bool>? processAlive = null,
+    ProfileContext? profile = null) : IProxyControl, IProxyStatistics
 {
     /// <summary>Marker of the detached worker in the command line; the same marker identifies the worker on shutdown.</summary>
     public const string WorkerMarker = "--proxy-worker";
+
+    private readonly ProfileContext _profile = profile ?? ProfileContext.Default;
 
     private readonly Func<string, string?, string, int?> _spawnWorker =
         spawnWorker ?? ((commandLine, stdoutPath, stderrPath) => ProcessOps.StartViaCmd(commandLine, stdoutPath, stderrPath)?.Id ?? 0);
@@ -113,6 +116,16 @@ public sealed class ForwardProxySupervisor(
 
         if (ports.IsListening(Port))
         {
+            // Another profile's proxy on our port would silently route this profile's clients
+            // through the wrong chain: a named profile adopts only a worker of its own, and the
+            // default one keeps the long-standing behaviour (a worker of a previous run).
+            if (!_profile.IsDefault && !OwnedByThisProfile())
+            {
+                throw new IOException(
+                    $"port {Port} is already listening and belongs to another process ({DescribeOwners()}); " +
+                    $"give profile '{_profile.Name}' its own forwardProxy.listen");
+            }
+
             log.Info($"forward-proxy: port {Port} is already listening — reusing the running owner ({DescribeOwners()})");
             return;
         }
@@ -186,7 +199,11 @@ public sealed class ForwardProxySupervisor(
         // the worker listens where this supervisor waits (and where the clients were pointed):
         // its own read of the config on disk may have been edited since this process started
         var listen = Socks5Client.ParseEndPoint(config.Listen);
-        var pid = _spawnWorker($"{ProcessOps.Quote(exe)} {WorkerMarker} {ProxyWorker.ListenOption} {listen}", null, workerErrorLog);
+        var profileArgument = _profile.IsDefault ? "" : $" {AppProfile.Option} {_profile.Name}";
+        var pid = _spawnWorker(
+            $"{ProcessOps.Quote(exe)} {WorkerMarker} {ProxyWorker.ListenOption} {listen}{profileArgument}",
+            null,
+            workerErrorLog);
         log.Info($"forward-proxy: worker spawned via cmd, pid={pid}");
 
         try
@@ -405,15 +422,32 @@ public sealed class ForwardProxySupervisor(
     }
 
     /// <summary>
-    /// Our worker: the port owner's command line contains the marker. The CommandLine of an elevated
-    /// process is not visible to a non-elevated reader (WMI, Win11 24H2+) — then the worker is not
-    /// identified and not killed, and the chain shutdown honestly warns about it in the log.
+    /// A listener on our port held by a worker of THIS profile (its command line carries the
+    /// matching <c>--profile</c>; the default profile's worker carries none). Used only to decide
+    /// whether a named profile may adopt a busy port.
+    /// </summary>
+    private bool OwnedByThisProfile() =>
+        tcpTable.GetListeners(Port).Any(entry => IsOurWorker(entry.ProcessId));
+
+    /// <summary>
+    /// Our worker: the port owner's command line contains the marker and names this profile. The
+    /// CommandLine of an elevated process is not visible to a non-elevated reader (WMI, Win11
+    /// 24H2+) — then the worker is not identified and not killed, and the chain shutdown honestly
+    /// warns about it in the log.
     /// </summary>
     private bool IsOurWorker(int pid)
     {
         try
         {
-            return processes.FindById(pid)?.CommandLine.Contains(WorkerMarker, StringComparison.Ordinal) == true;
+            var commandLine = processes.FindById(pid)?.CommandLine;
+            if (commandLine?.Contains(WorkerMarker, StringComparison.Ordinal) != true)
+            {
+                return false;
+            }
+
+            var owner = AppProfile.NameFromArguments(ProcessMatch.SplitArguments(commandLine))
+                ?? AppProfile.DefaultName;
+            return string.Equals(owner, _profile.Name, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is ManagementException or IOException or InvalidOperationException)
         {

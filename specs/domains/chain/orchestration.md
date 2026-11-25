@@ -50,7 +50,10 @@ file `chain-operation.lock` in the chain log's directory; `FileMode.OpenOrCreate
 wait has **no deadline** and honors the caller's token (progress `Lock`); a bring-up legitimately
 holds it through a UAC prompt and an interactive login. An unopenable lock (ACL, read-only
 dir) is logged and the operation runs without it (fail-open). A stop waits for the in-process
-semaphore with `CancellationToken.None` ("a stop is never abandoned while it waits").
+semaphore with `CancellationToken.None` ("a stop is never abandoned while it waits"). Because
+the lock file lives next to the chain log, profiles with distinct `logging.directory` values
+serialize independently; a shared directory serializes them together (safe, slower)
+([Profiles](../configuration/profiles.md)).
 
 **Cancellation contract**: every link catch filters `OperationCanceledException` before
 wrapping into `ChainException` — cancellation always surfaces unwrapped.

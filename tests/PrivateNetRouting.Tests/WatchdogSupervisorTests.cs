@@ -74,6 +74,33 @@ public class WatchdogSupervisorTests : IDisposable
         Assert.Equal([52], WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
     }
 
+    /// <summary>
+    /// One installation, several profiles: the stopper search returns only this profile's stoppers
+    /// (a named worker carries --profile, the default one carries nothing), so a Stop, the
+    /// chain-stopped hook or the GUI status never touches another profile's stopper.
+    /// </summary>
+    [Fact]
+    public void FindFiltersStoppersByProfile()
+    {
+        var finder = new FakeFinderByName();
+        finder.ByName["PrivateNetRouting.App.exe"] =
+        [
+            new(61, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker"),
+            new(62, @"""C:\app\PrivateNetRouting.App.exe"" --watchdog-worker --profile codex"),
+            new(63, @"""C:\app\PrivateNetRouting.App.exe"" --profile codex --watchdog-worker"),
+        ];
+        finder.ByName["pnr.exe"] =
+        [
+            new(64, @"""C:\app\pnr.exe"" watchdog"),
+            new(65, @"""C:\app\pnr.exe"" --profile codex watchdog"),
+            new(66, @"""C:\app\pnr.exe"" --profile codex --watchdog-worker"),
+        ];
+
+        Assert.Equal([61, 64], WatchdogSupervisor.FindStopperPids(finder, @"C:\app"));
+        // the marker pass of pnr.exe comes first, so 66 precedes the CLI-form 65
+        Assert.Equal([62, 63, 66, 65], WatchdogSupervisor.FindStopperPids(finder, @"C:\app", "codex"));
+    }
+
     [Fact]
     public async Task StopRechecksTheIdentityBeforeTheKill()
     {

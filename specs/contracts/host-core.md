@@ -10,7 +10,7 @@ contracts.
 
 | Interface | Package | Consumed By | Purpose |
 |---|---|---|---|
-| `ProxyRuntime.FromConfig(AppConfig)` | `Core` | App, CLI | the whole object graph: `Config`, `ProxyService?`, `ProxyControl`, `Chain`, `Launcher`, `CodexLauncher`, `Browser`, `BrowserProfile`, `Watchdog`, `WatchdogControl`, `Updater`, `CodexUpdater`, `Guard`, `Diagnostics`, `Logs`, `AppUpdate`, `Log` |
+| `ProxyRuntime.FromConfig(AppConfig, logFileName?, ProfileContext?)` | `Core` | App, CLI, workers | the whole object graph: `Config`, `Profile`, `ProxyService?`, `ProxyControl`, `Chain`, `Launcher`, `CodexLauncher`, `Browser`, `BrowserProfile`, `Watchdog`, `WatchdogControl`, `Updater`, `CodexUpdater`, `Guard`, `Diagnostics`, `Logs`, `AppUpdate`, `Log` |
 | `ProxyRuntime.StartAsync/StopAsync/DisposeAsync` | `Core` | both hosts | proxy lifecycle (dispose on the thread pool from the GUI) |
 | `ProxyRuntime.HandOverProxyAsync(ct)` | `Core` | both hosts | hand the in-process listener to a worker under the chain lock |
 | `ProxyRuntime.CheckHealthAsync(timeout)` | `Core` | both hosts | the live CONNECT roundtrip |
@@ -25,7 +25,8 @@ contracts.
 
 ## Initialization
 
-`AppConfigStore.LoadOrCreate()` -> `ProxyRuntime.FromConfig(config)`; the App additionally
+`AppConfigStore.LoadOrCreate(profile.ConfigPath)` -> `ProxyRuntime.FromConfig(config,
+profile: profile)` ([Profiles](../domains/configuration/profiles.md)); the App additionally
 creates its single-instance events and tray around it. Both hosts dispose the runtime on
 exit (the GUI via `Task.Run(...).GetAwaiter().GetResult()` — never on the dispatcher).
 

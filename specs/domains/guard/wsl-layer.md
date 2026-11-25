@@ -98,6 +98,11 @@ not-installed/not-running distros with a reason and isolates per-distro failures
 - The distro `config.toml` carries `respect_system_proxy = false` together with the network
   block: the env exported by the snippet is the transport, and the distro has no system proxy
   to fall back to.
+- The two halves are independent switches: `wsl.syncClaude` owns the boot runner/startup
+  script/settings.json, `wsl.syncCodex` owns the profile.d snippet/config.toml/.env. In a
+  two-profile setup each profile enables only its app's half, so the profiles never write the
+  same files; the status row's "sync off" means both halves are off
+  ([Profiles](../configuration/profiles.md)).
 
 ## Related Specs
 

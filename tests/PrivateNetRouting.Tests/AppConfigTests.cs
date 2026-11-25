@@ -24,6 +24,9 @@ public class AppConfigTests : IDisposable
         Assert.Empty(config.ForwardProxy.DohSeed); // optional; discovery is the source
         Assert.True(config.Ui.CheckUpdatesOnStart);
         Assert.False(config.Browser.IsConfigured); // the profile is created through the dialog, not by default
+        Assert.Equal("", config.Profile.Name); // display only; the identity comes from --profile
+        Assert.True(config.Guard.ManagePolicy); // one profile owns the machine-wide values
+        Assert.True(config.Guard.ManageSystemProxy);
     }
 
     [Fact]

@@ -70,7 +70,11 @@ worker or anyone), leave it as-is. The chain-level wrapper
 ## Invariants
 
 - Exactly one owner of the port at a time; a second start reuses rather than binds.
-- Only a process identified by the `--proxy-worker` marker in its command line is ever killed.
+- Only a process identified by the `--proxy-worker` marker in its command line is ever killed —
+  and its profile (`--profile`, none for the default profile) must match this profile's: a
+  named profile never adopts or stops another profile's worker; a busy port owned by another
+  process is an explicit error there, not a silent route through the wrong chain
+  ([Profiles](../configuration/profiles.md)).
 - `IsRunning` answers from the port, identically for GUI and CLI.
 - `CountersAreLocal` is false when another process holds the port (the counters would describe
   only this process's idle instance).
