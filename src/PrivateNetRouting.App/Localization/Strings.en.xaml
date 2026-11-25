@@ -214,11 +214,12 @@
     <s:String x:Key="Main.Guard.Settings.NoFile">Claude Code: settings.json was not found</s:String>
     <s:String x:Key="Main.Guard.Settings.MismatchFmt">Claude Code: HTTPS_PROXY={0}, NO_PROXY={1} — differs from the config</s:String>
     <s:String x:Key="Main.Guard.Settings.KeysNotSetFmt">Claude Code: settings.json keys not set: {0}</s:String>
-    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = false, .env proxy is up to date</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.Ok">Codex: respect_system_proxy = false, analytics/feedback off, update check off, .env proxy is up to date</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.Unset">unset</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.FlagFmt">Codex: respect_system_proxy = {0} (expected false)</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.NoFile">Codex: config.toml and .env were not found</s:String>
     <s:String x:Key="Main.Guard.Settings.Codex.EnvStale">Codex: .env proxy is stale or missing</s:String>
+    <s:String x:Key="Main.Guard.Settings.Codex.PrivacyStale">Codex: privacy switches or update check are not set</s:String>
    <s:String x:Key="Main.Guard.Settings.DoneFmt">Claude Code and Codex updated: proxy {0} (backup: {1})</s:String>
     <s:String x:Key="Main.Guard.Settings.UpToDateFmt">Claude Code and Codex already up to date (proxy {0})</s:String>
     <s:String x:Key="Main.Guard.Settings.ClaudeOffInConfig">Claude: off in the config — not synced</s:String>

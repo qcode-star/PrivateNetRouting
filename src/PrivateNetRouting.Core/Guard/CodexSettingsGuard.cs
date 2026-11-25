@@ -23,6 +23,15 @@ namespace PrivateNetRouting.Core.Guard;
 /// reqwest's default proxy behavior, which reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from .env; that
 /// is the transport this guard relies on.
 ///
+/// The same file carries the privacy policy: `[analytics] enabled = false` (the desktop shell keys
+/// OpenAI analytics, Sentry error reporting, website reporting and its Datadog sink off the same
+/// flag; the core's Statsig metrics exporter follows it), `[feedback] enabled = false` (no feedback
+/// uploads, no background Guardian review retention) and the top-level
+/// `check_for_update_on_startup = false` (the startup update check; the desktop app itself updates
+/// through the Microsoft Store). These are the guard's policy, not user preferences: every sync
+/// restores them. Codex's own commit/PR attribution is deliberately not among them — it is a
+/// server-side account/workspace setting (`commit_attribution_enabled`), not a config.toml key.
+///
 /// The desktop app owns config.toml and rewrites it, so the edits are surgical: every other line is
 /// preserved byte for byte, only the maintained keys are inserted or rewritten, the newline style
 /// is kept. A `features = { … }` inline table or dotted `features.network_proxy.*` keys are a shape
@@ -56,6 +65,18 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
     private static readonly (string Key, string Value)[] DomainKeys = [("\"*\"", "\"allow\"")];
 
+    // The privacy policy: OpenAI analytics (the desktop shell also keys Sentry error reporting,
+    // website reporting and its Datadog sink off the same flag), feedback uploads, and the
+    // startup update check. `analytics` and `feedback` are one-key tables; the check is top-level.
+    private static readonly (string Section, (string Key, string Value)[] Keys)[] PrivacySections =
+    [
+        ("analytics", [("enabled", "false")]),
+        ("feedback", [("enabled", "false")]),
+    ];
+
+    private const string UpdateCheckKey = "check_for_update_on_startup";
+    private const string UpdateCheckValue = "false";
+
     public CodexSettingsStatus Read()
     {
         var path = config.Codex.SettingsPath;
@@ -75,11 +96,13 @@ public sealed class CodexSettingsGuard(AppConfig config)
 
             var value = FindValue(flagText);
             var networkOk = NetworkProxyUpToDate(flagText);
-            if (value == false && networkOk && envOk)
+            var privacyOk = PrivacyUpToDate(flagText);
+            if (value == false && networkOk && privacyOk && envOk)
             {
                 return new CodexSettingsStatus(GuardState.On, false, FileMissing: false, EnvUpToDate: true)
                 {
                     NetworkProxyUpToDate = true,
+                    PrivacyUpToDate = true,
                 };
             }
 
@@ -102,6 +125,11 @@ public sealed class CodexSettingsGuard(AppConfig config)
                 parts.Add($"{NetworkSection} is not enabled (expected enabled = true, allow_upstream_proxy = true, enable_socks5 = false, domains \"*\" = allow)");
             }
 
+            if (!privacyOk)
+            {
+                parts.Add("the privacy switches are not set (expected analytics.enabled = false, feedback.enabled = false, check_for_update_on_startup = false)");
+            }
+
             if (!envOk)
             {
                 parts.Add(envText is null ? ".env not found" : ".env proxy env stale");
@@ -111,6 +139,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 Detail = string.Join("; ", parts),
                 NetworkProxyUpToDate = networkOk,
+                PrivacyUpToDate = privacyOk,
             };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -127,7 +156,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
     {
         var path = config.Codex.SettingsPath;
         var existing = File.Exists(path) ? File.ReadAllText(path) : null;
-        var updated = ApplyNetworkProxy(Apply(existing));
+        var updated = ApplyPrivacy(ApplyNetworkProxy(Apply(existing)));
         string? backup = null;
         var written = existing != updated;
         if (written)
@@ -154,8 +183,9 @@ public sealed class CodexSettingsGuard(AppConfig config)
         return Locate(SplitLines(text)).Value;
     }
 
-    /// <summary>Whether a config.toml carries the maintained Codex shape: the flag off and the managed-proxy block.</summary>
-    internal static bool ConfigUpToDate(string? text) => FindValue(text) == false && NetworkProxyUpToDate(text);
+    /// <summary>Whether a config.toml carries the maintained Codex shape: the flag off, the managed-proxy block and the privacy switches.</summary>
+    internal static bool ConfigUpToDate(string? text) =>
+        FindValue(text) == false && NetworkProxyUpToDate(text) && PrivacyUpToDate(text);
 
     /// <summary>
     /// The flag line inserted/updated in a config.toml text: an existing key is rewritten in place
@@ -229,6 +259,32 @@ public sealed class CodexSettingsGuard(AppConfig config)
     }
 
     /// <summary>
+    /// Whether config.toml carries the maintained privacy switches: `analytics.enabled = false`,
+    /// `feedback.enabled = false` and the top-level `check_for_update_on_startup = false`.
+    /// </summary>
+    internal static bool PrivacyUpToDate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var lines = SplitLines(text);
+        var structural = StructuralLines(lines);
+        foreach (var (section, keys) in PrivacySections)
+        {
+            var actual = ReadSectionKeys(lines, structural, section);
+            // exact booleans: a quoted "false" is a wrong type, not the maintained value
+            if (actual is null || keys.Any(key => !actual.TryGetValue(NormalizeKey(key.Key), out var value) || value != key.Value))
+            {
+                return false;
+            }
+        }
+
+        return FindRootKey(lines, structural, UpdateCheckKey) is { Value: UpdateCheckValue };
+    }
+
+    /// <summary>
     /// The managed-proxy block inserted/updated in a config.toml text: the maintained keys are
     /// rewritten in place or inserted after the section header, foreign keys and every other line
     /// survive. A shape this editor cannot edit surgically — the `features` inline table or dotted
@@ -296,6 +352,73 @@ public sealed class CodexSettingsGuard(AppConfig config)
         return string.Join(newline, lines) + newline;
     }
 
+    /// <summary>
+    /// The privacy switches inserted/updated in a config.toml text: `[analytics] enabled = false`,
+    /// `[feedback] enabled = false` and the top-level `check_for_update_on_startup = false` (the key
+    /// goes before the first table header — after it, it would belong to that table). Foreign keys
+    /// and every other line survive; the newline style is kept. A shape this editor cannot edit
+    /// surgically — an inline `analytics = { … }` / `feedback = { … }` table or dotted
+    /// `analytics.*` / `feedback.*` keys — is refused with InvalidDataException. An already-correct
+    /// text is returned unchanged (idempotence).
+    /// </summary>
+    internal static string ApplyPrivacy(string? existing)
+    {
+        if (existing is not null && PrivacyUpToDate(existing))
+        {
+            return existing;
+        }
+
+        var newline = existing is not null && existing.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var lines = SplitLines(existing ?? "");
+        RefuseUnsupportedPrivacyShapes(lines);
+
+        foreach (var (section, keys) in PrivacySections)
+        {
+            var structural = StructuralLines(lines);
+            if (FindSection(lines, structural, section) is { } bounds)
+            {
+                SetSectionKeys(lines, structural, bounds.Header, bounds.End, keys);
+                continue;
+            }
+
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+            {
+                lines.Add("");
+            }
+
+            lines.Add($"[{section}]");
+            lines.AddRange(keys.Select(key => $"{key.Key} = {key.Value}"));
+        }
+
+        var root = StructuralLines(lines);
+        if (FindRootKey(lines, root, UpdateCheckKey) is { } found)
+        {
+            lines[found.Index] = ReplaceValueWith(lines[found.Index], UpdateCheckValue);
+        }
+        else
+        {
+            var update = $"{UpdateCheckKey} = {UpdateCheckValue}";
+            var header = FirstHeader(lines, root);
+            if (header >= 0)
+            {
+                // a top-level key must stay above the first table header; one blank line keeps
+                // the key visually separate from the table
+                lines.InsertRange(header, [update, ""]);
+            }
+            else
+            {
+                if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+                {
+                    lines.Add("");
+                }
+
+                lines.Add(update);
+            }
+        }
+
+        return string.Join(newline, lines) + newline;
+    }
+
     /// <summary>Keys of a section, normalized and with the value's inline comment stripped; null — no such section.</summary>
     private static Dictionary<string, string>? ReadSectionKeys(IReadOnlyList<string> lines, bool[] structural, string name)
     {
@@ -354,6 +477,54 @@ public sealed class CodexSettingsGuard(AppConfig config)
         }
 
         return header < 0 ? null : (header, lines.Count);
+    }
+
+    /// <summary>
+    /// The top-level key and its value; null when the key is absent from the root region. A key
+    /// after the first table header belongs to that table, not to the root.
+    /// </summary>
+    private static (int Index, string Value)? FindRootKey(IReadOnlyList<string> lines, bool[] structural, string key)
+    {
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.IndexOf(']') > 1)
+            {
+                return null;
+            }
+
+            if (KeyOf(trimmed) == key)
+            {
+                return (i, ValueOf(trimmed));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The first table header; -1 — the file has no table header.</summary>
+    private static int FirstHeader(IReadOnlyList<string> lines, bool[] structural)
+    {
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.IndexOf(']') > 1)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -444,6 +615,57 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 throw new InvalidDataException(
                     $"{NetworkSection} is defined by dotted keys in config.toml; the block cannot be added without rewriting it");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A root `analytics = { … }` / `feedback = { … }` inline table or dotted `analytics.*` /
+    /// `feedback.*` keys define the same table in a shape the line editor cannot extend without
+    /// rewriting it: refuse instead of guessing.
+    /// </summary>
+    private static void RefuseUnsupportedPrivacyShapes(IReadOnlyList<string> lines)
+    {
+        var structural = StructuralLines(lines);
+        var current = "";
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.IndexOf(']') > 1)
+            {
+                current = HeaderName(trimmed);
+                continue;
+            }
+
+            if (current.Length != 0)
+            {
+                continue;
+            }
+
+            var key = KeyOf(trimmed);
+            if (key is null)
+            {
+                continue;
+            }
+
+            foreach (var (section, _) in PrivacySections)
+            {
+                if (key == section)
+                {
+                    throw new InvalidDataException(
+                        $"{section} is not a section table in config.toml; the privacy switch cannot be added without rewriting it");
+                }
+
+                if (key.StartsWith(section + ".", StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        $"{section} is defined by dotted keys in config.toml; the privacy switch cannot be added without rewriting it");
+                }
             }
         }
     }

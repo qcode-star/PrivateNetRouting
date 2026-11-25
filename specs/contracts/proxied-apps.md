@@ -11,9 +11,9 @@ own configuration; every other byte of those files belongs to the app and must s
 |---|---|---|---|
 | Claude Code proxy env + privacy + attribution | `~/.claude/settings.json` | `ClaudeSettingsGuard` (sync), WSL startup script (the two proxy keys) | the Claude Code engine |
 | Managed egress policy | HKLM `SOFTWARE\Policies\Claude` (`egressProxyUrl`, `disableWslSessions`) | `EgressPolicyStore` | Claude Desktop |
-| Codex proxy-mode flag + managed network proxy | `~/.codex/config.toml` (`[features] respect_system_proxy = false`, `[features.network_proxy]` + `.domains`) | `CodexSettingsGuard` | the Codex CLI core |
+| Codex proxy-mode flag + privacy switches + managed network proxy | `~/.codex/config.toml` (`[features] respect_system_proxy = false`, `[analytics] enabled = false`, `[feedback] enabled = false`, top-level `check_for_update_on_startup = false`, `[features.network_proxy]` + `.domains`) | `CodexSettingsGuard` | the Codex CLI core |
 | Codex proxy env | `~/.codex/.env` (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY`) | `CodexEnvFile` (sync + launcher refresh + WSL snippet) | the Codex CLI core |
-| Codex flag + managed network proxy in the distro | `<distro>:~/.codex/config.toml` (`[features] respect_system_proxy = false`, `[features.network_proxy]` + `.domains`) | `WslConfigGuard` (the shared `CodexSettingsGuard` editor) | the Codex CLI core inside WSL |
+| Codex flag + privacy switches + managed network proxy in the distro | `<distro>:~/.codex/config.toml` (`[features] respect_system_proxy = false`, `[analytics] enabled = false`, `[feedback] enabled = false`, top-level `check_for_update_on_startup = false`, `[features.network_proxy]` + `.domains`) | `WslConfigGuard` (the shared `CodexSettingsGuard` editor) | the Codex CLI core inside WSL |
 | Claude launch flags | command line: `--proxy-server`, `--proxy-bypass-list` | `ClaudeLauncher` | Claude Desktop (Chromium) |
 | Codex launch flags + env | package-context command line + PowerShell env | `CodexLauncher` | the Codex desktop app + its children |
 | Browser profile files | profile dir: `user.js` / `Default/Preferences` + `.pnr-profile` | `BrowserProfileFiles` | Firefox / Chromium |
@@ -31,8 +31,9 @@ profile owns Codex's — so one file never carries two proxy endpoints
 
 Into the files: the AppProxyEndpoint URL, the `NO_PROXY`/bypass list (base entries fixed in
 code + `bypassDomains` zones in two spellings + `directTlds` `*.tld` where the consumer knows
-TLD wildcards), the privacy/attribution constants, the `respect_system_proxy = false` flag and
-the managed-network-proxy block. The block's `domains` entry allows every host; the permission
+TLD wildcards), the privacy/attribution constants, the `respect_system_proxy = false` flag, the
+Codex privacy switches (`analytics`/`feedback` off, update check off) and the
+managed-network-proxy block. The block's `domains` entry allows every host; the permission
 profile, never this contract, decides whether the sandbox has network. Out of the files: nothing
 is read except for the drift comparison (status) and the `.env`-gateway-form acceptance.
 
@@ -55,6 +56,9 @@ If you change X, you MUST also update Y:
   (`WslConfigGuard`: the read probe, the status comparison and the sync pass), the status wording
   (`GuardService.BuildItems`), `docs/codex-proxy.md` (the flag and sandbox paragraphs) and
   `GuardTests`.
+- Change the Codex privacy switches -> `CodexSettingsGuard.PrivacyUpToDate`/`ApplyPrivacy`/
+  `ConfigUpToDate`, the WSL copy (the shared `ConfigUpToDate` and `ApplyPrivacy` call), the status
+  wording (`GuardService.BuildItems`, the GUI strings), `docs/codex-proxy.md` and `GuardTests`.
 - Change the bypass/NO_PROXY construction -> every consumer spelling (Claude flags, Codex env,
   system proxy bypass, browser prefs/command line), `ClaudeEnvValues`, and `LauncherTests`/
   `BrowserProfileTests`/`GuardTests`.

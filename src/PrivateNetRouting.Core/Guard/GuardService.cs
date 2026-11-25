@@ -305,9 +305,9 @@ public sealed class GuardService(
                     }.Where(part => part is not null)))),
             new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.State switch
             {
-                GuardState.On => "respect_system_proxy = false (the proxy env is the transport), network_proxy block up to date, .env proxy env up to date",
+                GuardState.On => "respect_system_proxy = false (the proxy env is the transport), network_proxy block up to date, analytics/feedback off, update check off, .env proxy env up to date",
                 GuardState.Off => "config.toml and .env not found",
-                _ => $"respect_system_proxy={Word(codex.Enabled)}, network_proxy={(codex.NetworkProxyUpToDate ? "up to date" : "not set")}, .env proxy env {(codex.EnvUpToDate ? "up to date" : "stale or missing")}",
+                _ => $"respect_system_proxy={Word(codex.Enabled)}, network_proxy={(codex.NetworkProxyUpToDate ? "up to date" : "not set")}, privacy={(codex.PrivacyUpToDate ? "off" : "not set")}, .env proxy env {(codex.EnvUpToDate ? "up to date" : "stale or missing")}",
             })),
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
@@ -468,8 +468,9 @@ public sealed class GuardService(
 
     /// <summary>
     /// Both applications at once: env in Claude Code settings.json and the Codex layer — the
-    /// system-proxy flag in config.toml plus the proxy env in .env (the guard card's single sync
-    /// action). Each file is written only on an actual change; the log carries one line per file.
+    /// system-proxy flag, the privacy switches and the managed-proxy block in config.toml plus the
+    /// proxy env in .env (the guard card's single sync action). Each file is written only on an
+    /// actual change; the log carries one line per file.
     /// One failing application does not prevent the other's write: each sync is isolated and its
     /// failure travels in the result (the WSL sync reports per distro the same way).
     /// </summary>
@@ -543,7 +544,7 @@ public sealed class GuardService(
             else if (codexError is null)
             {
                 log.Info(outcome.CodexWritten
-                    ? $"guard settings sync: config.toml updated (respect_system_proxy = false + network_proxy block; backup: {outcome.CodexBackupPath ?? "none"})"
+                    ? $"guard settings sync: config.toml updated (respect_system_proxy = false + network_proxy block + privacy switches; backup: {outcome.CodexBackupPath ?? "none"})"
                     : "guard settings sync: config.toml already up to date");
                 log.Info(outcome.CodexEnvWritten
                     ? $"guard settings sync: proxy env written to .env (backup: {outcome.CodexEnvBackupPath ?? "none"}) — the file the embedded CLI core loads itself"
@@ -611,7 +612,7 @@ public sealed class GuardService(
 
                 if (distro.CodexConfigWritten)
                 {
-                    what += ", codex config.toml network_proxy block written";
+                    what += ", codex config.toml network_proxy block and privacy switches written";
                 }
 
                 var backups = new[] { distro.SettingsBackup, distro.ScriptBackup, distro.CodexConfigBackup }

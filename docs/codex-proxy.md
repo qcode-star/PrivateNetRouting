@@ -91,6 +91,37 @@ something the client points at. Local and private destinations remain blocked by
 (`allow_local_binding` stays at its default `false`), so loopback is not a way around the chain; a
 command that needs an intranet host must be handled deliberately, not by disabling that check.
 
+## config.toml: analytics, feedback and the update check
+
+The guard also maintains the privacy policy of the same file:
+
+```toml
+check_for_update_on_startup = false
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+```
+
+`analytics.enabled = false` is the master switch. The core's OpenAI analytics, the desktop
+shell's Sentry error reporting, its website reporting and its Datadog log sink all key off this
+flag; the core's Statsig metrics exporter follows it too. `feedback.enabled = false` stops
+feedback uploads and background Guardian review retention (the desktop UI then reports feedback
+as disabled by configuration). `check_for_update_on_startup = false` stops the CLI core's startup
+update check — the desktop app itself updates through the Microsoft Store.
+
+Codex's own commit and pull-request attribution is not one of these keys and cannot be set here.
+When the account/workspace setting `commit_attribution_enabled` is on, the core's
+`git-attribution` extension instructs the model to append
+`Co-authored-by: Codex <noreply@openai.com>` to commits and `Generated with Codex` to pull
+requests; when it is off, the model is told to add neither. The value is resolved from the
+backend per account/workspace, and a failed lookup falls back to disabled. There is no
+`config.toml` key for it: turn it off in the OpenAI account/workspace settings (or use auth where
+the policy resolves to disabled). To see the effective value for an account, inspect the trailer
+of a commit Codex authored: the trailer is present only when the policy is on.
+
 ## Launching with the flags: the MSIX specifics
 
 Of the ways to start the app, only one delivers the arguments:
@@ -163,13 +194,15 @@ refreshes the `.env` back to the loopback form before every launch, so the two d
 fight over the file. (The sed above is the minimal shape: it rewrites existing lines only. The
 application's version of the same merge also adds missing keys and preserves foreign lines.)
 
-The guard also maintains the flag `respect_system_proxy = false` and the managed-proxy block in
-the distro's own `~/.codex/config.toml` (`[features.network_proxy]` plus the allow-everything
-domain entry), so the codex core running inside WSL gets the same transport as the Windows one:
-the flag off makes it read the proxy env the snippet exported, and its managed proxy chains to
-the gateway address the snippet exported. A `features` inline table or dotted
-`features.network_proxy.*` keys make that distro's sync fail with the reason instead of
-rewriting the file.
+The guard also maintains the flag `respect_system_proxy = false`, the privacy switches and the
+managed-proxy block in the distro's own `~/.codex/config.toml` (`[features.network_proxy]` plus
+the allow-everything domain entry; `[analytics]`/`[feedback]` off and
+`check_for_update_on_startup = false`), so the codex core running inside WSL gets the same
+transport and privacy policy as the Windows one: the flag off makes it read the proxy env the
+snippet exported, its managed proxy chains to the gateway address the snippet exported, and
+analytics, feedback and the startup update check are off. A `features` inline table, dotted
+`features.network_proxy.*` keys or an inline/dotted `analytics`/`feedback` table make that
+distro's sync fail with the reason instead of rewriting the file.
 
 ## Updates
 
@@ -207,6 +240,6 @@ manifest — ask for it through the live proxy when in doubt.
 
 `pnr codex launch` does the whole sequence (chain check → `.env` refresh → the package-context
 start with the flags and the env, restart offer for a running copy); the guard's settings sync
-writes the config.toml flag **off**, the network-proxy block and the `.env` (including
-`NODE_USE_ENV_PROXY`); `pnr guard wsl sync` installs the profile.d layer and the same flag and
-block into the distro's `config.toml`.
+writes the config.toml flag **off**, the privacy switches, the network-proxy block and the `.env`
+(including `NODE_USE_ENV_PROXY`); `pnr guard wsl sync` installs the profile.d layer and the same
+flag, privacy switches and block into the distro's `config.toml`.

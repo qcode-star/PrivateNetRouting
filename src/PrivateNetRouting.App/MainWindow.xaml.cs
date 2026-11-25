@@ -712,6 +712,7 @@ public partial class MainWindow : Window
                     : Loc.F(
                         "Main.Guard.Settings.Codex.FlagFmt",
                         snapshot.CodexSettings.Enabled is { } enabled ? enabled.ToString().ToLowerInvariant() : Loc.S("Main.Guard.Settings.Codex.Unset")),
+                snapshot.CodexSettings.PrivacyUpToDate ? null : Loc.S("Main.Guard.Settings.Codex.PrivacyStale"),
                 snapshot.CodexSettings.EnvUpToDate ? null : Loc.S("Main.Guard.Settings.Codex.EnvStale"),
             }.Where(part => part is not null)),
             _ => snapshot.CodexSettings.Detail ?? Loc.S("Main.Guard.Unknown"),

@@ -3,15 +3,16 @@
 ## Role
 
 The maintained shape of the two desktop apps' own configuration files: Claude Code's
-`settings.json` (proxy env + privacy + attribution), Codex's `config.toml` (the sysproxy flag
-and the managed network-proxy block) and `CODEX_HOME/.env` (the proxy env the embedded CLI core
-loads) — surgical edits with backups, on Windows and (via the WSL layer) inside distros.
+`settings.json` (proxy env + privacy + attribution), Codex's `config.toml` (the sysproxy flag,
+the privacy switches and the managed network-proxy block) and `CODEX_HOME/.env` (the proxy env
+the embedded CLI core loads) — surgical edits with backups, on Windows and (via the WSL layer)
+inside distros.
 
 ## Key Files
 
 - `src/PrivateNetRouting.Core/Guard/ClaudeSettingsShape.cs` — the maintained key manifest
 - `src/PrivateNetRouting.Core/Guard/ClaudeSettingsGuard.cs` — `ClaudeSettingsGuard`, `ClaudeEnvValues`, backup machinery
-- `src/PrivateNetRouting.Core/Guard/CodexSettingsGuard.cs` — the `respect_system_proxy` flag editor
+- `src/PrivateNetRouting.Core/Guard/CodexSettingsGuard.cs` — the `respect_system_proxy` flag, privacy switches and managed network-proxy block editor
 - `src/PrivateNetRouting.Core/Guard/CodexEnvFile.cs` — the `.env` merge (shared with the Codex launcher)
 
 ## Behavior
@@ -31,13 +32,16 @@ loads) — surgical edits with backups, on Windows and (via the WSL layer) insid
 JSON — comments of the original are not kept). A non-object `env`/root is a hard refusal:
 `InvalidDataException`, file untouched.
 
-**Codex `config.toml`**, two maintained tables:
+**Codex `config.toml`**, the maintained tables and top-level key:
 
-| Table | Keys | Value |
+| Table / key | Keys | Value |
 |---|---|---|
 | `[features]` | `respect_system_proxy` | `false` |
 | `[features.network_proxy]` | `enabled`, `allow_upstream_proxy`, `enable_socks5` | `true`, `true`, `false` |
 | `[features.network_proxy.domains]` | `"*"` | `"allow"` |
+| `[analytics]` | `enabled` | `false` |
+| `[feedback]` | `enabled` | `false` |
+| top-level | `check_for_update_on_startup` | `false` |
 
 The flag is maintained **off**: with `true` Codex resolves the system proxy first and, when the
 system proxy is disabled, pins the route to direct (`no_proxy()`), so the proxy env of `.env` is
@@ -58,6 +62,22 @@ is not mistaken for a section; newline style is kept. The network block is edite
 form only: `features = { … }` and top-level `features.network_proxy.*` keys are refused with
 `InvalidDataException` rather than rewritten into invalid TOML. An already-correct text is
 returned unchanged (idempotence).
+
+The privacy switches are maintained in the same file. `analytics.enabled = false` is the master
+switch: it disables OpenAI analytics across Codex surfaces; the desktop shell keys its Sentry
+error reporting, website reporting and Datadog sink off the same flag, and the Statsig metrics
+exporter follows it. `feedback.enabled = false` disables feedback uploads and background Guardian
+review retention. `check_for_update_on_startup = false` stops the CLI core's startup update check
+(the desktop app updates through the Microsoft Store). `analytics` and `feedback` are edited by
+section form only — an inline table or dotted keys are refused with `InvalidDataException`; the
+top-level key is rewritten in place or inserted before the first table header (after a header it
+would belong to that table). An already-correct text is returned unchanged (idempotence).
+
+Codex's own commit/PR attribution is deliberately not maintained here and is not a `config.toml`
+key: the core's `git-attribution` extension resolves `commit_attribution_enabled` from the
+account or workspace settings on the backend and only then instructs the model to append
+`Co-authored-by: Codex <noreply@openai.com>` / `Generated with Codex`. A failed policy lookup
+falls back to disabled. Turning it off is an account/workspace action, not a local edit.
 
 **Codex `.env`** (`CodexEnvFile`): maintained keys in order `HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY` (proxies = the AppProxyEndpoint URL;
@@ -84,6 +104,9 @@ written or created, its status reads `Off` with "not synced", and its half has n
 - A `features` inline table or dotted `features.network_proxy.*` keys leave the network block
   unedited: `Sync` refuses with `InvalidDataException` instead of producing invalid TOML (the
   flag editor still supports those shapes for `respect_system_proxy`).
+- An inline `analytics = { … }` / `feedback = { … }` table or dotted `analytics.*` /
+  `feedback.*` keys leave the privacy switches unedited: `Sync` refuses with
+  `InvalidDataException`.
 - Per-app failures are isolated (`SettingsSyncResult.ClaudeError`/`CodexError`) — one app's
   failure never stops the other's sync.
 - A write only happens when the content actually differs (idempotence); backups are still
@@ -99,6 +122,10 @@ written or created, its status reads `Off` with "not synced", and its half has n
   network is the app's decision; the network block only chains traffic that the profile allows.
 - `respect_system_proxy` is always `false`: the `.env` proxy env is the transport. `true` switches
   the core to the system proxy and, with the system proxy off, disables env routing altogether.
+- The privacy switches are always `false` (analytics, feedback) and the update check always off;
+  a top-level key never lands below a table header, where it would belong to that table.
+- The Codex commit/PR attribution policy is server-side (`commit_attribution_enabled`): the guard
+  never writes it into `config.toml` or any other file.
 - The sync is the same shape on Windows and in the WSL layer (shared manifest): the WSL layer
   writes the Codex `.env` and the same `[features.network_proxy]` block into the distro's
   `~/.codex/config.toml` (see [WSL layer](wsl-layer.md)).

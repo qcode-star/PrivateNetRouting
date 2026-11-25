@@ -129,4 +129,7 @@ public sealed record CodexSettingsStatus(
 {
     /// <summary>Whether config.toml carries the `[features.network_proxy]` block the guard maintains.</summary>
     public bool NetworkProxyUpToDate { get; init; }
+
+    /// <summary>Whether config.toml carries the privacy switches: analytics/feedback off and the update check off.</summary>
+    public bool PrivacyUpToDate { get; init; }
 }

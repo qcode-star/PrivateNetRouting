@@ -752,9 +752,12 @@ public class GuardTests : IDisposable
         Assert.Contains("allow_upstream_proxy = true", lines);
         Assert.Contains("[features.network_proxy.domains]", lines);
         Assert.Contains("\"*\" = \"allow\"", lines);
+        Assert.Contains("[analytics]", lines);
+        Assert.Contains("[feedback]", lines);
+        Assert.Contains("check_for_update_on_startup = false", lines);
         var before = File.ReadAllLines(result.BackupPath!);
         Assert.All(before, line => Assert.Contains(line, lines)); // every original line survived byte for byte
-        Assert.Equal(before.Length + 11, lines.Length); // flag block (3) + network block (8)
+        Assert.Equal(before.Length + 19, lines.Length); // flag block (3) + network block (8) + privacy (6) + update check with its blank (2)
 
         // the second sync finds the flag already correct: no rewrite, no backup
         var again = guard.Sync();
@@ -772,7 +775,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\nrespect_system_proxy = false\nfoo = \"bar\"\n\n[other]\nkey = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            "check_for_update_on_startup = false\n\n[features]\nrespect_system_proxy = false\nfoo = \"bar\"\n\n[other]\nkey = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n\n[analytics]\nenabled = false\n\n[feedback]\nenabled = false\n",
             File.ReadAllText(config.Codex.SettingsPath));
     }
 
@@ -788,7 +791,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n\r\n[features.network_proxy]\r\nenabled = true\r\nallow_upstream_proxy = true\r\nenable_socks5 = false\r\n\r\n[features.network_proxy.domains]\r\n\"*\" = \"allow\"\r\n",
+            "check_for_update_on_startup = false\r\n\r\n[features]\r\nrespect_system_proxy = false  # let the app decide\r\nother = 1\r\n\r\n[features.network_proxy]\r\nenabled = true\r\nallow_upstream_proxy = true\r\nenable_socks5 = false\r\n\r\n[features.network_proxy.domains]\r\n\"*\" = \"allow\"\r\n\r\n[analytics]\r\nenabled = false\r\n\r\n[feedback]\r\nenabled = false\r\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the inline comment and the CRLF style survive
         Assert.Equal(GuardState.On, guard.Read().State);
     }
@@ -808,7 +811,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = false\n\ncheck_for_update_on_startup = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n\n[analytics]\nenabled = false\n\n[feedback]\nenabled = false\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the dotted key is rewritten, the string is untouched
         Assert.Equal(GuardState.On, guard.Read().State);
     }
@@ -932,6 +935,75 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public void CodexPrivacySwitchesAreAddedAndIdempotent()
+    {
+        var applied = CodexSettingsGuard.ApplyPrivacy("[features]\nrespect_system_proxy = false\n");
+
+        Assert.Equal(
+            "check_for_update_on_startup = false\n\n[features]\nrespect_system_proxy = false\n\n[analytics]\nenabled = false\n\n[feedback]\nenabled = false\n",
+            applied);
+        Assert.True(CodexSettingsGuard.PrivacyUpToDate(applied));
+        Assert.Equal(applied, CodexSettingsGuard.ApplyPrivacy(applied)); // idempotent
+    }
+
+    [Fact]
+    public void CodexPrivacyUpdatesWrongValuesAndKeepsForeignKeys()
+    {
+        var applied = CodexSettingsGuard.ApplyPrivacy(
+            "check_for_update_on_startup = true\n\n[analytics]\nenabled = true  # telemetry\nforeign = \"keep\"\n\n[feedback]\nenabled = \"false\"\n");
+
+        Assert.Contains("check_for_update_on_startup = false", applied);
+        Assert.Contains("enabled = false  # telemetry", applied); // the inline comment survives
+        Assert.Contains("foreign = \"keep\"", applied); // a foreign key of the section survives
+        Assert.Contains("[feedback]\nenabled = false", applied); // the quoted "false" is a wrong type
+        Assert.True(CodexSettingsGuard.PrivacyUpToDate(applied));
+        Assert.Equal(applied, CodexSettingsGuard.ApplyPrivacy(applied)); // idempotent
+    }
+
+    [Fact]
+    public void CodexPrivacyPutsTheUpdateCheckBeforeTheFirstTable()
+    {
+        // after a table header the key would belong to that table, so it is inserted before it
+        var applied = CodexSettingsGuard.ApplyPrivacy("[desktop]\nx = 1\n");
+
+        Assert.StartsWith("check_for_update_on_startup = false\n\n[desktop]", applied, StringComparison.Ordinal);
+        Assert.Contains("[analytics]\nenabled = false", applied);
+        Assert.Contains("[feedback]\nenabled = false", applied);
+        Assert.True(CodexSettingsGuard.PrivacyUpToDate(applied));
+    }
+
+    [Fact]
+    public void CodexPrivacyRefusesShapesItCannotEditSurgically()
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            CodexSettingsGuard.ApplyPrivacy("analytics = { enabled = true }\n"));
+        Assert.Throws<InvalidDataException>(() =>
+            CodexSettingsGuard.ApplyPrivacy("feedback.enabled = true\n"));
+    }
+
+    [Fact]
+    public void CodexStatusRequiresThePrivacySwitches()
+    {
+        var config = CodexConfig();
+        var maintained = CodexSettingsGuard.ApplyNetworkProxy(
+            CodexSettingsGuard.Apply("[features]\nrespect_system_proxy = false\n"));
+        File.WriteAllText(config.Codex.SettingsPath, maintained);
+        CodexEnvFile.Write(config);
+        var guard = new CodexSettingsGuard(config);
+
+        var partial = guard.Read();
+
+        Assert.Equal(GuardState.Partial, partial.State);
+        Assert.False(partial.PrivacyUpToDate);
+        Assert.Contains("privacy switches", partial.Detail);
+
+        guard.Sync();
+        var on = guard.Read();
+        Assert.Equal(GuardState.On, on.State);
+        Assert.True(on.PrivacyUpToDate);
+    }
+
+    [Fact]
     public void CodexSettingsSyncCreatesTheFileAndStatusDetectsStates()
     {
         var config = CodexConfig();
@@ -946,6 +1018,8 @@ public class GuardTests : IDisposable
         Assert.Equal(
             new[]
             {
+                "check_for_update_on_startup = false",
+                "",
                 "[features]",
                 "respect_system_proxy = false",
                 "",
@@ -956,6 +1030,12 @@ public class GuardTests : IDisposable
                 "",
                 "[features.network_proxy.domains]",
                 "\"*\" = \"allow\"",
+                "",
+                "[analytics]",
+                "enabled = false",
+                "",
+                "[feedback]",
+                "enabled = false",
             },
             File.ReadAllLines(config.Codex.SettingsPath));
         Assert.Equal(GuardState.On, guard.Read().State);
@@ -1226,9 +1306,9 @@ public class GuardTests : IDisposable
         + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n"
         + CodexConfigInSync;
 
-    /// <summary>The flag and managed-proxy block of the distro config.toml as the probe reads it back.</summary>
+    /// <summary>The flag, managed-proxy block and privacy switches of the distro config.toml as the probe reads it back.</summary>
     private const string CodexConfigInSync =
-        "CODEXCFG=present\n[features]\nrespect_system_proxy = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\nCODEXCFG=END\n";
+        "CODEXCFG=present\ncheck_for_update_on_startup = false\n\n[features]\nrespect_system_proxy = false\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n\n[analytics]\nenabled = false\n\n[feedback]\nenabled = false\nCODEXCFG=END\n";
 
     /// <summary>The NO_PROXY export of the Codex snippet as the probe reads it back (no bypass domains configured).</summary>
     private const string CodexNoProxyLine = "    export NO_PROXY='localhost,127.0.0.1,.local'\n";

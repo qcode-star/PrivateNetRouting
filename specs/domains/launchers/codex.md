@@ -54,7 +54,7 @@ environment — only the package-context launch delivers both to the real entry 
 | `codex.packageName` / `appId` / `appExecutable` | Store package / `App` / `app\ChatGPT.exe` | launch context |
 | `codex.processName` | `ChatGPT` | already-running + update close |
 | `codex.envPath` | `%USERPROFILE%\.codex\.env` | env vars expanded |
-| `codex.settingsPath` | `%USERPROFILE%\.codex\config.toml` | the `respect_system_proxy` flag (maintained false by the guard) lives here |
+| `codex.settingsPath` | `%USERPROFILE%\.codex\config.toml` | the `respect_system_proxy` flag and the privacy switches (maintained by the guard) live here |
 
 ## Related Specs
 

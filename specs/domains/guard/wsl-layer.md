@@ -55,22 +55,24 @@ gateway form atomically when the file holds the Windows loopback form (the launc
 before every launch).
 
 **Codex config.toml** (the distro user, `~/.codex/config.toml`): the flag
-`[features] respect_system_proxy = false` and the same `[features.network_proxy]` block the
-Windows guard maintains (`enabled = true`, `allow_upstream_proxy = true`, `enable_socks5 = false`,
-`[features.network_proxy.domains]` `"*" = "allow"`), written surgically with the shared
-`CodexSettingsGuard` editor and the `pnr-bak` backup helper. The flag off keeps the Linux core on
+`[features] respect_system_proxy = false`, the same `[features.network_proxy]` block the Windows
+guard maintains (`enabled = true`, `allow_upstream_proxy = true`, `enable_socks5 = false`,
+`[features.network_proxy.domains]` `"*" = "allow"`) and the same privacy switches
+(`[analytics] enabled = false`, `[feedback] enabled = false`, top-level
+`check_for_update_on_startup = false`), written surgically with the shared `CodexSettingsGuard`
+editor and the `pnr-bak` backup helper. The flag off keeps the Linux core on
 reqwest's default proxy behavior, so it reads the env the snippet exported; `true` would resolve
 the system proxy first and, with the system proxy off, disable env routing. The network block
 turns on the Linux core's managed proxy for sandboxed commands and lets that proxy use the same
 env as its upstream. The permission profile still decides whether the sandbox has network. A file
-with the `features` inline table or dotted `features.network_proxy.*` keys is refused (the distro
-fails with the reason, nothing is rewritten); a missing file is created with the flag and the
-block.
+with the `features` inline table, dotted `features.network_proxy.*` keys or an inline/dotted
+`analytics`/`feedback` table is refused (the distro fails with the reason, nothing is rewritten);
+a missing file is created with the flag, the block and the privacy switches.
 
 **Per-distro sync/status**: a distro reads `On` only when every enabled check matches —
 script port/host == expected, `settings.json` proxy env fully in sync, Codex env file with the
-expected port/host/NO_PROXY, the Codex `config.toml` flag off and network-proxy block present and
-current, and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the configured user, boot wiring
+expected port/host/NO_PROXY, the Codex `config.toml` flag off, network-proxy block present and
+privacy switches off, and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the configured user, boot wiring
 `AlreadyOurs`, zero privacy/attribution drift). An unknown gateway -> `Partial`. Sync skips
 not-installed/not-running distros with a reason and isolates per-distro failures.
 
@@ -83,9 +85,9 @@ not-installed/not-running distros with a reason and isolates per-distro failures
   boot script.
 - A script failure inside the distro leaves the user's files untouched ("left untouched — fix
   it by hand").
-- A distro `config.toml` the shared editor cannot extend (an inline `features` table or dotted
-  `features.network_proxy.*` keys) fails that distro's sync with the reason; the file is not
-  rewritten.
+- A distro `config.toml` the shared editor cannot extend (an inline `features` table, dotted
+  `features.network_proxy.*` keys or an inline/dotted `analytics`/`feedback` table) fails that
+  distro's sync with the reason; the file is not rewritten.
 
 ## Invariants
 
@@ -96,8 +98,8 @@ not-installed/not-running distros with a reason and isolates per-distro failures
 - The boot pass always ensures the runner file itself, even in the `AlreadyOurs` case.
 - Ordinary distro shells never see the proxy env (only Codex's do).
 - The distro `config.toml` carries `respect_system_proxy = false` together with the network
-  block: the env exported by the snippet is the transport, and the distro has no system proxy
-  to fall back to.
+  block and the privacy switches: the env exported by the snippet is the transport, and the
+  distro has no system proxy to fall back to.
 - The two halves are independent switches: `wsl.syncClaude` owns the boot runner/startup
   script/settings.json, `wsl.syncCodex` owns the profile.d snippet/config.toml/.env. In a
   two-profile setup each profile enables only its app's half, so the profiles never write the

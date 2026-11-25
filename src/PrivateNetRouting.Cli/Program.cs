@@ -1212,8 +1212,8 @@ internal static class Program
                 else
                 {
                     Console.WriteLine(settings.CodexWritten
-                        ? $"config.toml: respect_system_proxy = false and the network_proxy block written (backup: {settings.CodexBackupPath ?? "none"})"
-                        : "config.toml: respect_system_proxy = false and the network_proxy block already in place");
+                        ? $"config.toml: respect_system_proxy = false, the network_proxy block and the privacy switches written (backup: {settings.CodexBackupPath ?? "none"})"
+                        : "config.toml: respect_system_proxy = false, the network_proxy block and the privacy switches already in place");
                     Console.WriteLine(settings.CodexEnvWritten
                         ? $".env: proxy env written to {settings.CodexEnvPath} (backup: {settings.CodexEnvBackupPath ?? "none"}) — the file the Codex core loads itself"
                         : $".env: proxy env already in place ({settings.CodexEnvPath})");
@@ -1515,12 +1515,13 @@ internal static class Program
                                  managed policy egressProxyUrl + disableWslSessions=0 (UAC)
             pnr guard settings sync
                                  write env (proxy + NO_PROXY) into Claude Code settings.json,
-                                 [features] respect_system_proxy = false into Codex config.toml
+                                 [features] respect_system_proxy = false, the privacy switches
+                                 (analytics/feedback off, update check off) into Codex config.toml
                                  and the proxy env into the .env of CODEX_HOME
             pnr guard wsl sync   update the WSL layer of the distros (wsl.distros): the startup
                                  script, settings.json env, the Codex proxy env snippet, the
-                                 flag plus network_proxy block in the distro's config.toml and
-                                 the boot runner in /etc/wsl.conf
+                                 flag, network_proxy block and privacy switches in the distro's
+                                 config.toml and the boot runner in /etc/wsl.conf
             pnr guard sysproxy on|off
                                  system WinINET proxy on the app's forward proxy (no UAC)
             pnr config path      config path of the profile

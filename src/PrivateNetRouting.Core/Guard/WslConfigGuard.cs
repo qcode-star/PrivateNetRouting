@@ -608,7 +608,7 @@ public sealed class WslConfigGuard(
             string updated;
             try
             {
-                updated = CodexSettingsGuard.ApplyNetworkProxy(CodexSettingsGuard.Apply(read.CodexConfigText));
+                updated = CodexSettingsGuard.ApplyPrivacy(CodexSettingsGuard.ApplyNetworkProxy(CodexSettingsGuard.Apply(read.CodexConfigText)));
             }
             catch (InvalidDataException ex)
             {
@@ -1597,6 +1597,11 @@ public sealed class WslConfigGuard(
         if (proxyEnvExpected && !CodexSettingsGuard.NetworkProxyUpToDate(read.CodexConfigText))
         {
             parts.Add("codex config.toml has no network_proxy block");
+        }
+
+        if (proxyEnvExpected && !CodexSettingsGuard.PrivacyUpToDate(read.CodexConfigText))
+        {
+            parts.Add("codex config.toml has no analytics/feedback privacy switches or update check off");
         }
 
         return string.Join("; ", parts);
