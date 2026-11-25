@@ -286,9 +286,9 @@ public sealed class GuardService(
                     }.Where(part => part is not null)))),
             new(GuardKind.CodexSettings, codex.State, codex.Detail ?? (codex.State switch
             {
-                GuardState.On => "respect_system_proxy = true, .env proxy env up to date",
+                GuardState.On => "respect_system_proxy = true, network_proxy block up to date, .env proxy env up to date",
                 GuardState.Off => "config.toml and .env not found",
-                _ => $"respect_system_proxy={Word(codex.Enabled)}, .env proxy env {(codex.EnvUpToDate ? "up to date" : "stale or missing")}",
+                _ => $"respect_system_proxy={Word(codex.Enabled)}, network_proxy={(codex.NetworkProxyUpToDate ? "up to date" : "not set")}, .env proxy env {(codex.EnvUpToDate ? "up to date" : "stale or missing")}",
             })),
             new(GuardKind.WslConfig, wsl.State, wsl.Distros.Count == 0
                 ? wsl.Reason
@@ -516,8 +516,8 @@ public sealed class GuardService(
             else if (codexError is null)
             {
                 log.Info(outcome.CodexWritten
-                    ? $"guard settings sync: respect_system_proxy=true written to config.toml (backup: {outcome.CodexBackupPath ?? "none"})"
-                    : "guard settings sync: respect_system_proxy=true already in place");
+                    ? $"guard settings sync: config.toml updated (respect_system_proxy + network_proxy block; backup: {outcome.CodexBackupPath ?? "none"})"
+                    : "guard settings sync: config.toml already up to date");
                 log.Info(outcome.CodexEnvWritten
                     ? $"guard settings sync: proxy env written to .env (backup: {outcome.CodexEnvBackupPath ?? "none"}) — the file the embedded CLI core loads itself"
                     : "guard settings sync: .env proxy env already in place");

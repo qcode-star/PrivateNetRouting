@@ -15,8 +15,13 @@ namespace PrivateNetRouting.Core.Guard;
 /// </summary>
 public static class CodexEnvFile
 {
-    /// <summary>The maintained keys, in the file order.</summary>
-    public static readonly IReadOnlyList<string> Keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+    /// <summary>
+    /// The maintained keys, in the file order. NODE_USE_ENV_PROXY is not a proxy address: Node's
+    /// built-in HTTP clients ignore the proxy env without it, and the browser/computer-use helpers
+    /// Codex starts are Node programs. The managed proxy sets the same variable for its own
+    /// children; keeping it here covers the helpers that read the core's environment directly.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "NODE_USE_ENV_PROXY"];
 
     /// <summary>The values the Windows side writes: the forward proxy address and the bypass list.</summary>
     public static IReadOnlyDictionary<string, string> Values(AppConfig config) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -25,6 +30,7 @@ public static class CodexEnvFile
         ["HTTPS_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["ALL_PROXY"] = ClaudeEnvValues.WindowsProxyUrl(config),
         ["NO_PROXY"] = ClaudeEnvValues.BuildNoProxy(config.BypassDomains),
+        ["NODE_USE_ENV_PROXY"] = "1",
     };
 
     /// <summary>

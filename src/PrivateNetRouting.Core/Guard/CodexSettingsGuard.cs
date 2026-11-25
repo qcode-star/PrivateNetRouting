@@ -5,26 +5,48 @@ namespace PrivateNetRouting.Core.Guard;
 
 /// <summary>
 /// The persistent guard layer of Codex (ChatGPT desktop and the CLI), two files of CODEX_HOME:
-/// the flag `[features] respect_system_proxy = true` in `~/.codex/config.toml` — a belt-and-braces
-/// for the guard's WinINET system-proxy layer (upstream the flag is not reliably honoured:
-/// openai/codex#39237, #29958 — connectivity never rests on it) — and the proxy env
-/// (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY) in `~/.codex/.env`.
+/// the flag `[features] respect_system_proxy = true` and the `[features.network_proxy]` block in
+/// `~/.codex/config.toml` — the latter turns on Codex's managed network proxy for sandboxed
+/// commands and lets it honour the proxy env for its upstream, so command traffic leaves through
+/// the application's forward proxy instead of a direct route. The permission profile still decides
+/// whether the sandbox has network at all; the guard never edits `[permissions]` or
+/// `default_permissions`. The second file is the proxy env
+/// (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY/NODE_USE_ENV_PROXY) in `~/.codex/.env`.
 /// The embedded CLI core loads .env after its own start: the desktop app strips the inherited
 /// proxy env variables from the processes it spawns, so this file is what actually carries the
 /// proxy to the core (the launcher's env reaches only the Chromium part, via the flags).
 ///
-/// The desktop app owns config.toml and rewrites it, so the edit is surgical: every other line is
-/// preserved byte for byte, only the flag line is inserted or rewritten, the newline style is
-/// kept. The .env merge is the same: our keys' lines are rewritten, foreign lines survive. Before
-/// a rewrite the previous version is preserved unless an identical copy is already among the
-/// `.pnr-bak-*` backups (the matching copy is touched; three numbered slots, at most three
-/// such copies are kept per file). Requires no special rights.
+/// The desktop app owns config.toml and rewrites it, so the edits are surgical: every other line is
+/// preserved byte for byte, only the maintained keys are inserted or rewritten, the newline style
+/// is kept. A `features = { … }` inline table or dotted `features.network_proxy.*` keys are a shape
+/// this editor refuses instead of rewriting (InvalidDataException). The .env merge is the same:
+/// our keys' lines are rewritten, foreign lines survive. Before a rewrite the previous version is
+/// preserved unless an identical copy is already among the `.pnr-bak-*` backups (the matching copy
+/// is touched; three numbered slots, at most three such copies are kept per file). Requires no
+/// special rights.
 /// </summary>
 public sealed class CodexSettingsGuard(AppConfig config)
 {
     private const string SectionName = "features";
     private const string KeyName = "respect_system_proxy";
     private const string DottedKey = SectionName + "." + KeyName;
+
+    // The sandbox network layer of newer Codex builds: Codex runs its own managed proxy for the
+    // commands a permission profile lets out to the network, and that proxy honours the proxy env
+    // (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY) for its upstream. The table below turns the proxy on and
+    // allows every host, so command traffic is not filtered here — it is only forced through the
+    // chain. The permission profile keeps deciding whether the sandbox has network at all; this
+    // guard deliberately does not touch default_permissions or any [permissions] table.
+    private const string NetworkSection = "features.network_proxy";
+    private const string DomainsSection = "features.network_proxy.domains";
+    private static readonly (string Key, string Value)[] NetworkKeys =
+    [
+        ("enabled", "true"),
+        ("allow_upstream_proxy", "true"),
+        ("enable_socks5", "false"),
+    ];
+
+    private static readonly (string Key, string Value)[] DomainKeys = [("\"*\"", "\"allow\"")];
 
     public CodexSettingsStatus Read()
     {
@@ -44,9 +66,13 @@ public sealed class CodexSettingsGuard(AppConfig config)
             }
 
             var value = FindValue(flagText);
-            if (value == true && envOk)
+            var networkOk = NetworkProxyUpToDate(flagText);
+            if (value == true && networkOk && envOk)
             {
-                return new CodexSettingsStatus(GuardState.On, true, FileMissing: false, EnvUpToDate: true);
+                return new CodexSettingsStatus(GuardState.On, true, FileMissing: false, EnvUpToDate: true)
+                {
+                    NetworkProxyUpToDate = true,
+                };
             }
 
             var parts = new List<string>();
@@ -54,13 +80,18 @@ public sealed class CodexSettingsGuard(AppConfig config)
             {
                 parts.Add("config.toml not found");
             }
-            else
+            else if (value != true)
             {
                 parts.Add(value switch
                 {
                     false => $"{KeyName} = false (expected true)",
                     _ => $"{DottedKey} is not set",
                 });
+            }
+
+            if (!networkOk)
+            {
+                parts.Add($"{NetworkSection} is not enabled (expected enabled = true, allow_upstream_proxy = true, enable_socks5 = false, domains \"*\" = allow)");
             }
 
             if (!envOk)
@@ -71,6 +102,7 @@ public sealed class CodexSettingsGuard(AppConfig config)
             return new CodexSettingsStatus(GuardState.Partial, value, !flagExists, envOk)
             {
                 Detail = string.Join("; ", parts),
+                NetworkProxyUpToDate = networkOk,
             };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -82,12 +114,12 @@ public sealed class CodexSettingsGuard(AppConfig config)
     /// <summary>Outcome of a sync: which of the two files were rewritten and which backups were made.</summary>
     public sealed record CodexSettingsSyncResult(bool Written, string? BackupPath, bool EnvWritten, string? EnvBackupPath);
 
-    /// <summary>Writes the flag and the .env proxy env; each file is touched only on an actual change.</summary>
+    /// <summary>Writes the flag, the network-proxy block and the .env proxy env; each file is touched only on an actual change.</summary>
     public CodexSettingsSyncResult Sync()
     {
         var path = config.Codex.SettingsPath;
         var existing = File.Exists(path) ? File.ReadAllText(path) : null;
-        var updated = Apply(existing);
+        var updated = ApplyNetworkProxy(Apply(existing));
         string? backup = null;
         var written = existing != updated;
         if (written)
@@ -158,6 +190,274 @@ public sealed class CodexSettingsGuard(AppConfig config)
         }
 
         return string.Join(newline, lines) + newline;
+    }
+
+    /// <summary>
+    /// Whether config.toml carries the maintained managed-proxy block: the three keys of
+    /// `[features.network_proxy]` and the allow-everything entry of
+    /// `[features.network_proxy.domains]`. The permission profile is not inspected: whether the
+    /// block actually starts a proxy is the app's network toggle, not this file's business.
+    /// </summary>
+    internal static bool NetworkProxyUpToDate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var lines = SplitLines(text);
+        var structural = StructuralLines(lines);
+        var network = ReadSectionKeys(lines, structural, NetworkSection);
+        if (network is null || !MaintainedKeysMatch(network, NetworkKeys))
+        {
+            return false;
+        }
+
+        var domains = ReadSectionKeys(lines, structural, DomainsSection);
+        return domains is not null && MaintainedKeysMatch(domains, DomainKeys);
+    }
+
+    /// <summary>
+    /// The managed-proxy block inserted/updated in a config.toml text: the maintained keys are
+    /// rewritten in place or inserted after the section header, foreign keys and every other line
+    /// survive. A shape this editor cannot edit surgically — the `features` inline table or dotted
+    /// `features.network_proxy.*` keys — is refused with InvalidDataException rather than rewritten.
+    /// An already-correct text is returned unchanged (idempotence).
+    /// </summary>
+    internal static string ApplyNetworkProxy(string? existing)
+    {
+        if (existing is not null && NetworkProxyUpToDate(existing))
+        {
+            return existing;
+        }
+
+        var newline = existing is not null && existing.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var lines = SplitLines(existing ?? "");
+        RefuseUnsupportedNetworkShapes(lines);
+
+        var structural = StructuralLines(lines);
+        var network = FindSection(lines, structural, NetworkSection);
+        if (network is null)
+        {
+            var domains = FindSection(lines, structural, DomainsSection);
+            var block = new List<string>();
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+            {
+                block.Add("");
+            }
+
+            block.Add($"[{NetworkSection}]");
+            block.AddRange(NetworkKeys.Select(key => $"{key.Key} = {key.Value}"));
+            if (domains is { } bounds)
+            {
+                // the sub-table already exists and implicitly defines the parent: the parent
+                // header and its keys go right before it, not at the end of the file
+                lines.InsertRange(bounds.Header, block);
+            }
+            else
+            {
+                lines.AddRange(block);
+            }
+        }
+
+        structural = StructuralLines(lines);
+        var section = FindSection(lines, structural, NetworkSection)
+            ?? throw new InvalidDataException($"could not locate [{NetworkSection}] after adding it to config.toml");
+        SetSectionKeys(lines, structural, section.Header, section.End, NetworkKeys);
+
+        structural = StructuralLines(lines);
+        var domainSection = FindSection(lines, structural, DomainsSection);
+        if (domainSection is null)
+        {
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+            {
+                lines.Add("");
+            }
+
+            lines.Add($"[{DomainsSection}]");
+            lines.AddRange(DomainKeys.Select(key => $"{key.Key} = {key.Value}"));
+        }
+        else
+        {
+            SetSectionKeys(lines, structural, domainSection.Value.Header, domainSection.Value.End, DomainKeys);
+        }
+
+        return string.Join(newline, lines) + newline;
+    }
+
+    /// <summary>Keys of a section, normalized and with the value's inline comment stripped; null — no such section.</summary>
+    private static Dictionary<string, string>? ReadSectionKeys(IReadOnlyList<string> lines, bool[] structural, string name)
+    {
+        if (FindSection(lines, structural, name) is not { } bounds)
+        {
+            return null;
+        }
+
+        var keys = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = bounds.Header + 1; i < bounds.End; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            var key = KeyOf(trimmed);
+            if (key is not null && !keys.ContainsKey(key))
+            {
+                keys[key] = ValueOf(trimmed);
+            }
+        }
+
+        return keys;
+    }
+
+    /// <summary>The section header and the line where it ends (the next header or the end of the file).</summary>
+    private static (int Header, int End)? FindSection(IReadOnlyList<string> lines, bool[] structural, string name)
+    {
+        var header = -1;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            if (!trimmed.StartsWith('[') || trimmed.IndexOf(']') <= 1)
+            {
+                continue;
+            }
+
+            if (header < 0)
+            {
+                if (HeaderName(trimmed) == name)
+                {
+                    header = i;
+                }
+            }
+            else
+            {
+                return (header, i);
+            }
+        }
+
+        return header < 0 ? null : (header, lines.Count);
+    }
+
+    /// <summary>
+    /// Rewrites the maintained keys of a section, inserting the missing ones right after its
+    /// header in the declared order; foreign keys of the section stay where they are.
+    /// </summary>
+    private static void SetSectionKeys(
+        List<string> lines,
+        bool[] structural,
+        int header,
+        int end,
+        IReadOnlyList<(string Key, string Value)> keys)
+    {
+        var existing = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = header + 1; i < end; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var key = KeyOf(lines[i].Trim());
+            if (key is not null && !existing.ContainsKey(key))
+            {
+                existing[key] = i;
+            }
+        }
+
+        var missing = new List<(string Key, string Value)>();
+        foreach (var (key, value) in keys)
+        {
+            if (existing.TryGetValue(NormalizeKey(key), out var index))
+            {
+                lines[index] = ReplaceValueWith(lines[index], value);
+            }
+            else
+            {
+                missing.Add((key, value));
+            }
+        }
+
+        for (var i = missing.Count - 1; i >= 0; i--)
+        {
+            lines.Insert(header + 1, $"{missing[i].Key} = {missing[i].Value}");
+        }
+    }
+
+    /// <summary>
+    /// `features = { … }` and top-level `features.network_proxy.*` keys define the same table in a
+    /// shape the line editor cannot extend without rewriting it: refuse instead of guessing.
+    /// </summary>
+    private static void RefuseUnsupportedNetworkShapes(IReadOnlyList<string> lines)
+    {
+        var structural = StructuralLines(lines);
+        var current = "";
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!structural[i])
+            {
+                continue;
+            }
+
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.IndexOf(']') > 1)
+            {
+                current = HeaderName(trimmed);
+                continue;
+            }
+
+            if (current.Length != 0)
+            {
+                continue;
+            }
+
+            var key = KeyOf(trimmed);
+            if (key is null)
+            {
+                continue;
+            }
+
+            if (key == SectionName && ValueOf(trimmed).StartsWith('{'))
+            {
+                throw new InvalidDataException(
+                    $"{SectionName} is an inline table in config.toml; the {NetworkSection} block cannot be added without rewriting it");
+            }
+
+            if (key == NetworkSection || key.StartsWith(NetworkSection + ".", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"{NetworkSection} is defined by dotted keys in config.toml; the block cannot be added without rewriting it");
+            }
+        }
+    }
+
+    private static bool MaintainedKeysMatch(
+        IReadOnlyDictionary<string, string> actual,
+        IReadOnlyList<(string Key, string Value)> expected)
+    {
+        foreach (var (key, value) in expected)
+        {
+            if (!actual.TryGetValue(NormalizeKey(key), out var current) || Unquote(current) != Unquote(value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string Unquote(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length >= 2 && trimmed[0] == trimmed[^1] && trimmed[0] is '"' or '\''
+            ? trimmed[1..^1]
+            : trimmed;
     }
 
     /// <summary>
@@ -458,10 +758,10 @@ public sealed class CodexSettingsGuard(AppConfig config)
     };
 
     /// <summary>
-    /// The line with its value replaced by `true`; the key spelling, the spacing around '=' and
-    /// an inline comment are kept (the desktop app's own style stays recognizable).
+    /// The line with its value replaced; the key spelling, the spacing around '=' and an inline
+    /// comment are kept (the desktop app's own style stays recognizable).
     /// </summary>
-    private static string ReplaceValue(string line)
+    private static string ReplaceValueWith(string line, string value)
     {
         var eq = line.IndexOf('=');
         var tail = line[(eq + 1)..];
@@ -487,6 +787,12 @@ public sealed class CodexSettingsGuard(AppConfig config)
             }
         }
 
-        return $"{line[..eq].TrimEnd()} = true{comment}";
+        return $"{line[..eq].TrimEnd()} = {value}{comment}";
     }
+
+    /// <summary>
+    /// The line with its value replaced by `true`; the key spelling, the spacing around '=' and
+    /// an inline comment are kept (the desktop app's own style stays recognizable).
+    /// </summary>
+    private static string ReplaceValue(string line) => ReplaceValueWith(line, "true");
 }

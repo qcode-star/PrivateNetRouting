@@ -29,12 +29,15 @@ HTTP_PROXY=http://127.0.0.1:18081
 HTTPS_PROXY=http://127.0.0.1:18081
 ALL_PROXY=http://127.0.0.1:18081
 NO_PROXY=localhost,127.0.0.1,.local,corp.example.com,.corp.example.com
+NODE_USE_ENV_PROXY=1
 ```
 
-Keep every foreign line of the file intact and rewrite only the four proxy lines. Refresh the file
-before every launch: a WSL codex session rewrites it to the WSL gateway address (below), which is
-unreachable from Windows once WSL is down — with a stale address the core would silently stop
-reaching anything.
+Keep every foreign line of the file intact and rewrite only the maintained lines.
+`NODE_USE_ENV_PROXY` is what makes Node's built-in HTTP clients honour the proxy env; Codex's
+browser and computer-use helpers are Node programs, so the line belongs with the proxy env even
+though it is not an address. Refresh the file before every launch: a WSL codex session rewrites it
+to the WSL gateway address (below), which is unreachable from Windows once WSL is down — with a
+stale address the core would silently stop reaching anything.
 
 ## config.toml: respect_system_proxy
 
@@ -56,6 +59,32 @@ rewrites the file on its own, so the edit must be surgical: every other line sur
 newline style is kept, the key is inserted into an existing `[features]` section (or one is
 appended), and the top-level dotted spelling `features.respect_system_proxy = true` is an
 equivalent form.
+
+## config.toml: the managed proxy of the sandbox
+
+The app's own transport and the commands the model runs in the sandbox are two different paths.
+For the second one newer builds ship a managed network proxy: Codex starts it when the selected
+permission profile lets the sandbox use the network, forces the command traffic through it, and
+points the command environment at it. With `allow_upstream_proxy` the managed proxy forwards to
+the proxy env it inherited — which `.env` has already set to the application's endpoint:
+
+```toml
+[features.network_proxy]
+enabled = true
+allow_upstream_proxy = true
+enable_socks5 = false
+
+[features.network_proxy.domains]
+"*" = "allow"
+```
+
+The allow-everything domain entry makes this a chaining layer, not a filter. Whether the sandbox
+has network at all stays the permission profile's decision — do not add `default_permissions` or a
+`[permissions]` table for this; the app's own network toggle supplies the profile. The managed
+proxy's default listener (`127.0.0.1:3128`, next free port if taken) is local to Codex and is not
+something the client points at. Local and private destinations remain blocked by the managed proxy
+(`allow_local_binding` stays at its default `false`), so loopback is not a way around the chain; a
+command that needs an intranet host must be handled deliberately, not by disabling that check.
 
 ## Launching with the flags: the MSIX specifics
 
@@ -107,6 +136,7 @@ if [ "$_codex_shell" = "1" ]; then
         export HTTP_PROXY="http://$_host_ip:$PORT"
         export HTTPS_PROXY="$HTTP_PROXY"
         export ALL_PROXY="$HTTP_PROXY"
+        export NODE_USE_ENV_PROXY=1
         export NO_PROXY="localhost,127.0.0.1,.local,corp.example.com,.corp.example.com"
         # The exports alone are not enough: the core loads "$CODEX_HOME/.env" over the
         # inherited environment, so the loopback form kept there would win — rewrite it.
@@ -141,6 +171,21 @@ manifest — ask for it through the live proxy when in doubt.
 - The core: a login succeeds — before the `.env` layer it fails with the token-exchange transport
   error while the UI looks fine. The core keeps a log database (`~/.codex/logs_2.sqlite`) that
   shows live responses instead of send errors.
+- The transport, in one command: the bundled core's `codex doctor` (the `app\resources\codex.exe`
+  of the installed package) prints a `Connectivity` section with the proxy env vars it loaded, the
+  `respect system proxy` state and a live Responses WebSocket handshake. `HTTP 101 Switching
+  Protocols` next to a failed DNS lookup is the clean result under a local ban: the handshake went
+  through the proxy, and the system resolver never saw the blocked name. This WebSocket is the
+  transport that silently times out with only a system proxy configured
+  ([openai/codex#63294](https://github.com/openai/codex/issues/63294)); a failed handshake while
+  the env vars are listed means the proxy is not reachable, and missing env vars mean the `.env`
+  layer is not reaching the core.
+- Commands the model runs in the sandbox: with the network block above, `codex doctor` reports
+  `managed proxy configured` only while a permission profile with network enabled is selected;
+  under a profile without network it says `not configured` even though the block is present, and
+  nothing starts — that difference is expected. Command traffic is a separate path from the
+  app's own transport and is not covered by the `.env` check above; verify it separately when the
+  sandbox's network access matters.
 - The generic CONNECT roundtrip is the same as
   [the Claude guide's](claude-proxy.md#verification).
 
@@ -148,4 +193,5 @@ manifest — ask for it through the live proxy when in doubt.
 
 `pnr codex launch` does the whole sequence (chain check → `.env` refresh → the package-context
 start with the flags and the env, restart offer for a running copy); the guard's settings sync
-writes the config.toml flag and the `.env`; `pnr guard wsl sync` installs the profile.d layer.
+writes the config.toml flag and network-proxy block and the `.env` (including
+`NODE_USE_ENV_PROXY`); `pnr guard wsl sync` installs the profile.d layer.

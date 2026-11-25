@@ -3,9 +3,9 @@
 ## Role
 
 The maintained shape of the two desktop apps' own configuration files: Claude Code's
-`settings.json` (proxy env + privacy + attribution), Codex's `config.toml` (one flag) and
-`CODEX_HOME/.env` (the proxy env the embedded CLI core loads) — surgical edits with backups,
-on Windows and (via the WSL layer) inside distros.
+`settings.json` (proxy env + privacy + attribution), Codex's `config.toml` (the sysproxy flag
+and the managed network-proxy block) and `CODEX_HOME/.env` (the proxy env the embedded CLI core
+loads) — surgical edits with backups, on Windows and (via the WSL layer) inside distros.
 
 ## Key Files
 
@@ -31,19 +31,37 @@ on Windows and (via the WSL layer) inside distros.
 JSON — comments of the original are not kept). A non-object `env`/root is a hard refusal:
 `InvalidDataException`, file untouched.
 
-**Codex `config.toml`**: `[features] respect_system_proxy = true`. The editor recognizes the
-key inside `[features]`, the top-level dotted form, and an inline `features = { … }` table;
-it rewrites the line in place (keeping key spelling, spacing and inline comment), inserts
-after `[features]` or a dotted sibling, or appends the section. Multi-line values are tracked
-so a header inside a string is not mistaken for a section; newline style is kept.
+**Codex `config.toml`**, two maintained tables:
+
+| Table | Keys | Value |
+|---|---|---|
+| `[features]` | `respect_system_proxy` | `true` |
+| `[features.network_proxy]` | `enabled`, `allow_upstream_proxy`, `enable_socks5` | `true`, `true`, `false` |
+| `[features.network_proxy.domains]` | `"*"` | `"allow"` |
+
+The network-proxy block turns on Codex's own managed proxy for the commands a permission profile
+lets out to the network, and `allow_upstream_proxy` makes that proxy use the proxy env of
+`.env` for its upstream — the command traffic then leaves through the AppProxyEndpoint instead of
+a direct route. The domain entry allows every host: the layer is a chaining layer, not a filter.
+The permission profile still decides whether the sandbox has network at all; the guard never
+edits `[permissions]` or `default_permissions`. The editor recognizes the flag inside
+`[features]`, the top-level dotted form and an inline `features = { … }` table; it rewrites the
+line in place (keeping key spelling, spacing and inline comment), inserts after `[features]` or a
+dotted sibling, or appends the section. Multi-line values are tracked so a header inside a string
+is not mistaken for a section; newline style is kept. The network block is edited by section
+form only: `features = { … }` and top-level `features.network_proxy.*` keys are refused with
+`InvalidDataException` rather than rewritten into invalid TOML. An already-correct text is
+returned unchanged (idempotence).
 
 **Codex `.env`** (`CodexEnvFile`): maintained keys in order `HTTP_PROXY`, `HTTPS_PROXY`,
-`ALL_PROXY`, `NO_PROXY` (proxies = the AppProxyEndpoint URL; `NO_PROXY` = `BuildNoProxy`). Any
-spelling of a maintained key (lowercase, `export ` prefix) is rewritten to canonical uppercase
-`KEY=value`; foreign lines survive byte for byte; the file always ends with a newline.
-`UpToDate` accepts the Windows form **or** the WSL-gateway resting form (same scheme `http`,
-same port, host a private IPv4) for the proxy values; `NO_PROXY` must match exactly. The
-launcher refreshes the Windows form back before every launch.
+`ALL_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY` (proxies = the AppProxyEndpoint URL;
+`NO_PROXY` = `BuildNoProxy`; `NODE_USE_ENV_PROXY` = `1` — Node's built-in HTTP clients ignore the
+proxy env without it, and Codex's browser/computer-use helpers are Node programs). Any spelling of
+a maintained key (lowercase, `export ` prefix) is rewritten to canonical uppercase `KEY=value`;
+foreign lines survive byte for byte; the file always ends with a newline. `UpToDate` accepts the
+Windows form **or** the WSL-gateway resting form (same scheme `http`, same port, host a private
+IPv4) for the proxy values; `NO_PROXY` and `NODE_USE_ENV_PROXY` must match exactly. The launcher
+refreshes the Windows form back before every launch.
 
 **Backup machinery** (shared): before a rewrite the file is copied to `<name>.pnr-bak-<n>` —
 three numbered slots; a free slot first, else the oldest-mtime slot is reused. A state already
@@ -57,6 +75,9 @@ written or created, its status reads `Off` with "not synced", and its half has n
 ## Error Handling
 
 - A malformed maintained file is never rewritten (status `Unknown`, `Sync` refuses).
+- A `features` inline table or dotted `features.network_proxy.*` keys leave the network block
+  unedited: `Sync` refuses with `InvalidDataException` instead of producing invalid TOML (the
+  flag editor still supports those shapes for `respect_system_proxy`).
 - Per-app failures are isolated (`SettingsSyncResult.ClaudeError`/`CodexError`) — one app's
   failure never stops the other's sync.
 - A write only happens when the content actually differs (idempotence); backups are still
@@ -68,6 +89,8 @@ written or created, its status reads `Off` with "not synced", and its half has n
   survives.
 - A backup exists before every content-changing rewrite (and dedupes by content).
 - Both apps' proxy values always name the AppProxyEndpoint — never a hardcoded port.
+- The guard never edits `[permissions]` or `default_permissions`: whether the Codex sandbox has
+  network is the app's decision; the network block only chains traffic that the profile allows.
 - The sync is the same shape on Windows and in the WSL layer (shared manifest).
 
 ## Related Specs

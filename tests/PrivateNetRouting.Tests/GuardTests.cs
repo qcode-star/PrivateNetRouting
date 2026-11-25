@@ -748,9 +748,13 @@ public class GuardTests : IDisposable
         var lines = File.ReadAllLines(config.Codex.SettingsPath);
         Assert.Contains("[features]", lines);
         Assert.Contains("respect_system_proxy = true", lines);
+        Assert.Contains("[features.network_proxy]", lines);
+        Assert.Contains("allow_upstream_proxy = true", lines);
+        Assert.Contains("[features.network_proxy.domains]", lines);
+        Assert.Contains("\"*\" = \"allow\"", lines);
         var before = File.ReadAllLines(result.BackupPath!);
         Assert.All(before, line => Assert.Contains(line, lines)); // every original line survived byte for byte
-        Assert.Equal(before.Length + 3, lines.Length); // blank line, section header, key
+        Assert.Equal(before.Length + 11, lines.Length); // flag block (3) + network block (8)
 
         // the second sync finds the flag already correct: no rewrite, no backup
         var again = guard.Sync();
@@ -768,7 +772,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\nrespect_system_proxy = true\nfoo = \"bar\"\n\n[other]\nkey = 1\n",
+            "[features]\nrespect_system_proxy = true\nfoo = \"bar\"\n\n[other]\nkey = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
             File.ReadAllText(config.Codex.SettingsPath));
     }
 
@@ -784,7 +788,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n",
+            "[features]\r\nrespect_system_proxy = true  # let the app decide\r\nother = 1\r\n\r\n[features.network_proxy]\r\nenabled = true\r\nallow_upstream_proxy = true\r\nenable_socks5 = false\r\n\r\n[features.network_proxy.domains]\r\n\"*\" = \"allow\"\r\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the inline comment and the CRLF style survive
         Assert.Equal(GuardState.On, guard.Read().State);
     }
@@ -804,7 +808,7 @@ public class GuardTests : IDisposable
 
         Assert.True(result.Written);
         Assert.Equal(
-            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n",
+            "instructions = \"\"\"\n[features]\nrespect_system_proxy = true\n\"\"\"\nfeatures.respect_system_proxy = true\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
             File.ReadAllText(config.Codex.SettingsPath)); // the dotted key is rewritten, the string is untouched
         Assert.Equal(GuardState.On, guard.Read().State);
     }
@@ -849,6 +853,84 @@ public class GuardTests : IDisposable
         Assert.Null(CodexSettingsGuard.FindValue("features = { note = \"respect_system_proxy = true\" }\n"));
     }
 
+    // ----- the managed network proxy block of config.toml -----
+
+    [Fact]
+    public void CodexNetworkProxyBlockIsAddedAndIdempotent()
+    {
+        var applied = CodexSettingsGuard.ApplyNetworkProxy(
+            "[features]\nrespect_system_proxy = true\nforeign = 1\n");
+
+        Assert.Equal(
+            "[features]\nrespect_system_proxy = true\nforeign = 1\n\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\n",
+            applied);
+        Assert.True(CodexSettingsGuard.NetworkProxyUpToDate(applied));
+        Assert.Equal(applied, CodexSettingsGuard.ApplyNetworkProxy(applied)); // idempotent
+    }
+
+    [Fact]
+    public void CodexNetworkProxyUpdatesWrongValuesAndKeepsForeignKeys()
+    {
+        var existing =
+            "[features.network_proxy]\nenabled = false  # off\nforeign = \"keep\"\nallow_upstream_proxy = false\nenable_socks5 = true\n\n"
+            + "[features.network_proxy.domains]\n\"*.openai.com\" = \"allow\"\n\"*\" = \"deny\"\n";
+
+        var applied = CodexSettingsGuard.ApplyNetworkProxy(existing);
+
+        Assert.Contains("enabled = true  # off", applied); // the inline comment survives
+        Assert.Contains("foreign = \"keep\"", applied); // a foreign key of the section survives
+        Assert.Contains("allow_upstream_proxy = true", applied);
+        Assert.Contains("enable_socks5 = false", applied);
+        Assert.Contains("\"*\" = \"allow\"", applied);
+        Assert.Contains("\"*.openai.com\" = \"allow\"", applied);
+        Assert.True(CodexSettingsGuard.NetworkProxyUpToDate(applied));
+    }
+
+    [Fact]
+    public void CodexNetworkProxyInsertsTheParentBeforeAnExistingDomainsSection()
+    {
+        // [features.network_proxy.domains] implicitly defines the parent: the parent header and its
+        // keys must land before it, not after it at the end of the file
+        var applied = CodexSettingsGuard.ApplyNetworkProxy("[features.network_proxy.domains]\n\"*\" = \"allow\"\n");
+
+        var parent = applied.IndexOf("[features.network_proxy]", StringComparison.Ordinal);
+        var domains = applied.IndexOf("[features.network_proxy.domains]", StringComparison.Ordinal);
+        Assert.True(parent >= 0 && parent < domains);
+        Assert.True(CodexSettingsGuard.NetworkProxyUpToDate(applied));
+    }
+
+    [Fact]
+    public void CodexNetworkProxyRefusesShapesItCannotEditSurgically()
+    {
+        // the flag editor supports these shapes; the network block cannot be added to them without
+        // rewriting the table — refuse instead of producing invalid TOML
+        Assert.Throws<InvalidDataException>(() =>
+            CodexSettingsGuard.ApplyNetworkProxy("features = { respect_system_proxy = true }\n"));
+        Assert.Throws<InvalidDataException>(() =>
+            CodexSettingsGuard.ApplyNetworkProxy("features.network_proxy.enabled = true\n"));
+    }
+
+    [Fact]
+    public void CodexStatusRequiresTheNetworkBlock()
+    {
+        var config = CodexConfig();
+        File.WriteAllText(config.Codex.SettingsPath, "[features]\nrespect_system_proxy = true\n");
+        CodexEnvFile.Write(config);
+        var guard = new CodexSettingsGuard(config);
+
+        var partial = guard.Read();
+
+        Assert.Equal(GuardState.Partial, partial.State);
+        Assert.False(partial.NetworkProxyUpToDate);
+        Assert.Contains("features.network_proxy", partial.Detail);
+        Assert.DoesNotContain("is not set", partial.Detail); // the flag itself is fine
+
+        guard.Sync();
+        var on = guard.Read();
+        Assert.Equal(GuardState.On, on.State);
+        Assert.True(on.NetworkProxyUpToDate);
+    }
+
     [Fact]
     public void CodexSettingsSyncCreatesTheFileAndStatusDetectsStates()
     {
@@ -862,7 +944,19 @@ public class GuardTests : IDisposable
         var created = guard.Sync();
         Assert.True(created.Written);
         Assert.Equal(
-            new[] { "[features]", "respect_system_proxy = true" },
+            new[]
+            {
+                "[features]",
+                "respect_system_proxy = true",
+                "",
+                "[features.network_proxy]",
+                "enabled = true",
+                "allow_upstream_proxy = true",
+                "enable_socks5 = false",
+                "",
+                "[features.network_proxy.domains]",
+                "\"*\" = \"allow\"",
+            },
             File.ReadAllLines(config.Codex.SettingsPath));
         Assert.Equal(GuardState.On, guard.Read().State);
 
@@ -966,7 +1060,9 @@ public class GuardTests : IDisposable
         var before = guard.Read();
         Assert.Equal(GuardState.Partial, before.State);
         Assert.False(before.EnvUpToDate);
-        Assert.Equal("config.toml not found; .env proxy env stale", before.Detail);
+        Assert.Contains("config.toml not found", before.Detail);
+        Assert.Contains("features.network_proxy", before.Detail);
+        Assert.Contains(".env proxy env stale", before.Detail);
 
         var result = guard.Sync();
 
@@ -997,7 +1093,7 @@ public class GuardTests : IDisposable
         Assert.True(written);
         Assert.NotNull(backup);
         Assert.Equal(
-            "HTTP_PROXY=http://127.0.0.1:18081\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1,.local\n",
+            "HTTP_PROXY=http://127.0.0.1:18081\nHTTPS_PROXY=http://127.0.0.1:18081\nALL_PROXY=http://127.0.0.1:18081\nNO_PROXY=localhost,127.0.0.1,.local\nNODE_USE_ENV_PROXY=1\n",
             File.ReadAllText(config.Codex.EnvPath));
         var (again, noBackup) = CodexEnvFile.Write(config);
         Assert.False(again);
@@ -1563,6 +1659,7 @@ public class GuardTests : IDisposable
         // the address is the WSL NAT gateway recomputed at every shell start, not 127.0.0.1
         Assert.Contains("ip route show default", script);
         Assert.Contains("export HTTP_PROXY=\"http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT\"", script);
+        Assert.Contains("export NODE_USE_ENV_PROXY=1", script);
         Assert.Contains("export NO_PROXY='localhost,127.0.0.1,.local,corp.example.com,.corp.example.com'", script);
         // the port line is what `pnr guard status` reads back
         Assert.Contains("PNR_CODEX_PROXY_PORT=18082", script);
@@ -1573,6 +1670,7 @@ public class GuardTests : IDisposable
         Assert.Contains("grep -qxF \"HTTP_PROXY=$HTTP_PROXY\"", script);
         Assert.Contains("print \"HTTP_PROXY=\" _proxy", script);
         Assert.Contains("print \"NO_PROXY=\" _no_proxy", script);
+        Assert.Contains("print \"NODE_USE_ENV_PROXY=1\"", script);
         Assert.Contains("mv -f \"$_pnr_tmp\" \"$_pnr_dst\"", script);
     }
 

@@ -1179,8 +1179,8 @@ internal static class Program
                 else
                 {
                     Console.WriteLine(settings.CodexWritten
-                        ? $"config.toml: respect_system_proxy = true written (backup: {settings.CodexBackupPath ?? "none"})"
-                        : "config.toml: respect_system_proxy = true already in place");
+                        ? $"config.toml: respect_system_proxy and the network_proxy block written (backup: {settings.CodexBackupPath ?? "none"})"
+                        : "config.toml: respect_system_proxy and the network_proxy block already in place");
                     Console.WriteLine(settings.CodexEnvWritten
                         ? $".env: proxy env written to {settings.CodexEnvPath} (backup: {settings.CodexEnvBackupPath ?? "none"}) — the file the Codex core loads itself"
                         : $".env: proxy env already in place ({settings.CodexEnvPath})");

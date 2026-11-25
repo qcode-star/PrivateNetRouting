@@ -929,6 +929,7 @@ public sealed class WslConfigGuard(
                 export HTTP_PROXY="http://$_pnr_url_host:$PNR_CODEX_PROXY_PORT"
                 export HTTPS_PROXY="$HTTP_PROXY"
                 export ALL_PROXY="$HTTP_PROXY"
+                export NODE_USE_ENV_PROXY=1
                 export NO_PROXY={{BashQuote(noProxy)}}
                 _pnr_env="$CODEX_HOME/.env"
                 # a .env written on the Windows side may carry CRLF: the check ignores the CR, and
@@ -938,18 +939,20 @@ public sealed class WslConfigGuard(
                     [ -n "$_pnr_dst" ] || _pnr_dst="$_pnr_env"
                     _pnr_tmp=$(mktemp "${_pnr_dst}.pnr-XXXXXX")
                     awk -v _proxy="$HTTP_PROXY" -v _no_proxy="$NO_PROXY" '
-                        BEGIN { _h=0; _s=0; _a=0; _n=0 }
+                        BEGIN { _h=0; _s=0; _a=0; _n=0; _x=0 }
                         { sub(/\r$/, "") }
                         /^[ \t]*(export[ \t]+)?HTTP_PROXY[ \t]*=/  { print "HTTP_PROXY=" _proxy;  _h=1; next }
                         /^[ \t]*(export[ \t]+)?HTTPS_PROXY[ \t]*=/ { print "HTTPS_PROXY=" _proxy; _s=1; next }
                         /^[ \t]*(export[ \t]+)?ALL_PROXY[ \t]*=/   { print "ALL_PROXY=" _proxy;   _a=1; next }
                         /^[ \t]*(export[ \t]+)?NO_PROXY[ \t]*=/    { print "NO_PROXY=" _no_proxy; _n=1; next }
+                        /^[ \t]*(export[ \t]+)?NODE_USE_ENV_PROXY[ \t]*=/ { print "NODE_USE_ENV_PROXY=1"; _x=1; next }
                         { print }
                         END {
                             if (!_h) print "HTTP_PROXY=" _proxy
                             if (!_s) print "HTTPS_PROXY=" _proxy
                             if (!_a) print "ALL_PROXY=" _proxy
                             if (!_n) print "NO_PROXY=" _no_proxy
+                            if (!_x) print "NODE_USE_ENV_PROXY=1"
                         }' "$_pnr_dst" > "$_pnr_tmp" && [ -s "$_pnr_tmp" ] && {
                         # two shells starting at once must not tear the file: the new content
                         # replaces it in one rename (the mode kept); a rename the filesystem
