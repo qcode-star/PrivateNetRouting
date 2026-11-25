@@ -1367,6 +1367,12 @@ public partial class MainWindow : Window
             ApplyCardLayout();
             ApplyAppAvailability();
             _tray?.ShowLaunchClaude(_runtime.Config.Claude.Enabled);
+            // the icon identity follows the reloaded apps as well: claude.enabled / codex.enabled
+            // decide whether the profile wears a brand icon
+            var iconVariant = AppIconVariants.Resolve(_runtime.Config);
+            AppIcons.Select(iconVariant);
+            _tray?.SetIcon(AppIcons.TrayIcon);
+            AppIcons.RefreshShortcuts(iconVariant, _runtime.Profile, _runtime.Log);
             var preference = _runtime.Config.Ui.Language;
             Loc.Apply(AppLanguage.Resolve(preference, CultureInfo.CurrentUICulture));
             FillLanguages(preference);

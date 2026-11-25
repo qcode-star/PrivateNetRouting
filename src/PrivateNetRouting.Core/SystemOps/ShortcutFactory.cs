@@ -17,29 +17,73 @@ public interface IShortcutFactory
 }
 
 /// <summary>
-/// Shortcut creation through the WScript.Shell COM object — the same path Explorer uses, no
+/// Reading and re-iconing shortcuts that already exist (the profile's desktop identity). Behind an
+/// interface for the same reason: the tests never touch COM.
+/// </summary>
+public interface IShortcutStore
+{
+    /// <summary>What an existing .lnk starts and how it looks; null when there is no such file.</summary>
+    ShortcutProperties? ReadShortcut(string shortcutPath);
+
+    /// <summary>Replaces the icon of an existing .lnk; its target and arguments stay as they are.</summary>
+    void SetShortcutIcon(string shortcutPath, string iconLocation);
+}
+
+/// <summary>A shortcut as the icon refresher sees it: <c>IconLocation</c> is <c>path,index</c> or empty.</summary>
+public sealed record ShortcutProperties(string TargetPath, string Arguments, string IconLocation);
+
+/// <summary>
+/// Shortcut work through the WScript.Shell COM object — the same path Explorer uses, no
 /// privileges required (the desktop is writable by the owner), no PowerShell process.
 /// </summary>
-public sealed class WScriptShortcutFactory : IShortcutFactory
+public sealed class WScriptShortcutFactory : IShortcutFactory, IShortcutStore
 {
-    public void CreateShortcut(string shortcutPath, string targetPath, string arguments, string workingDirectory, string description)
+    public void CreateShortcut(string shortcutPath, string targetPath, string arguments, string workingDirectory, string description) =>
+        WithShortcut<object?>(shortcutPath, save: true, link =>
+        {
+            link.TargetPath = targetPath;
+            link.Arguments = arguments;
+            link.WorkingDirectory = workingDirectory;
+            link.Description = description;
+            link.IconLocation = targetPath + ",0";
+            return null;
+        });
+
+    public ShortcutProperties? ReadShortcut(string shortcutPath) =>
+        File.Exists(shortcutPath)
+            ? WithShortcut(shortcutPath, save: false, link => new ShortcutProperties(
+                (string?)link.TargetPath ?? "",
+                (string?)link.Arguments ?? "",
+                (string?)link.IconLocation ?? ""))
+            : null;
+
+    public void SetShortcutIcon(string shortcutPath, string iconLocation) =>
+        WithShortcut<object?>(shortcutPath, save: true, link =>
+        {
+            link.IconLocation = iconLocation;
+            return null;
+        });
+
+    /// <summary>Opens the shortcut through WScript.Shell, runs <paramref name="work"/> and saves on request.</summary>
+    private static T WithShortcut<T>(string shortcutPath, bool save, Func<dynamic, T> work)
     {
         var type = Type.GetTypeFromProgID("WScript.Shell")
-            ?? throw new PlatformNotSupportedException("WScript.Shell is unavailable: cannot create a shortcut");
+            ?? throw new PlatformNotSupportedException("WScript.Shell is unavailable: cannot work with a shortcut");
         object? shell = null;
         try
         {
             shell = Activator.CreateInstance(type)
-                ?? throw new PlatformNotSupportedException("WScript.Shell did not start: cannot create a shortcut");
-            dynamic link = ((dynamic)shell).CreateShortcut(shortcutPath);
+                ?? throw new PlatformNotSupportedException("WScript.Shell did not start: cannot work with a shortcut");
+            var link = ((dynamic)shell).CreateShortcut(shortcutPath);
             try
             {
-                link.TargetPath = targetPath;
-                link.Arguments = arguments;
-                link.WorkingDirectory = workingDirectory;
-                link.Description = description;
-                link.IconLocation = targetPath + ",0";
-                link.Save();
+                var result = work(link);
+                if (save)
+                {
+                    link.Save();
+                }
+
+                return result;
             }
             finally
             {

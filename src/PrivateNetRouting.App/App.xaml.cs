@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Threading;
 using PrivateNetRouting.App.Localization;
 using PrivateNetRouting.Core;
 using PrivateNetRouting.Core.Chain;
@@ -163,6 +164,16 @@ public partial class App : Application
         // opening the window raises nothing: without the chain the proxy is unusable (its SOCKS5
         // upstream is down), so an auto-start would only produce a guaranteed-failing CONNECT
         // check; the proxy comes up as part of the chain (chain up / launches / update)
+
+        // the profile's icon identity (both apps / Claude only / Codex only): the window and the
+        // tray take it now, the desktop shortcuts follow once the window is up (a shortcut's icon
+        // is a file, and the COM work does not belong in startup)
+        var iconVariant = AppIconVariants.Resolve(config);
+        AppIcons.Select(iconVariant);
+        ProxyRuntime runtime = _runtime;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(() => AppIcons.RefreshShortcuts(iconVariant, _profile, runtime.Log)));
 
         var window = new MainWindow(_runtime, _profile.ConfigPath, config.Ui.Language);
         MainWindow = window;

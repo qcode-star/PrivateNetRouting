@@ -5,7 +5,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\app.ico" />
+    <!-- The icon family: app.ico is the neutral "both apps" one (also the exe's own icon),
+         app-claude.ico / app-codex.ico are the single-app profile variants. -->
+    <Resource Include="Assets\*.ico" />
     <!-- WinForms is needed only for the tray (TrayIcon.cs with an alias): no global usings,
          so that System.Windows.Forms/System.Drawing do not conflict with WPF types. -->
     <Using Remove="System.Windows.Forms" />

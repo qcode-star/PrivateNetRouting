@@ -13,6 +13,8 @@ WPF starts. Profiles: [Profiles](../configuration/profiles.md).
 - `src/PrivateNetRouting.App/HeadlessHost.cs` — windowless roles + crash logging
 - `src/PrivateNetRouting.App/App.xaml` + `src/PrivateNetRouting.App/App.xaml.cs` — `ShutdownMode`, single-instance mutex + events, tray wiring, exit paths, startup checks
 - `src/PrivateNetRouting.App/TrayIcon.cs` — the WinForms `NotifyIcon` menu and balloon
+- `src/PrivateNetRouting.App/AppIcons.cs` — the icon family (`Assets/*.ico`) for the windows, the
+  tray and the profile's desktop shortcuts, picked by [the profile's icon variant](../configuration/profiles.md#identity)
 - `src/PrivateNetRouting.App/MainWindow.xaml` + `src/PrivateNetRouting.App/MainWindow.xaml.cs` — chain card, guards card, the launch actions with their stop buttons (detail: [Chain card](chain-card.md))
 - `src/PrivateNetRouting.App/DiagnosticsWindow.xaml`, `src/PrivateNetRouting.App/BrowserProfileWindow.xaml`, `src/PrivateNetRouting.App/AboutWindow.xaml` (+ code-behinds)
 - `src/PrivateNetRouting.App/Theme.cs`, `WindowTheme.cs`, `App.xaml` — the UI token dictionary
@@ -69,6 +71,11 @@ chain, no UAC.
 - Two profiles are two GUI processes: their mutexes/events differ, their titles and tray
   tooltips read `<product> — <profile display>`, and the installer sees any of them through
   `AnyInstance`.
+- The windows and the tray wear the profile's icon variant — neutral (both apps), Claude (only
+  `claude.enabled`), Codex (only `codex.enabled`). The exe's own icon stays the neutral one, so
+  the brand variant is also written to `%APPDATA%\PrivateNetRouting\icons` for the desktop
+  shortcuts. A config reload switches the tray and the shortcuts; an open window keeps the icon
+  it was created with (its title bar and taskbar button follow the next start).
 - Closing or minimizing the window never stops the proxy or the idle stopper.
 - The tray is a WinForms `NotifyIcon` referenced for that alone (global usings removed to
   avoid WPF name conflicts).
@@ -86,7 +93,7 @@ chain, no UAC.
 | `ui.language` | `auto` | see [Localization](localization.md) |
 | `ui.checkUpdatesOnStart` / `ui.checkAppUpdatesOnStart` | `true` | startup checks |
 | `ui.chainCardExpanded` / `ui.guardsCardExpanded` | `true` | card collapse state |
-| `claude.enabled` / `codex.enabled` | `true` | false hides the app's launch/update/stop buttons, tray item and startup check |
+| `claude.enabled` / `codex.enabled` | `true` | false hides the app's launch/update/stop buttons, tray item and startup check; together they pick the profile's icon variant |
 
 ## Extension Points
 

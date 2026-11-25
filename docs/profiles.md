@@ -65,7 +65,11 @@ prints the profile's file; `config init` creates it.
 ## Shortcuts
 
 Create a second desktop shortcut whose target is the app exe with `--profile example` after the
-path (Inno Setup creates only the default one). The installer's upgrade check sees any profile's
+path (Inno Setup creates only the default one). The application then gives it the profile's icon
+by itself: a profile that enables one app wears that app's brand icon on the taskbar, in the tray
+and on its shortcuts, so two profiles are told apart at a glance. Only shortcuts that start this
+exe with this profile are touched, and a shortcut whose icon you picked by hand keeps it; the
+icons live in `%APPDATA%\PrivateNetRouting\icons`. The installer's upgrade check sees any profile's
 window through the profile-agnostic `AnyInstance` marker; the upgrade itself stops all profiles'
 background workers, so raise the chains again afterwards.
 

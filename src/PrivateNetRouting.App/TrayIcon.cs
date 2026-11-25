@@ -104,6 +104,22 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>Claude turned off in the config (claude.enabled=false) — the launch item leaves the menu.</summary>
     public void ShowLaunchClaude(bool visible) => _launchClaudeItem.Visible = visible;
 
+    /// <summary>
+    /// The icon follows the profile's variant after a config reload (AppIcons was re-selected); the
+    /// icon it replaces is not the cached one any more, so it is disposed here.
+    /// </summary>
+    public void SetIcon(System.Drawing.Icon icon)
+    {
+        if (ReferenceEquals(_notifyIcon.Icon, icon))
+        {
+            return;
+        }
+
+        var previous = _notifyIcon.Icon;
+        _notifyIcon.Icon = icon;
+        previous?.Dispose();
+    }
+
     private void ApplyStrings()
     {
         _openItem.Text = Loc.S("Tray.Open");

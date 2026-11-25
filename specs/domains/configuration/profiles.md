@@ -37,6 +37,12 @@ derived from it:
   the proxy worker ownership check and the diagnostics list compare it. A default-profile
   worker carries no option.
 - Window title and tray tooltip/balloon: `<product> — <display>`.
+- Icon: the windows and the tray wear the variant the enabled apps resolve to
+  (`claude.enabled`/`codex.enabled` → Claude / Codex / neutral), so two profiles are told apart
+  at a glance. The desktop shortcuts of the profile follow: their target is this exe, their
+  arguments name this profile, and their icon is still the exe's own one — a hand-picked icon is
+  never replaced. The brand icon is written to `%APPDATA%\PrivateNetRouting\icons` (per user,
+  shared by the profiles; the shortcut's icon is a file, the exe carries the neutral one only).
 
 ## Config path plumbing
 
