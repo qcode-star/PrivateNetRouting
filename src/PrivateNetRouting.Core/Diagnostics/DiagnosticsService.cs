@@ -219,14 +219,16 @@ public sealed class DiagnosticsService(
         }
 
         var self = $"pid {Environment.ProcessId}";
-        var proxyLine = proxy.IsRunning
+        var proxyLine = proxy.IsRunningInThisProcess
             ? new DiagLine("forward proxy", $"running ({self})", DiagMark.Good)
             : proxyListeners.Count > 0
                 ? new DiagLine(
                     "forward proxy",
                     $"port {proxyPort} is held by {DescribeOwners(proxyListeners)} - another process of ours",
                     DiagMark.Neutral)
-                : new DiagLine("forward proxy", "stopped", DiagMark.Warn);
+                : proxy.IsRunning
+                    ? new DiagLine("forward proxy", "running in another process", DiagMark.Neutral)
+                    : new DiagLine("forward proxy", "stopped", DiagMark.Warn);
 
         // the WSL bind is the extra listener next to the configured one: a non-loopback
         // forwardProxy.listen (a LAN address) is the main listener itself, never the WSL bind

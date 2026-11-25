@@ -14,6 +14,13 @@ public interface IProxyStatistics
 {
     bool IsRunning { get; }
 
+    /// <summary>
+    /// True only when the proxy service lives in this process. IsRunning is port liveness —
+    /// a detached worker or another of our processes may hold the listener, and then the pid
+    /// shown by the diagnostics must be the listener's owner, not this process.
+    /// </summary>
+    bool IsRunningInThisProcess => IsRunning;
+
     IReadOnlyList<string> ListenerEndpoints { get; }
 
     int ActiveConnections { get; }

@@ -55,6 +55,9 @@ public sealed class ForwardProxySupervisor(
 
     public bool IsRunning => !skipped && (inner!.IsRunning || ports.IsListening(Port));
 
+    /// <summary>The in-process service only: a listener held by a worker or another process is not this one.</summary>
+    public bool IsRunningInThisProcess => !skipped && inner!.IsRunning;
+
     public IReadOnlyList<string> ListenerEndpoints =>
         skipped
             ? []

@@ -26,6 +26,13 @@ internal sealed class FakeProxyStats : IProxyStatistics
 {
     public bool IsRunning { get; set; }
 
+    /// <summary>Simulates a listener held by another process of ours: running, but not here.</summary>
+    public bool ForeignOwner { get; set; }
+
+    public bool IsRunningInThisProcess => IsRunning && !ForeignOwner;
+
+    public bool CountersAreLocal => !ForeignOwner;
+
     public IReadOnlyList<string> ListenerEndpoints { get; set; } = [];
 
     public int ActiveConnections { get; set; }
@@ -212,6 +219,32 @@ public class DiagnosticsTests : IDisposable
 
         Assert.Equal("running (pid 202)", Section(summary, "watchdog").Single(l => l.Name == "idle supervisor").Value);
         Assert.Contains(_tempDir, Section(summary, "logs").Single(l => l.Name == "logs").Value);
+    }
+
+    /// <summary>
+    /// A listener held by another of our processes (a detached worker, or the GUI while this
+    /// summary is built by the CLI): the pid line must name the owner from the TCP table, never
+    /// this process's own pid — the previous wording claimed "running" with the reader's pid.
+    /// </summary>
+    [Fact]
+    public async Task AProxyPortHeldByAnotherProcessReportsItsOwner()
+    {
+        var service = MakeService(out var config, out var proxy, out var table, out _, out _, out _);
+        var proxyPort = ParsePort(config.ForwardProxy.Listen);
+        table.Listeners[proxyPort] = [new TcpListenerEntry(IPAddress.Loopback, proxyPort, 4321, "PrivateNetRouting.App")];
+        proxy.IsRunning = true;
+        proxy.ForeignOwner = true;
+
+        var summary = await service.GetSummaryAsync(CancellationToken.None);
+
+        var proxySection = Section(summary, "proxy");
+        var line = proxySection.Single(l => l.Name == "forward proxy");
+        Assert.Equal(
+            $"port {proxyPort} is held by pid 4321 (PrivateNetRouting.App) - another process of ours",
+            line.Value);
+        Assert.DoesNotContain($"pid {Environment.ProcessId}", line.Value);
+        Assert.Equal(DiagMark.Neutral, line.Mark);
+        Assert.Equal("n/a (the proxy lives in another process)", proxySection.Single(l => l.Name == "connections").Value);
     }
 
     [Fact]

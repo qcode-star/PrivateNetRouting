@@ -31,7 +31,9 @@ public sealed record DiagnosticsSummary(bool ChainStopped, IReadOnlyList<DiagSec
   the socks5 one with its user and never the password, plus reachability).
 - **proxy**: running-with-pid / "port held by another process of ours" / stopped; listener
   list; the WSL bind (flagged when stale vs the current gateway); connection counters (or
-  "n/a — the proxy lives in another process"); the activity marker's age.
+  "n/a — the proxy lives in another process"); the activity marker's age. The local case is
+  selected by `IsRunningInThisProcess`; the "held by" line names the TCP table's owner PID, so a
+  summary built by `pnr status` never prints its own pid for the GUI's or a worker's listener.
 - **health**: the CONNECT roundtrip `OK in N ms (first response line)` / `failed in N ms: …`;
   skipped when no probe is wanted.
 - **guards**: egress policy + local ban core (without WSL/settings).
@@ -59,6 +61,8 @@ at …" and the CONNECT roundtrip runs against the applications endpoint.
 - The summary is strictly read-only: no binds, no kills, no config writes.
 - A socks5/http stopped chain ignores the tailnet daemon ports entirely.
 - The socks5 upstream's password never appears anywhere in the summary.
+- The forward-proxy pid is never the summary process's own pid unless that process holds the
+  listener; a foreign owner is reported with its own pid from the TCP table.
 - The "stopped chain" message is a normal state, rendered as such by both hosts.
 
 ## Configuration

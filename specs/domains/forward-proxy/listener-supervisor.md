@@ -17,6 +17,12 @@ Shapes: `skipped=true` (http mode, or socks5 with `forwardProxy.enabled=false`) 
 method an honest no-op — `IsRunning` false, counters zero, empty `ListenerEndpoints`, a log
 line naming the external endpoint the applications point at.
 
+Two liveness answers: `IsRunning` is port liveness (the in-process service, a detached worker
+or another of our processes all count — the chain is alive either way), while
+`IsRunningInThisProcess` is true only for the in-process service. The diagnostics use the latter
+to decide whether the pid they print is their own; a listener owned elsewhere is reported with the
+owner's pid from the TCP table.
+
 **Start** (`StartLockedAsync`):
 1. Already running -> return (idempotent).
 2. Port already listening -> log "already listening — reusing the running owner"; never bind.
