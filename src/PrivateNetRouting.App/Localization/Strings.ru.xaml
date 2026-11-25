@@ -241,6 +241,8 @@
     <s:String x:Key="Main.Guard.Wsl.Loopback">адрес прокси приложений — только loopback, дистрибутивы его не видят</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">окружение codex записано</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">окружение codex актуально</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexConfigWritten">конфиг codex записан</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexLayerWritten">окружение и конфиг codex записаны</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">Синхронизация WSL пропущена: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: пропущен — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroFailedFmt">{0}: синхронизация НЕ УДАЛАСЬ — {1}</s:String>

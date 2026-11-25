@@ -582,7 +582,12 @@ public sealed class GuardService(
                     what += ", ~/.claude handed back from root to the user";
                 }
 
-                var backups = new[] { distro.SettingsBackup, distro.ScriptBackup }
+                if (distro.CodexConfigWritten)
+                {
+                    what += ", codex config.toml network_proxy block written";
+                }
+
+                var backups = new[] { distro.SettingsBackup, distro.ScriptBackup, distro.CodexConfigBackup }
                     .Concat(distro.BootBackups ?? [])
                     .Where(b => b is not null)
                     .ToList();

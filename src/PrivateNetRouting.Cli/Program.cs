@@ -1216,9 +1216,22 @@ internal static class Program
                         continue;
                     }
 
+                    var codexWritten = new List<string>();
+                    if (distro.ProxyEnvWritten)
+                    {
+                        codexWritten.Add("env");
+                    }
+
+                    if (distro.CodexConfigWritten)
+                    {
+                        codexWritten.Add("config");
+                    }
+
+                    var codexPart = codexWritten.Count > 0 ? $"+ codex {string.Join("+", codexWritten)} " : "";
                     Console.WriteLine(distro.SettingsWritten || distro.ScriptWritten || distro.ProxyEnvWritten
                         || distro.BootRunnerWritten || distro.UserCommandWritten || distro.WslConfWritten
-                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {(distro.ProxyEnvWritten ? "+ codex proxy env " : "")}written"
+                        || distro.CodexConfigWritten
+                        ? $"{distro.Distro}: proxy {distro.ProxyUrl}, settings.json + startup script {codexPart}written"
                         : $"{distro.Distro}: proxy {distro.ProxyUrl}, already up to date");
                     if (distro.ClaudeDirChowned)
                     {

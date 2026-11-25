@@ -142,7 +142,7 @@ internal sealed class FakeWslRunner : IWslProcessRunner
     public Func<string, string> ProbeOutput { get; set; } = _ => "SCRIPT=missing\nSETTINGS=missing\n";
 
     /// <summary>Output returned for the writing scripts (settings/startup/codex env); without the marker the sync must fail.</summary>
-    public string WriteOutput { get; set; } = "SETTINGS=written\nSCRIPT=written\nENVFILE=written\nPNR=ok\n";
+    public string WriteOutput { get; set; } = "SETTINGS=written\nSCRIPT=written\nENVFILE=written\nCODEXCFG=written\nPNR=ok\n";
 
     /// <summary>stdin of scripts passed to the distro: (distro, user, script).</summary>
     public List<(string Distro, string? User, string Script)> Scripts { get; } = [];
@@ -1223,7 +1223,12 @@ public class GuardTests : IDisposable
         $"SCRIPT=present\nPORT=18082\nUSER_NAME='{user}'\n"
         + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=18082\n" + CodexNoProxyLine
         + WslBootWired
-        + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n";
+        + $"SETTINGS=present\n{FullSettingsJson(proxy)}\nSETTINGS=END\n"
+        + CodexConfigInSync;
+
+    /// <summary>The managed-proxy block of the distro config.toml as the probe reads it back.</summary>
+    private const string CodexConfigInSync =
+        "CODEXCFG=present\n[features.network_proxy]\nenabled = true\nallow_upstream_proxy = true\nenable_socks5 = false\n\n[features.network_proxy.domains]\n\"*\" = \"allow\"\nCODEXCFG=END\n";
 
     /// <summary>The NO_PROXY export of the Codex snippet as the probe reads it back (no bypass domains configured).</summary>
     private const string CodexNoProxyLine = "    export NO_PROXY='localhost,127.0.0.1,.local'\n";
@@ -1373,7 +1378,7 @@ public class GuardTests : IDisposable
             ExtractBase64Payload(envPass.Script, "ENVFILE='/etc/profile.d/20-pnr-codex-proxy.sh'")));
         Assert.Contains("PNR_CODEX_PROXY_PORT=3128", env);
         Assert.Contains("PNR_CODEX_PROXY_HOST='192.0.2.50'", env);
-        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1" && s.Script.Contains("SETTINGS="));
         var settingsJson = Encoding.UTF8.GetString(Convert.FromBase64String(
             ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
         Assert.Contains("\"HTTPS_PROXY\": \"http://192.0.2.50:3128\"", settingsJson);
@@ -1391,7 +1396,7 @@ public class GuardTests : IDisposable
         var result = await guard.SyncAsync(CancellationToken.None);
 
         Assert.Equal("http://[2001:db8::1]:1080", Assert.Single(result.Distros).ProxyUrl);
-        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1" && s.Script.Contains("SETTINGS="));
         var settingsJson = Encoding.UTF8.GetString(Convert.FromBase64String(
             ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
         Assert.Contains("\"HTTPS_PROXY\": \"http://[2001:db8::1]:1080\"", settingsJson);
@@ -1417,7 +1422,8 @@ public class GuardTests : IDisposable
         // the status reads the bare address back and finds the distro in sync
         runner.ProbeOutput = _ => "SCRIPT=present\nPORT=1080\nPNR_PROXY_HOST='2001:db8::1'\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=1080\nPNR_CODEX_PROXY_HOST='2001:db8::1'\n" + CodexNoProxyLine + WslBootWired
-            + $"SETTINGS=present\n{FullSettingsJson("http://[2001:db8::1]:1080")}\nSETTINGS=END\n";
+            + $"SETTINGS=present\n{FullSettingsJson("http://[2001:db8::1]:1080")}\nSETTINGS=END\n"
+            + CodexConfigInSync;
         var status = await guard.ReadAsync(CancellationToken.None);
         Assert.Equal(GuardState.On, status.Distros[0].State);
     }
@@ -1455,7 +1461,8 @@ public class GuardTests : IDisposable
         var config = WslSkippedShapeConfig("192.0.2.50:3128");
         var inSync = "SCRIPT=present\nPORT=3128\nPNR_PROXY_HOST='192.0.2.50'\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\nPNR_CODEX_PROXY_HOST='192.0.2.50'\n" + CodexNoProxyLine + WslBootWired
-            + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.50:3128")}\nSETTINGS=END\n";
+            + $"SETTINGS=present\n{FullSettingsJson("http://192.0.2.50:3128")}\nSETTINGS=END\n"
+            + CodexConfigInSync;
         // what the gateway-form scripts of an earlier sync look like: right port, no baked host
         var gatewayForm = "SCRIPT=present\nPORT=3128\nUSER_NAME='u1'\n"
             + "PROXYENV=present\nPNR_CODEX_PROXY_PORT=3128\n"
@@ -1542,6 +1549,76 @@ public class GuardTests : IDisposable
     }
 
     [Fact]
+    public async Task WslStatusRequiresTheCodexNetworkProxyBlockInTheDistroConfig()
+    {
+        var foreign = "CODEXCFG=present\n[projects.\"/work\"]\ntrust_level = \"trusted\"\nCODEXCFG=END\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => WslProbeInSync("u1").Replace(CodexConfigInSync, foreign),
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var status = await guard.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(GuardState.Partial, status.Distros[0].State);
+        Assert.Contains("codex config.toml has no network_proxy block", status.Distros[0].Reason);
+    }
+
+    [Fact]
+    public async Task WslSyncWritesTheCodexNetworkProxyBlockAndKeepsForeignLines()
+    {
+        var foreign = "CODEXCFG=present\n[projects.\"/work\"]\ntrust_level = \"trusted\"\nCODEXCFG=END\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => WslProbeInSync("u1").Replace(CodexConfigInSync, foreign),
+            WriteOutput = "CODEXCFG=written\nPNR=ok\n",
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var distro = Assert.Single(result.Distros);
+        Assert.True(distro.CodexConfigWritten);
+        var script = Assert.Single(runner.Scripts, s => s.User == "u1" && s.Script.Contains("CFG=\"$HOME/.codex/config.toml\""));
+        var body = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(script.Script, "CFG=\"$HOME/.codex/config.toml\"")));
+        Assert.Contains("trust_level = \"trusted\"", body); // the foreign project entry survives
+        Assert.Contains("[features.network_proxy]", body);
+        Assert.Contains("allow_upstream_proxy = true", body);
+        Assert.Contains("\"*\" = \"allow\"", body);
+
+        // the next sync finds the block already in place: no config write, no backup
+        runner.ProbeOutput = _ => WslProbeInSync("u1");
+        runner.Scripts.Clear();
+        var again = await guard.SyncAsync(CancellationToken.None);
+        Assert.False(Assert.Single(again.Distros).CodexConfigWritten);
+        Assert.DoesNotContain(runner.Scripts, s => s.Script.Contains("CFG=\"$HOME/.codex/config.toml\""));
+    }
+
+    [Fact]
+    public async Task WslSyncRefusesAnInlineFeaturesTableInTheDistroConfig()
+    {
+        var inline = "CODEXCFG=present\nfeatures = { other = 1 }\nCODEXCFG=END\n";
+        var runner = new FakeWslRunner
+        {
+            Installed = ["d1"],
+            Running = ["d1"],
+            ProbeOutput = _ => WslProbeInSync("u1").Replace(CodexConfigInSync, inline),
+        };
+        var guard = new WslConfigGuard(WslConfig("on", ("d1", "u1")), runner, gatewayProvider: () => IPAddress.Parse("192.0.2.1"));
+
+        var result = await guard.SyncAsync(CancellationToken.None);
+
+        var distro = Assert.Single(result.Distros);
+        Assert.True(distro.Failed);
+        Assert.Contains("inline table", distro.Reason);
+    }
+
+    [Fact]
     public async Task WslSettingsSyncCarriesThePrivacyAndAttributionKeys()
     {
         var runner = new FakeWslRunner { Installed = ["d1"], Running = ["d1"] };
@@ -1552,7 +1629,7 @@ public class GuardTests : IDisposable
 
         await guard.SyncAsync(CancellationToken.None);
 
-        var settings = Assert.Single(runner.Scripts, s => s.User == "u1");
+        var settings = Assert.Single(runner.Scripts, s => s.User == "u1" && s.Script.Contains("SETTINGS="));
         var json = Encoding.UTF8.GetString(Convert.FromBase64String(
             ExtractBase64Payload(settings.Script, "SETTINGS=\"$HOME/.claude/settings.json\"")));
         var root = JsonNode.Parse(json)!;
@@ -1750,12 +1827,18 @@ public class GuardTests : IDisposable
         Assert.True(d2.Skipped);
         Assert.Contains("not running", d2.Reason);
 
-        // d1: one pass as the user (settings) and two as root (startup script + codex proxy env)
-        var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1");
+        // d1: two passes as the user (settings + codex config) and two as root (startup script + codex proxy env)
+        var settings = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1" && s.Script.Contains("SETTINGS="));
         Assert.Contains("SETTINGS=\"$HOME/.claude/settings.json\"", settings.Script);
         Assert.Contains("pnr-bak", settings.Script);
         Assert.Contains("pnr_bak \"$SETTINGS\" BACKUP", settings.Script); // the deduplicating backup helper
         Assert.DoesNotContain("cp -p \"$SETTINGS\"", settings.Script);
+        var configScript = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "u1" && s.Script.Contains("CFG=\"$HOME/.codex/config.toml\""));
+        var configBody = Encoding.UTF8.GetString(Convert.FromBase64String(
+            ExtractBase64Payload(configScript.Script, "CFG=\"$HOME/.codex/config.toml\"")));
+        Assert.Contains("[features.network_proxy]", configBody);
+        Assert.Contains("allow_upstream_proxy = true", configBody);
+        Assert.Contains("\"*\" = \"allow\"", configBody);
         var root = Assert.Single(runner.Scripts, s => s.Distro == "d1" && s.User == "root" && s.Script.Contains("10-claude-proxy.sh"));
         Assert.Contains("/etc/wsl.d/startup/10-claude-proxy.sh", root.Script);
         Assert.Contains("pnr_bak \"$SCRIPT\" BACKUP", root.Script);
@@ -1763,6 +1846,7 @@ public class GuardTests : IDisposable
         Assert.True(d1.SettingsWritten);
         Assert.True(d1.ScriptWritten);
         Assert.True(d1.ProxyEnvWritten);
+        Assert.True(d1.CodexConfigWritten);
 
         // startup script contents: the app port and the distro user
         var payload = ExtractBase64Payload(root.Script, "SCRIPT='/etc/wsl.d/startup/10-claude-proxy.sh'");
@@ -2164,7 +2248,7 @@ public class GuardTests : IDisposable
 
         await guard.SyncAsync(CancellationToken.None);
 
-        Assert.Equal(5, runner.Scripts.Count);
+        Assert.Equal(6, runner.Scripts.Count);
         foreach (var (_, _, script) in runner.Scripts.Where(s => !s.Script.Contains("CLAUDEDIR=chowned")))
         {
             Assert.Contains("pnr_put()", script);
@@ -2182,6 +2266,7 @@ public class GuardTests : IDisposable
 
         // the user's settings directory is created by the script itself
         Assert.Contains(runner.Scripts, s => s.Script.Contains("mkdir -p \"$HOME/.claude\" ||"));
+        Assert.Contains(runner.Scripts, s => s.Script.Contains("mkdir -p \"$HOME/.codex\" ||"));
     }
 
     [Fact]
@@ -2475,7 +2560,7 @@ public class GuardTests : IDisposable
 
         // every script piped to bash -s (boot, ~/.claude owner, settings, startup, codex env), and
         // every base64 payload it embeds, is LF only — whatever the checkout the sources were compiled from
-        Assert.Equal(5, runner.Scripts.Count);
+        Assert.Equal(6, runner.Scripts.Count);
         foreach (var (_, _, script) in runner.Scripts)
         {
             Assert.DoesNotContain("\r", script);

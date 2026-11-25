@@ -158,6 +158,13 @@ refreshes the `.env` back to the loopback form before every launch, so the two d
 fight over the file. (The sed above is the minimal shape: it rewrites existing lines only. The
 application's version of the same merge also adds missing keys and preserves foreign lines.)
 
+The guard also maintains the managed-proxy block in the distro's own
+`~/.codex/config.toml` (`[features.network_proxy]` plus the allow-everything domain entry),
+so the codex core running inside WSL gets the same sandbox path as the Windows one: its
+managed proxy chains to the gateway address the snippet exported. A `features` inline table or
+dotted `features.network_proxy.*` keys make that distro's sync fail with the reason instead of
+rewriting the file.
+
 ## Updates
 
 The app updates through the Microsoft Store; the Store's own CDN needs neither the proxy nor

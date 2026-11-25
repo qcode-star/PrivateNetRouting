@@ -993,10 +993,10 @@ public partial class MainWindow : Window
             ? LocalizeDistroFailure(d)
             : d.Skipped
             ? Loc.F("Main.Guard.Wsl.DistroSkippedFmt", d.Distro, LocalizeWslReason(d.Reason ?? ""))
-            : d.SettingsWritten || d.ScriptWritten || d.ProxyEnvWritten
+            : d.SettingsWritten || d.ScriptWritten || d.ProxyEnvWritten || d.CodexConfigWritten
                 || d.BootRunnerWritten || d.UserCommandWritten || d.WslConfWritten
-                ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten))
-                : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten)));
+                ? Loc.F("Main.Guard.Wsl.DistroDoneFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten, d.CodexConfigWritten))
+                : Loc.F("Main.Guard.Wsl.DistroUnchangedFmt", d.Distro, d.ProxyUrl ?? "", LocalizeCodexWritten(d.ProxyEnvWritten, d.CodexConfigWritten)));
         _viewModel.SetCheckText(string.Join("; ", lines));
     });
 
@@ -1009,10 +1009,14 @@ public partial class MainWindow : Window
         return Loc.F("Main.Guard.Wsl.DistroFailedFmt", distro.Distro, detail);
     }
 
-    /// <summary>The Codex proxy env part of a sync result line ("codex env written" / "up to date").</summary>
-    private static string LocalizeCodexWritten(bool written) => written
-        ? Loc.S("Main.Guard.Wsl.CodexEnvWritten")
-        : Loc.S("Main.Guard.Wsl.CodexEnvUnchanged");
+    /// <summary>The Codex part of a sync result line: the proxy env and the config.toml block.</summary>
+    private static string LocalizeCodexWritten(bool envWritten, bool configWritten) => (envWritten, configWritten) switch
+    {
+        (true, true) => Loc.S("Main.Guard.Wsl.CodexLayerWritten"),
+        (true, false) => Loc.S("Main.Guard.Wsl.CodexEnvWritten"),
+        (false, true) => Loc.S("Main.Guard.Wsl.CodexConfigWritten"),
+        _ => Loc.S("Main.Guard.Wsl.CodexEnvUnchanged"),
+    };
 
     private async void OnRefreshGuards(object sender, RoutedEventArgs e) => await RefreshGuardsAsync();
 

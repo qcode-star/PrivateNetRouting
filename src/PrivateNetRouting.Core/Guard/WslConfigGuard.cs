@@ -75,7 +75,9 @@ public sealed record WslDistroSyncResult(
     bool WslConfWritten = false,
     IReadOnlyList<string>? BootBackups = null,
     bool Failed = false,
-    bool ClaudeDirChowned = false);
+    bool ClaudeDirChowned = false,
+    bool CodexConfigWritten = false,
+    string? CodexConfigBackup = null);
 
 public sealed record WslSyncResult(bool LayerDisabled, string? Reason, IReadOnlyList<WslDistroSyncResult> Distros);
 
@@ -313,6 +315,9 @@ public sealed class WslConfigGuard(
             var envOk = !config.Wsl.SyncCodex
                 || (read.ProxyEnvPresent && read.ProxyEnvPort == expectedPort && read.ProxyEnvHost == expected.Host
                     && read.ProxyEnvNoProxy == expected.NoProxy);
+            // the Codex network layer inside the distro: the managed-proxy block the sync maintains
+            // in ~/.codex/config.toml, so sandboxed commands chain through the exported proxy env
+            var codexConfigOk = !config.Wsl.SyncCodex || CodexSettingsGuard.NetworkProxyUpToDate(read.CodexConfigText);
             // the rest of what the Claude pass maintains: the privacy/attribution keys and NO_PROXY of
             // settings.json, the user the startup script serves, and the boot wiring that runs it —
             // a missing [boot] command leaves the script dead even though the file is there
@@ -326,7 +331,7 @@ public sealed class WslConfigGuard(
                 // the expected proxy cannot be computed (the WSL NAT gateway is gone, or the
                 // endpoint is loopback-only): the proxy state is uncheckable — that is not "on",
                 // the distro is partial with the reason
-                var okWithoutProxy = portOk && envOk && keysOk;
+                var okWithoutProxy = portOk && envOk && codexConfigOk && keysOk;
                 return new WslDistroStatus(
                     distro.Name,
                     config.Wsl.SyncClaude,
@@ -345,7 +350,7 @@ public sealed class WslConfigGuard(
                 || (expectedProxy is { } proxy
                     && read.SettingsProxy == proxy
                     && ClaudeSettingsShape.ProxyEnvInSync(read.SettingsRoot?["env"] as JsonObject, proxy, expected.NoProxy));
-            var ok = portOk && proxyOk && envOk && keysOk;
+            var ok = portOk && proxyOk && envOk && codexConfigOk && keysOk;
             return new WslDistroStatus(
                 distro.Name,
                 config.Wsl.SyncClaude,
@@ -589,6 +594,51 @@ public sealed class WslConfigGuard(
             envBackup = envWritten ? FindBackupName(envOutput) : null;
         }
 
+        // Codex config.toml of the distro: the managed-proxy block that makes the sandboxed
+        // command traffic go through Codex's own proxy and then the exported upstream (the
+        // gateway address from the profile.d snippet). Foreign lines survive, the file belongs to
+        // the distro user, and a shape the editor cannot extend is a per-distro failure.
+        var codexConfigWritten = false;
+        string? codexConfigBackup = null;
+        if (config.Wsl.SyncCodex)
+        {
+            string updated;
+            try
+            {
+                updated = CodexSettingsGuard.ApplyNetworkProxy(read.CodexConfigText);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new IOException($"~/.codex/config.toml of '{distro.User}' in '{distro.Name}': {ex.Message}", ex);
+            }
+
+            if (!read.CodexConfigPresent || read.CodexConfigText != updated)
+            {
+                var configScript = NormalizeLf($$"""
+                    {{PnrBakFn}}
+                    CFG="$HOME/.codex/config.toml"
+                    mkdir -p "$HOME/.codex" || { echo "FAILED: cannot create $HOME/.codex"; exit 1; }
+                    NEW="/tmp/.pnr-codexcfg-{{stamp}}"
+                    echo '{{DistroPayload(updated)}}' | base64 -d > "$NEW" || { echo "FAILED: cannot write the payload to /tmp"; exit 1; }
+                    if [ -f "$CFG" ] && cmp -s "$NEW" "$CFG"; then
+                        echo CODEXCFG=unchanged
+                    else
+                        if [ -f "$CFG" ]; then pnr_bak "$CFG" BACKUP || { echo "FAILED: backup of $CFG"; exit 1; }; fi
+                        pnr_put "$NEW" "$CFG" || exit 1
+                        chmod 600 "$CFG"
+                        echo CODEXCFG=written
+                    fi
+                    rm -f "$NEW"
+                    ls -1t "$CFG".pnr-bak-* 2>/dev/null | tail -n +4 | xargs -r -d '\n' rm -f
+                    echo PNR=ok
+                    """);
+                var configOutput = await wsl.RunAsync(["-d", distro.Name, "-u", distro.User, "--", "bash", "-s"], configScript, Encoding.UTF8, ct);
+                RequireCompleted(configOutput, $"codex config.toml sync in '{distro.Name}'");
+                codexConfigWritten = configOutput.Contains("CODEXCFG=written", StringComparison.Ordinal);
+                codexConfigBackup = codexConfigWritten ? FindBackupName(configOutput) : null;
+            }
+        }
+
         var settingsWritten = settingsOutput.Contains("SETTINGS=written", StringComparison.Ordinal);
         var scriptWritten = scriptOutput.Contains("SCRIPT=written", StringComparison.Ordinal);
         return new WslDistroSyncResult(
@@ -604,7 +654,9 @@ public sealed class WslConfigGuard(
             UserCommandWritten: userCommandWritten,
             WslConfWritten: wslConfWritten,
             BootBackups: bootBackups,
-            ClaudeDirChowned: claudeDirChowned);
+            ClaudeDirChowned: claudeDirChowned,
+            CodexConfigWritten: codexConfigWritten,
+            CodexConfigBackup: codexConfigBackup);
     }
 
     /// <summary>
@@ -678,7 +730,9 @@ public sealed class WslConfigGuard(
         string? ScriptHost = null,
         string? ProxyEnvHost = null,
         bool SettingsNotObject = false,
-        string? ProxyEnvNoProxy = null);
+        string? ProxyEnvNoProxy = null,
+        bool CodexConfigPresent = false,
+        string? CodexConfigText = null);
 
     /// <summary>What a distro in sync carries, from the config.</summary>
     private sealed record WslExpected(
@@ -707,6 +761,7 @@ public sealed class WslConfigGuard(
         // the user's real home (root, or one outside /home), not /home/<user>: the sync writes
         // through $HOME as that user, so the read has to look at the same file
         const string settingsPath = "\"$PNR_HOME/.claude/settings.json\"";
+        const string codexConfigPath = "\"$PNR_HOME/.codex/config.toml\"";
         var runnerPath = BootRunnerPath(scriptPath);
 
         // An empty path would make `[ -f  ]` true and `grep -E …` with no file read the rest of
@@ -766,6 +821,14 @@ public sealed class WslConfigGuard(
             else
                 echo SETTINGS=missing
             fi
+            if [ -f {codexConfigPath} ]; then
+                echo CODEXCFG=present
+                cat {codexConfigPath}
+                echo
+                echo CODEXCFG=END
+            else
+                echo CODEXCFG=missing
+            fi
             echo PNR=ok
             """);
         var output = await wsl.RunAsync(["-d", distro.Name, "-u", "root", "--", "bash", "-s"], probe, Encoding.UTF8, ct);
@@ -781,6 +844,8 @@ public sealed class WslConfigGuard(
         var bootRunner = WslBootRunnerState.Missing;
         JsonObject? root = null;
         var settingsNotObject = false;
+        bool codexConfigPresent = false;
+        string? codexConfig = null;
 
         var lines = output.Split('\n');
         for (var i = 0; i < lines.Length; i++)
@@ -841,6 +906,18 @@ public sealed class WslConfigGuard(
                 case "SETTINGS=missing":
                     settingsFilePresent = false;
                     break;
+                case "CODEXCFG=present":
+                    codexConfigPresent = true;
+                    // config.toml body — up to the CODEXCFG=END line (or the end of the output);
+                    // a BOM from an editor on the Windows side is not TOML
+                    var cfgEnd = Array.IndexOf(lines, "CODEXCFG=END", i + 1);
+                    codexConfig = string.Join('\n', lines[(i + 1)..(cfgEnd > 0 ? cfgEnd : lines.Length)])
+                        .TrimStart('\uFEFF');
+                    i = cfgEnd > 0 ? cfgEnd : lines.Length;
+                    break;
+                case "CODEXCFG=missing":
+                    codexConfigPresent = false;
+                    break;
                 default:
                     if (line.StartsWith("PORT=", StringComparison.Ordinal)
                         && int.TryParse(line["PORT=".Length..], out var parsed))
@@ -874,7 +951,7 @@ public sealed class WslConfigGuard(
             }
         }
 
-        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost, settingsNotObject, proxyEnvNoProxy);
+        return new WslRead(scriptPresent, port, user, settingsFilePresent, proxy, root, proxyEnvPresent, proxyEnvPort, wslConf, bootRunner, scriptHost, proxyEnvHost, settingsNotObject, proxyEnvNoProxy, codexConfigPresent, codexConfig);
     }
 
     /// <summary>One shell word back to its text: '…' (an embedded quote written as '\'') or "…".</summary>
@@ -1498,6 +1575,11 @@ public sealed class WslConfigGuard(
         else if (proxyEnvExpected && read.ProxyEnvNoProxy != expected.NoProxy)
         {
             parts.Add("codex proxy env NO_PROXY differs from the config");
+        }
+
+        if (proxyEnvExpected && !CodexSettingsGuard.NetworkProxyUpToDate(read.CodexConfigText))
+        {
+            parts.Add("codex config.toml has no network_proxy block");
         }
 
         return string.Join("; ", parts);

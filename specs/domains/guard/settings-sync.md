@@ -91,7 +91,9 @@ written or created, its status reads `Off` with "not synced", and its half has n
 - Both apps' proxy values always name the AppProxyEndpoint — never a hardcoded port.
 - The guard never edits `[permissions]` or `default_permissions`: whether the Codex sandbox has
   network is the app's decision; the network block only chains traffic that the profile allows.
-- The sync is the same shape on Windows and in the WSL layer (shared manifest).
+- The sync is the same shape on Windows and in the WSL layer (shared manifest): the WSL layer
+  writes the Codex `.env` and the same `[features.network_proxy]` block into the distro's
+  `~/.codex/config.toml` (see [WSL layer](wsl-layer.md)).
 
 ## Related Specs
 

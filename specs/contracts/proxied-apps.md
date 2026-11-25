@@ -13,6 +13,7 @@ own configuration; every other byte of those files belongs to the app and must s
 | Managed egress policy | HKLM `SOFTWARE\Policies\Claude` (`egressProxyUrl`, `disableWslSessions`) | `EgressPolicyStore` | Claude Desktop |
 | Codex sysproxy flag + managed network proxy | `~/.codex/config.toml` (`[features] respect_system_proxy`, `[features.network_proxy]` + `.domains`) | `CodexSettingsGuard` | the Codex CLI core |
 | Codex proxy env | `~/.codex/.env` (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY`) | `CodexEnvFile` (sync + launcher refresh + WSL snippet) | the Codex CLI core |
+| Codex managed network proxy in the distro | `<distro>:~/.codex/config.toml` (`[features.network_proxy]` + `.domains`) | `WslConfigGuard` (the shared `CodexSettingsGuard` editor) | the Codex CLI core inside WSL |
 | Claude launch flags | command line: `--proxy-server`, `--proxy-bypass-list` | `ClaudeLauncher` | Claude Desktop (Chromium) |
 | Codex launch flags + env | package-context command line + PowerShell env | `CodexLauncher` | the Codex desktop app + its children |
 | Browser profile files | profile dir: `user.js` / `Default/Preferences` + `.pnr-profile` | `BrowserProfileFiles` | Firefox / Chromium |
@@ -47,7 +48,8 @@ If you change X, you MUST also update Y:
   editor), the sync status comparison (status = "every maintained value matches"), the WSL
   payload where it mirrors the shape, and the tests (`GuardTests`).
 - Change the Codex network-proxy block -> `CodexSettingsGuard.NetworkProxyUpToDate`/
-  `ApplyNetworkProxy`, the status wording (`GuardService.BuildItems`), `docs/codex-proxy.md`
+  `ApplyNetworkProxy`, the WSL copy (`WslConfigGuard`: the read probe, the status comparison and
+  the sync pass), the status wording (`GuardService.BuildItems`), `docs/codex-proxy.md`
   (the sandbox paragraph) and `GuardTests`.
 - Change the bypass/NO_PROXY construction -> every consumer spelling (Claude flags, Codex env,
   system proxy bypass, browser prefs/command line), `ClaudeEnvValues`, and `LauncherTests`/

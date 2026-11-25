@@ -4,7 +4,8 @@
 
 The optional in-distro half of the guard: a boot-layer runner wired into `/etc/wsl.conf`, a
 startup script that refreshes the proxy address at every distro start, a Codex proxy-env
-snippet, and the Claude settings/env sync into every configured distro.
+snippet, the managed-proxy block of the distro's Codex `config.toml`, and the Claude settings/env
+sync into every configured distro.
 
 ## Key Files
 
@@ -45,19 +46,30 @@ runs the root-owned-`~/.claude` handback (only the directory, only when owned by
 through a symlink, never for `root`).
 
 **Codex snippet** (`wsl.proxyEnvPath`, under `/etc/profile.d/`): exports
-`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` **only** to Codex shells (marker: `CODEX_HOME`
-in the environment, or `BASH_EXECUTION_STRING` matching `*codex*|*Codex*`); ordinary shells,
-apt, pip and git stay direct. The host is recomputed every shell start (fixed address or
-`ip route show default`); the port is baked as `PNR_CODEX_PROXY_PORT` (read back by the
-status). It also rewrites `$CODEX_HOME/.env` to the gateway form atomically when the file holds
-the Windows loopback form (the launcher restores it before every launch).
+`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`/`NODE_USE_ENV_PROXY` **only** to Codex shells
+(marker: `CODEX_HOME` in the environment, or `BASH_EXECUTION_STRING` matching
+`*codex*|*Codex*`); ordinary shells, apt, pip and git stay direct. The host is recomputed every
+shell start (fixed address or `ip route show default`); the port is baked as
+`PNR_CODEX_PROXY_PORT` (read back by the status). It also rewrites `$CODEX_HOME/.env` to the
+gateway form atomically when the file holds the Windows loopback form (the launcher restores it
+before every launch).
+
+**Codex config.toml** (the distro user, `~/.codex/config.toml`): the same
+`[features.network_proxy]` block the Windows guard maintains (`enabled = true`,
+`allow_upstream_proxy = true`, `enable_socks5 = false`, `[features.network_proxy.domains]`
+`"*" = "allow"`), written surgically with the shared `CodexSettingsGuard` editor and the
+`pnr-bak` backup helper. It turns on the Linux core's managed proxy for sandboxed commands and
+lets that proxy use the env the snippet exported as its upstream. The permission profile still
+decides whether the sandbox has network. A file with the `features` inline table or dotted
+`features.network_proxy.*` keys is refused (the distro fails with the reason, nothing is
+rewritten); a missing file is created with the block alone.
 
 **Per-distro sync/status**: a distro reads `On` only when every enabled check matches —
 script port/host == expected, `settings.json` proxy env fully in sync, Codex env file with the
-expected port/host/NO_PROXY, and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the
-configured user, boot wiring `AlreadyOurs`, zero privacy/attribution drift). An unknown gateway
--> `Partial`. Sync skips not-installed/not-running distros with a reason and isolates
-per-distro failures.
+expected port/host/NO_PROXY, the Codex `config.toml` network-proxy block present and current,
+and `keysOk` (settings `NO_PROXY`, script `USER_NAME` == the configured user, boot wiring
+`AlreadyOurs`, zero privacy/attribution drift). An unknown gateway -> `Partial`. Sync skips
+not-installed/not-running distros with a reason and isolates per-distro failures.
 
 ## Error Handling
 
@@ -68,6 +80,9 @@ per-distro failures.
   boot script.
 - A script failure inside the distro leaves the user's files untouched ("left untouched — fix
   it by hand").
+- A distro `config.toml` the shared editor cannot extend (an inline `features` table or dotted
+  `features.network_proxy.*` keys) fails that distro's sync with the reason; the file is not
+  rewritten.
 
 ## Invariants
 

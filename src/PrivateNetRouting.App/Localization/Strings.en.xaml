@@ -241,6 +241,8 @@
     <s:String x:Key="Main.Guard.Wsl.Loopback">the applications proxy endpoint is loopback-only — unreachable from the distros</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvWritten">codex env written</s:String>
     <s:String x:Key="Main.Guard.Wsl.CodexEnvUnchanged">codex env up to date</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexConfigWritten">codex config written</s:String>
+    <s:String x:Key="Main.Guard.Wsl.CodexLayerWritten">codex env + config written</s:String>
     <s:String x:Key="Main.Guard.Wsl.SkippedFmt">WSL sync skipped: {0}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroSkippedFmt">{0}: skipped — {1}</s:String>
     <s:String x:Key="Main.Guard.Wsl.DistroFailedFmt">{0}: sync FAILED — {1}</s:String>
